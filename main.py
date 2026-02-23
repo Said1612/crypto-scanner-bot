@@ -29,9 +29,10 @@ def run_bot():
         send_message("🤖 Bot is running...")
         time.sleep(3600)  # 1 hour
 
-if name == "main":
+:"__if __name__ == "main
     try:
         run_bot()
     except Exception as e:
         print("🔥 Fatal error:", e)
         sys.exit(1)
+        
