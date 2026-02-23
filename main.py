@@ -15,9 +15,10 @@ def send_message(text):
 
 def run_bot():
     while True:
-        send_message("🚀 Bot is running successfully!")
+        send_message("🚀 Bot is running...")
         time.sleep(3600)
 
-:"__if__name__=="__main
+
+if name == "main":
     run_bot()
 
