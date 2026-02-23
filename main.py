@@ -18,6 +18,6 @@ def run_bot():
         send_message("🚀 Bot is running successfully!")
         time.sleep(3600)
 
-if name == "main":
+:"__if__name__=="__main
     run_bot()
 
