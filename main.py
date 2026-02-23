@@ -2,27 +2,26 @@ import requests
 import time
 from datetime import datetime
 
-# ========= CONFIGURATION =========
+# ========= CONFIG =========
 TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_TOKEN_HERE"
 CHAT_ID = "PUT_YOUR_CHAT_ID_HERE"
 
-MIN_VOLUME_USDT = 5_000_000      # Minimum 24h volume (USDT)
-MIN_PRICE_CHANGE = 2             # Minimum % price change
-TOP_RESULTS = 10                 # Number of coins to send
-SLEEP_TIME = 300                 # Scan interval in seconds (300 = 5 minutes)
+MIN_VOLUME_USDT = 5_000_000
+MIN_PRICE_CHANGE = 2
+TOP_RESULTS = 10
+SLEEP_TIME = 300
 
-BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"
+BINANCE_URL = "https://api.binance.com/api/v3/ticker/24hr"
 
 sent_cache = set()
 
 
-# ========= SEND TELEGRAM MESSAGE =========
-def send_telegram_message(message: str):
+# ========= TELEGRAM =========
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
+        "text": message
     }
 
     try:
@@ -31,99 +30,119 @@ def send_telegram_message(message: str):
         print("Telegram Error:", e)
 
 
-# ========= FETCH BINANCE SPOT DATA =========
-def fetch_spot_market_data():
+# ========= FETCH DATA =========
+def fetch_market_data():
     try:
-        response = requests.get(BINANCE_TICKER_URL, timeout=15)
-        return response.json()
+        response = requests.get(BINANCE_URL, timeout=15)
+
+        if response.status_code != 200:
+            print("HTTP Error:", response.status_code)
+            return None
+
+        data = response.json()
+
+        # CRITICAL CHECK
+        if type(data) is not list:
+            print("API did not return list. Response:")
+            print(data)
+            return None
+
+        return data
+
     except Exception as e:
-        print("Binance API Error:", e)
-        return []
+        print("Connection Error:", e)
+        return None
 
 
-# ========= MARKET SCANNER =========
+# ========= SCAN =========
 def scan_market():
     global sent_cache
 
-    market_data = fetch_spot_market_data()
-    filtered_coins = []
+    market_data = fetch_market_data()
+
+    # Stop immediately if bad data
+    if market_data is None:
+        print("Skipping cycle due to bad API response.")
+        return
+
+    strong_coins = []
 
     for coin in market_data:
-        symbol = coin.get("symbol", "")
 
-        # Only Spot USDT pairs
+        # Extra protection
+        if type(coin) is not dict:
+            continue
+
+        symbol = coin["symbol"]
+
         if not symbol.endswith("USDT"):
             continue
 
         try:
             volume = float(coin["quoteVolume"])
-            price_change = float(coin["priceChangePercent"])
-            last_price = float(coin["lastPrice"])
+            change = float(coin["priceChangePercent"])
+            price = float(coin["lastPrice"])
 
-            # Liquidity filter
-            if volume >= MIN_VOLUME_USDT and abs(price_change) >= MIN_PRICE_CHANGE:
-                strength_score = volume * abs(price_change)
+            if volume >= MIN_VOLUME_USDT and abs(change) >= MIN_PRICE_CHANGE:
+                score = volume * abs(change)
 
-                filtered_coins.append({
+                strong_coins.append({
                     "symbol": symbol,
-                    "price": last_price,
+                    "price": price,
                     "volume": volume,
-                    "change": price_change,
-                    "score": strength_score
+                    "change": change,
+                    "score": score
                 })
 
-        except Exception:
+        except:
             continue
 
-    # Sort by strength score
-    filtered_coins.sort(key=lambda x: x["score"], reverse=True)
-    top_coins = filtered_coins[:TOP_RESULTS]
-
-    if not top_coins:
+    if not strong_coins:
         print("No strong coins found.")
         return
 
-    # Build Telegram message
-    message = "🚨 *Smart Liquidity Report (Spot)* 🚨\n"
-    message += f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+    strong_coins.sort(key=lambda x: x["score"], reverse=True)
+    top = strong_coins[:TOP_RESULTS]
 
-    new_signals = []
+    message = "SMART LIQUIDITY REPORT (SPOT)\n"
+    message += datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC") + "\n\n"
 
-    for coin in top_coins:
-        unique_key = f"{coin['symbol']}_{round(coin['change'],1)}"
+    new_found = False
 
-        # Anti-duplicate system
-        if unique_key in sent_cache:
+    for coin in top:
+        key = f"{coin['symbol']}_{round(coin['change'],1)}"
+
+        if key in sent_cache:
             continue
 
-        sent_cache.add(unique_key)
-        new_signals.append(coin)
+        sent_cache.add(key)
+        new_found = True
 
-        direction = "🟢 LONG" if coin["change"] > 0 else "🔴 SHORT"
+        direction = "LONG" if coin["change"] > 0 else "SHORT"
 
         message += (
-            f"*{coin['symbol']}*\n"
+            f"{coin['symbol']}\n"
             f"Price: {coin['price']}\n"
-            f"24h Change: {round(coin['change'],2)}%\n"
-            f"Volume: {round(coin['volume']/1_000_000,2)}M USDT\n"
+            f"Change: {round(coin['change'],2)}%\n"
+            f"Volume: {round(coin['volume']/1_000_000,2)}M\n"
             f"Signal: {direction}\n\n"
         )
 
-    if new_signals:
-        send_telegram_message(message)
-        print("New signals sent.")
+    if new_found:
+        send_telegram(message)
+        print("Signals sent.")
     else:
         print("No new signals.")
 
 
-# ========= MAIN LOOP =========
+# ========= MAIN =========
 if __name__ == "__main__":
-    print("Smart Liquidity Engine v4.0 Started...")
+    print("Smart Liquidity Engine v6.0 Started...")
 
     while True:
         try:
             scan_market()
-            print("Scan cycle completed.")
+            print("Cycle completed.")
             time.sleep(SLEEP_TIME)
 
         except Exception as e:
