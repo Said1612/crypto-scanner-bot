@@ -9,8 +9,8 @@ CHAT_ID = os.getenv("CHAT_ID")
 BINANCE_URL = "https://data-api.binance.vision/api/v3"
 
 CHECK_INTERVAL = 300
-MIN_VOLUME = 1_000_000
-MIN_CHANGE = 3
+MIN_VOLUME = 500_000
+MIN_CHANGE = 0.5
 
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
