@@ -6,7 +6,7 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-BINANCE_URL = "https://api.binance.com/api/v3"
+BINANCE_URL = "https://api1.binance.com/api/v3"
 
 CHECK_INTERVAL = 300
 MIN_VOLUME = 5_000_000
