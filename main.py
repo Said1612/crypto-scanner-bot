@@ -6,162 +6,89 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-BASE_URL = "https://api.binance.com/api/v3"
-INTERVAL = "5m"
-LIMIT = 50
-COOLDOWN = 1800
-SCAN_INTERVAL = 300
+BINANCE_SPOT_URL = "https://api.binance.com/api/v3"
 
-sent_coins = {}
-signal_counter = {}
+CHECK_INTERVAL = 300  # 5 minutes
+MIN_VOLUME = 5_000_000  # Minimum 24h USDT volume
+MIN_CHANGE = 3  # Minimum % change
 
-# ================= TELEGRAM =================
+sent_coins = set()
 
-def send_message(text):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
-        requests.post(url, data=payload, timeout=10)
-    except:
-        pass
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, json=payload)
 
-# ================= INDICATORS =================
+def get_spot_pairs():
+    exchange_info = requests.get(f"{BINANCE_SPOT_URL}/exchangeInfo").json()
+    symbols = []
 
-def calculate_rsi(closes, period=14):
-    gains = []
-    losses = []
+    for s in exchange_info["symbols"]:
+        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING":
+            symbols.append(s["symbol"])
 
-    for i in range(1, len(closes)):
-        change = closes[i] - closes[i - 1]
-        if change > 0:
-            gains.append(change)
-            losses.append(0)
-        else:
-            gains.append(0)
-            losses.append(abs(change))
+    return symbols
 
-    avg_gain = sum(gains[-period:]) / period
-    avg_loss = sum(losses[-period:]) / period
+def analyze_market():
+    tickers = requests.get(f"{BINANCE_SPOT_URL}/ticker/24hr").json()
+    strong_coins = []
 
-    if avg_loss == 0:
-        return 100
+    for coin in tickers:
+        if coin["symbol"].endswith("USDT"):
+            volume = float(coin["quoteVolume"])
+            change = float(coin["priceChangePercent"])
 
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+            if volume > MIN_VOLUME and abs(change) > MIN_CHANGE:
+                strong_coins.append({
+                    "symbol": coin["symbol"],
+                    "volume": volume,
+                    "change": change
+                })
 
-def calculate_ema(closes, period=20):
-    multiplier = 2 / (period + 1)
-    ema = closes[0]
+    return sorted(strong_coins, key=lambda x: x["volume"], reverse=True)[:10]
 
-    for price in closes:
-        ema = (price - ema) * multiplier + ema
+def format_report(coins):
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    return ema
+    message = f"🚀 *Smart Liquidity Report (SPOT)*\n"
+    message += f"📅 {now}\n\n"
 
-# ================= SYMBOLS =================
+    if not coins:
+        message += "No strong liquidity coins found."
+        return message
 
-def get_symbols():
-    try:
-        r = requests.get(f"{BASE_URL}/exchangeInfo", timeout=10)
-        data = r.json()
+    for c in coins:
+        direction = "🟢 LONG" if c["change"] > 0 else "🔴 SHORT"
+        message += (
+            f"*{c['symbol']}*\n"
+            f"Volume: {round(c['volume']/1_000_000,2)}M USDT\n"
+            f"24h Change: {round(c['change'],2)}%\n"
+            f"Signal: {direction}\n\n"
+        )
 
-        if "symbols" not in data:
-            return []
+    return message
 
-        return [
-            s["symbol"] for s in data["symbols"]
-            if s["quoteAsset"] == "USDT"
-            and s["status"] == "TRADING"
-            and not s["symbol"].endswith("UPUSDT")
-            and not s["symbol"].endswith("DOWNUSDT")
-        ]
-    except:
-        return []
-
-# ================= CHECK =================
-
-def check_liquidity(symbol):
-    try:
-        # 24h volume filter
-        ticker = requests.get(f"{BASE_URL}/ticker/24hr?symbol={symbol}", timeout=10).json()
-        if float(ticker["quoteVolume"]) < 5_000_000:
-            return None
-
-        params = {"symbol": symbol, "interval": INTERVAL, "limit": LIMIT}
-        data = requests.get(f"{BASE_URL}/klines", params=params, timeout=10).json()
-
-        if not isinstance(data, list) or len(data) < LIMIT:
-            return None
-
-        volumes = [float(c[5]) for c in data]
-        closes = [float(c[4]) for c in data]
-
-        last_volume = volumes[-1]
-        avg_volume = sum(volumes[-21:-1]) / 20
-
-        price_change = ((closes[-1] - closes[-2]) / closes[-2]) * 100
-
-        rsi = calculate_rsi(closes)
-        ema20 = calculate_ema(closes)
-
-        if (
-            last_volume > avg_volume * 2.5 and
-            price_change > 1.5 and
-            45 < rsi < 75 and
-            closes[-1] > ema20
-        ):
-            strength = "🚀 STRONG SIGNAL" if price_change > 2.5 else "⚡ NORMAL SIGNAL"
-
-            return closes[-1], price_change, rsi, strength
-
-        return None
-
-    except:
-        return None
-
-# ================= SCANNER =================
-
-def scanner():
-    print("Smart Liquidity Engine v2 Started...")
+def main():
+    print("Smart Liquidity Engine v3 Started...")
 
     while True:
-        symbols = get_symbols()
+        try:
+            coins = analyze_market()
 
-        for symbol in symbols:
-            result = check_liquidity(symbol)
+            if coins:
+                report = format_report(coins)
+                send_telegram(report)
 
-            if result:
-                price, change, rsi, strength = result
-                now = time.time()
+            print("Cycle complete...")
+            time.sleep(CHECK_INTERVAL)
 
-                if symbol in sent_coins and now - sent_coins[symbol] < COOLDOWN:
-                    continue
-
-                sent_coins[symbol] = now
-                signal_counter[symbol] = signal_counter.get(symbol, 0) + 1
-
-                message = f"""
-👑 <b>SOURCE BOT PRO</b> 👑
-
-💲 <b>#{symbol}</b>
-🔔 SIGNAL #{signal_counter[symbol]}
-
-💵 Price: ${round(price,6)}
-📈 5m Change: {round(change,2)}%
-📊 RSI: {round(rsi,1)}
-
-{strength}
-
-────────────────────
-⏰ {datetime.utcnow().strftime('%H:%M:%S')} UTC
-"""
-
-                send_message(message)
-
-            time.sleep(0.15)
-
-        print("Cycle complete...")
-        time.sleep(SCAN_INTERVAL)
+        except Exception as e:
+            print("Error:", e)
+            time.sleep(60)
 
 if __name__ == "__main__":
-    scanner()
+    main()
