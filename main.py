@@ -29,7 +29,7 @@ def run_bot():
         send_message("🤖 Bot is running...")
         time.sleep(3600)
 
-if name == "main":
+if __name__ == "__main__":
     try:
         run_bot()
     except Exception as e:
