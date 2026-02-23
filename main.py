@@ -138,6 +138,7 @@ def scan_market():
 # ========= MAIN =========
 if __name__ == "__main__":
     print("Smart Liquidity Engine v6.0 Started...")
+    send_telegram("🚀 Bot Started Successfully") 
 
     while True:
         try:
