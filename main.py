@@ -30,7 +30,6 @@ def run_bot():
         time.sleep(3600)  # 1 hour
 
 :"__if __name__ == "main
-    try:
         run_bot()
     except Exception as e:
         print("🔥 Fatal error:", e)
