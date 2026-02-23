@@ -19,6 +19,6 @@ def run_bot():
         time.sleep(3600)
 
 
-if name == "main":
+if__name__ == "main__":
     run_bot()
 
