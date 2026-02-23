@@ -1,201 +1,100 @@
 import requests
-import numpy as np
 import time
-from datetime import datetime, timedelta
+import statistics
 
-# =========================
-# CONFIG
-# =========================
-
-TELEGRAM_TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
+# =============================
+# TELEGRAM CONFIG
+# =============================
+TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
 CHAT_ID = "1658477428"
 
-BASE_URL = "https://api.binance.com/api/v3/klines"
-EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo"
-
+# =============================
+# SETTINGS
+# =============================
+symbols = ["BTCUSDT", "ETHUSDT", "AGLDUSDT", "KITEUSDT"]
 timeframes = ["15m", "1h", "4h", "1d"]
 
-weights = {
-    "15m": 1,
-    "1h": 2,
-    "4h": 3,
-    "1d": 4
-}
+volume_multiplier = 2.5   # تضخيم السيولة
+price_break_percent = 1.5 # نسبة كسر سعري %
 
-last_sent = {}
-
-# =========================
-# TELEGRAM
-# =========================
-
+# =============================
+# TELEGRAM FUNCTION
+# =============================
 def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
         "text": message
     }
-    requests.post(url, data=payload)
-
-# =========================
-# BINANCE DATA
-# =========================
-
-def get_symbols():
     try:
-        response = requests.get(EXCHANGE_INFO, timeout=10)
-        data = response.json()
+        requests.post(url, data=payload)
+    except:
+        pass
 
-        if "symbols" not in data:
-            print("ExchangeInfo Error:", data)
-            return []
+# =============================
+# BINANCE REQUEST
+# =============================
+def get_klines(symbol, interval):
+    url = f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit=50"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(url, headers=headers, timeout=10)
+    return response.json()
 
-        symbols = []
+# =============================
+# ANALYSIS FUNCTION
+# =============================
+def analyze(symbol, interval):
+    try:
+        data = get_klines(symbol, interval)
+        closes = [float(c[4]) for c in data]
+        volumes = [float(c[5]) for c in data]
 
-        for s in data["symbols"]:
-            if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING":
-                symbols.append(s["symbol"])
+        last_close = closes[-1]
+        prev_close = closes[-2]
 
-        return symbols
+        last_volume = volumes[-1]
+        avg_volume = statistics.mean(volumes[:-1])
+
+        price_change = ((last_close - prev_close) / prev_close) * 100
+
+        # =============================
+        # LIQUIDITY ENTRY (GREEN)
+        # =============================
+        if last_volume > avg_volume * volume_multiplier:
+            if price_change > price_break_percent:
+                return f"🟢 LIQUIDITY ENTRY\n{symbol} ({interval})\nVolume Spike + Price Break 🔥"
+
+        # =============================
+        # LIQUIDITY EXIT (RED)
+        # =============================
+        if last_volume > avg_volume * volume_multiplier:
+            if price_change < -price_break_percent:
+                return f"🔴 LIQUIDITY EXIT\n{symbol} ({interval})\nSell Pressure Detected"
+
+        return None
 
     except Exception as e:
-        print("get_symbols error:", e)
-        return []
+        return None
 
-# =========================
-# BTC TREND FILTER
-# =========================
+# =============================
+# MAIN LOOP
+# =============================
+def main():
+    print("Bot Started Successfully 🚀")
+    send_telegram("🚀 Liquidity Bot Started")
 
-def get_btc_trend():
+    while True:
+        for symbol in symbols:
+            for tf in timeframes:
+                signal = analyze(symbol, tf)
+                if signal:
+                    print(signal)
+                    send_telegram(signal)
 
-    data_4h = get_klines("BTCUSDT", "4h")
-    data_1d = get_klines("BTCUSDT", "1d")
+        time.sleep(60)  # يفحص كل دقيقة
 
-    closes_4h = np.array([float(k[4]) for k in data_4h])
-    closes_1d = np.array([float(k[4]) for k in data_1d])
-
-    ema50_4h = closes_4h[-50:].mean()
-    ema50_1d = closes_1d[-50:].mean()
-
-    current_4h = closes_4h[-1]
-    current_1d = closes_1d[-1]
-
-    if current_4h > ema50_4h and current_1d > ema50_1d:
-        return "BULLISH"
-    elif current_4h < ema50_4h and current_1d < ema50_1d:
-        return "BEARISH"
-    else:
-        return "NEUTRAL"
-
-# =========================
-# SCORE CALCULATION
-# =========================
-
-def calculate_score(volume_ratio, tf_score, price_change):
-
-    score = 0
-
-    score += min(volume_ratio * 10, 40)
-    score += tf_score * 5
-    score += min(abs(price_change) * 3, 30)
-
-    return min(int(score), 100)
-
-# =========================
-# MAIN SCANNER
-# =========================
-
-def scan_market():
-
-    symbols = get_symbols()
-    trend = get_btc_trend()
-
-    signals = []
-
-    for symbol in symbols:
-
-        green_score = 0
-        red_score = 0
-        tf_status = {}
-
-        for tf in timeframes:
-
-            data = get_klines(symbol, tf)
-            closes = np.array([float(k[4]) for k in data])
-            volumes = np.array([float(k[5]) for k in data])
-
-            avg_volume = volumes[-20:].mean()
-            current_volume = volumes[-1]
-
-            change = ((closes[-1] - closes[-2]) / closes[-2]) * 100
-            volume_ratio = current_volume / avg_volume
-
-            if volume_ratio > 1.7 and change > 0:
-                green_score += weights[tf]
-                tf_status[tf] = "🟢"
-
-            elif volume_ratio > 1.7 and change < 0:
-                red_score += weights[tf]
-                tf_status[tf] = "🔴"
-
-            else:
-                tf_status[tf] = "⚪"
-
-        # PRE-LIQUIDITY
-        if tf_status["15m"] == "🟢" and green_score <= 3 and trend != "BEARISH":
-            score = calculate_score(volume_ratio, green_score, change)
-            signals.append(("🟡 PRE-LIQUIDITY", symbol, score, tf_status))
-
-        # CONFIRMED INFLOW
-        elif green_score >= 5 and trend != "BEARISH":
-            score = calculate_score(volume_ratio, green_score, change)
-            signals.append(("🟢 CONFIRMED INFLOW", symbol, score, tf_status))
-
-        # CONFIRMED OUTFLOW
-        elif red_score >= 5 and trend != "BULLISH":
-            score = calculate_score(volume_ratio, red_score, change)
-            signals.append(("🔴 CONFIRMED OUTFLOW", symbol, score, tf_status))
-
-    # Sort strongest first
-    signals.sort(key=lambda x: x[2], reverse=True)
-    top5 = signals[:5]
-
-    now = datetime.utcnow()
-
-    if top5:
-
-        message = "🚨 SMART LIQUIDITY REPORT (SPOT)\n\n"
-
-        for label, symbol, score, tf_status in top5:
-
-            # Prevent repeat within 6 hours
-            if symbol in last_sent:
-                if now - last_sent[symbol] < timedelta(hours=6):
-                    continue
-
-            last_sent[symbol] = now
-
-            message += f"""
-{label}
-{symbol}
-Score: {score}/100
-
-15m: {tf_status['15m']}
-1h : {tf_status['1h']}
-4h : {tf_status['4h']}
-1d : {tf_status['1d']}
--------------------------
-"""
-
-        send_telegram(message)
-
-# =========================
-# LOOP
-# =========================
-
-while True:
-    try:
-        scan_market()
-        time.sleep(300)  # scan every 5 minutes
-    except Exception as e:
-        print("Error:", e)
-        time.sleep(60)
+# =============================
+# START
+# =============================
+if __name__ == "__main__":
+    main()
