@@ -41,24 +41,25 @@ def send_telegram(message):
 # =========================
 
 def get_symbols():
-    data = requests.get(EXCHANGE_INFO).json()
-    symbols = []
+    try:
+        response = requests.get(EXCHANGE_INFO, timeout=10)
+        data = response.json()
 
-    for s in data["symbols"]:
-        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING":
-            symbols.append(s["symbol"])
+        if "symbols" not in data:
+            print("ExchangeInfo Error:", data)
+            return []
 
-    return symbols
+        symbols = []
 
+        for s in data["symbols"]:
+            if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING":
+                symbols.append(s["symbol"])
 
-def get_klines(symbol, interval):
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "limit": 50
-    }
-    response = requests.get(BASE_URL, params=params)
-    return response.json()
+        return symbols
+
+    except Exception as e:
+        print("get_symbols error:", e)
+        return []
 
 # =========================
 # BTC TREND FILTER
