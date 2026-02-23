@@ -27,7 +27,7 @@ def run_bot():
     print("🚀 Bot started")
     while True:
         send_message("🤖 Bot is running...")
-        time.sleep(3600)  # 1 hour
+        time.sleep(3600)
 
 if name == "main":
     try:
