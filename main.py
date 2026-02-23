@@ -1,151 +1,200 @@
 import requests
+import numpy as np
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# ========= CONFIG =========
+# =========================
+# CONFIG
+# =========================
+
 TELEGRAM_TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
 CHAT_ID = "1658477428"
 
-MIN_VOLUME_USDT = 5_000_000
-MIN_PRICE_CHANGE = 2
-TOP_RESULTS = 10
-SLEEP_TIME = 300
+BASE_URL = "https://api.binance.com/api/v3/klines"
+EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo"
 
-BINANCE_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
+timeframes = ["15m", "1h", "4h", "1d"]
 
-sent_cache = set()
+weights = {
+    "15m": 1,
+    "1h": 2,
+    "4h": 3,
+    "1d": 4
+}
 
+last_sent = {}
 
-# ========= TELEGRAM =========
+# =========================
+# TELEGRAM
+# =========================
+
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
         "text": message
     }
+    requests.post(url, data=payload)
 
-    try:
-        requests.post(url, data=payload, timeout=10)
-    except Exception as e:
-        print("Telegram Error:", e)
+# =========================
+# BINANCE DATA
+# =========================
 
+def get_symbols():
+    data = requests.get(EXCHANGE_INFO).json()
+    symbols = []
 
-# ========= FETCH DATA =========
-def fetch_market_data():
-    try:
-        response = requests.get(BINANCE_URL, timeout=15)
+    for s in data["symbols"]:
+        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING":
+            symbols.append(s["symbol"])
 
-        if response.status_code != 200:
-            print("HTTP Error:", response.status_code)
-            return None
-
-        data = response.json()
-
-        # CRITICAL CHECK
-        if type(data) is not list:
-            print("API did not return list. Response:")
-            print(data)
-            return None
-
-        return data
-
-    except Exception as e:
-        print("Connection Error:", e)
-        return None
+    return symbols
 
 
-# ========= SCAN =========
-def scan_market():
-    global sent_cache
+def get_klines(symbol, interval):
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": 50
+    }
+    response = requests.get(BASE_URL, params=params)
+    return response.json()
 
-    market_data = fetch_market_data()
+# =========================
+# BTC TREND FILTER
+# =========================
 
-    # Stop immediately if bad data
-    if market_data is None:
-        print("Skipping cycle due to bad API response.")
-        return
+def get_btc_trend():
 
-    strong_coins = []
+    data_4h = get_klines("BTCUSDT", "4h")
+    data_1d = get_klines("BTCUSDT", "1d")
 
-    for coin in market_data:
+    closes_4h = np.array([float(k[4]) for k in data_4h])
+    closes_1d = np.array([float(k[4]) for k in data_1d])
 
-        # Extra protection
-        if type(coin) is not dict:
-            continue
+    ema50_4h = closes_4h[-50:].mean()
+    ema50_1d = closes_1d[-50:].mean()
 
-        symbol = coin["symbol"]
+    current_4h = closes_4h[-1]
+    current_1d = closes_1d[-1]
 
-        if not symbol.endswith("USDT"):
-            continue
-
-        try:
-            volume = float(coin["quoteVolume"])
-            change = float(coin["priceChangePercent"])
-            price = float(coin["lastPrice"])
-
-            if volume >= MIN_VOLUME_USDT and abs(change) >= MIN_PRICE_CHANGE:
-                score = volume * abs(change)
-
-                strong_coins.append({
-                    "symbol": symbol,
-                    "price": price,
-                    "volume": volume,
-                    "change": change,
-                    "score": score
-                })
-
-        except:
-            continue
-
-    if not strong_coins:
-        print("No strong coins found.")
-        return
-
-    strong_coins.sort(key=lambda x: x["score"], reverse=True)
-    top = strong_coins[:TOP_RESULTS]
-
-    message = "SMART LIQUIDITY REPORT (SPOT)\n"
-    message += datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC") + "\n\n"
-
-    new_found = False
-
-    for coin in top:
-        key = f"{coin['symbol']}_{round(coin['change'],1)}"
-
-        if key in sent_cache:
-            continue
-
-        sent_cache.add(key)
-        new_found = True
-
-        direction = "LONG" if coin["change"] > 0 else "SHORT"
-
-        message += (
-            f"{coin['symbol']}\n"
-            f"Price: {coin['price']}\n"
-            f"Change: {round(coin['change'],2)}%\n"
-            f"Volume: {round(coin['volume']/1_000_000,2)}M\n"
-            f"Signal: {direction}\n\n"
-        )
-
-    if new_found:
-        send_telegram(message)
-        print("Signals sent.")
+    if current_4h > ema50_4h and current_1d > ema50_1d:
+        return "BULLISH"
+    elif current_4h < ema50_4h and current_1d < ema50_1d:
+        return "BEARISH"
     else:
-        print("No new signals.")
+        return "NEUTRAL"
 
+# =========================
+# SCORE CALCULATION
+# =========================
 
-# ========= MAIN =========
-if __name__ == "__main__":
-    print("Smart Liquidity Engine v6.0 Started...")
-    send_telegram("🚀 Bot Started Successfully") 
+def calculate_score(volume_ratio, tf_score, price_change):
 
-    while True:
-        try:
-            scan_market()
-            print("Cycle completed.")
-            time.sleep(SLEEP_TIME)
+    score = 0
 
-        except Exception as e:
-            print("Main Loop Error:", e)
-            time.sleep(60)
+    score += min(volume_ratio * 10, 40)
+    score += tf_score * 5
+    score += min(abs(price_change) * 3, 30)
+
+    return min(int(score), 100)
+
+# =========================
+# MAIN SCANNER
+# =========================
+
+def scan_market():
+
+    symbols = get_symbols()
+    trend = get_btc_trend()
+
+    signals = []
+
+    for symbol in symbols:
+
+        green_score = 0
+        red_score = 0
+        tf_status = {}
+
+        for tf in timeframes:
+
+            data = get_klines(symbol, tf)
+            closes = np.array([float(k[4]) for k in data])
+            volumes = np.array([float(k[5]) for k in data])
+
+            avg_volume = volumes[-20:].mean()
+            current_volume = volumes[-1]
+
+            change = ((closes[-1] - closes[-2]) / closes[-2]) * 100
+            volume_ratio = current_volume / avg_volume
+
+            if volume_ratio > 1.7 and change > 0:
+                green_score += weights[tf]
+                tf_status[tf] = "🟢"
+
+            elif volume_ratio > 1.7 and change < 0:
+                red_score += weights[tf]
+                tf_status[tf] = "🔴"
+
+            else:
+                tf_status[tf] = "⚪"
+
+        # PRE-LIQUIDITY
+        if tf_status["15m"] == "🟢" and green_score <= 3 and trend != "BEARISH":
+            score = calculate_score(volume_ratio, green_score, change)
+            signals.append(("🟡 PRE-LIQUIDITY", symbol, score, tf_status))
+
+        # CONFIRMED INFLOW
+        elif green_score >= 5 and trend != "BEARISH":
+            score = calculate_score(volume_ratio, green_score, change)
+            signals.append(("🟢 CONFIRMED INFLOW", symbol, score, tf_status))
+
+        # CONFIRMED OUTFLOW
+        elif red_score >= 5 and trend != "BULLISH":
+            score = calculate_score(volume_ratio, red_score, change)
+            signals.append(("🔴 CONFIRMED OUTFLOW", symbol, score, tf_status))
+
+    # Sort strongest first
+    signals.sort(key=lambda x: x[2], reverse=True)
+    top5 = signals[:5]
+
+    now = datetime.utcnow()
+
+    if top5:
+
+        message = "🚨 SMART LIQUIDITY REPORT (SPOT)\n\n"
+
+        for label, symbol, score, tf_status in top5:
+
+            # Prevent repeat within 6 hours
+            if symbol in last_sent:
+                if now - last_sent[symbol] < timedelta(hours=6):
+                    continue
+
+            last_sent[symbol] = now
+
+            message += f"""
+{label}
+{symbol}
+Score: {score}/100
+
+15m: {tf_status['15m']}
+1h : {tf_status['1h']}
+4h : {tf_status['4h']}
+1d : {tf_status['1d']}
+-------------------------
+"""
+
+        send_telegram(message)
+
+# =========================
+# LOOP
+# =========================
+
+while True:
+    try:
+        scan_market()
+        time.sleep(300)  # scan every 5 minutes
+    except Exception as e:
+        print("Error:", e)
+        time.sleep(60)
