@@ -1,6 +1,7 @@
 import requests
 import time
 import statistics
+from datetime import datetime
 
 # =============================
 # TELEGRAM CONFIG
@@ -12,46 +13,74 @@ CHAT_ID = "1658477428"
 # SETTINGS
 # =============================
 timeframes = ["15m", "1h", "4h", "1d"]
-volume_multiplier = 2.2
-price_break_percent = 1.2
+volume_multiplier = 2.0
+price_break_percent = 1.0
 
 sent_signals = set()
+last_update_day = None
+top_symbols = []
 
 # =============================
 # TELEGRAM
 # =============================
 def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
     try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {"chat_id": CHAT_ID, "text": message}
         requests.post(url, data=payload, timeout=10)
     except:
         pass
 
 # =============================
-# GET ALL USDT PAIRS
+# GET TOP 10 USDT PAIRS (BY VOLUME)
 # =============================
-def get_all_usdt_symbols():
-    url = "https://api1.binance.com/api/v3/exchangeInfo"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers, timeout=10)
-    data = response.json()
+def get_top_10_symbols():
+    try:
+        url = "https://api1.binance.com/api/v3/ticker/24hr"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
 
-    symbols = []
-    for s in data["symbols"]:
-        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING":
-            symbols.append(s["symbol"])
+        if response.status_code != 200:
+            return []
 
-    return symbols
+        data = response.json()
+
+        usdt_pairs = [s for s in data if s["symbol"].endswith("USDT")]
+
+        sorted_pairs = sorted(
+            usdt_pairs,
+            key=lambda x: float(x["quoteVolume"]),
+            reverse=True
+        )
+
+        top10 = [s["symbol"] for s in sorted_pairs[:10]]
+
+        return top10
+
+    except:
+        return []
 
 # =============================
 # GET KLINES
 # =============================
 def get_klines(symbol, interval):
-    url = f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit=40"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers, timeout=10)
-    return response.json()
+    try:
+        url = f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit=40"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+
+        if isinstance(data, dict):
+            return None
+
+        return data
+
+    except:
+        return None
 
 # =============================
 # ANALYSIS
@@ -59,6 +88,9 @@ def get_klines(symbol, interval):
 def analyze(symbol, interval):
     try:
         data = get_klines(symbol, interval)
+
+        if not data or len(data) < 10:
+            return None
 
         closes = [float(c[4]) for c in data]
         volumes = [float(c[5]) for c in data]
@@ -72,31 +104,32 @@ def analyze(symbol, interval):
 
         signal_key = f"{symbol}_{interval}"
 
-        # دخول سيولة
+        # 🟢 دخول سيولة
         if last_volume > avg_volume * volume_multiplier and price_change > price_break_percent:
             if signal_key not in sent_signals:
                 sent_signals.add(signal_key)
-               return f"""🟢🟢🟢 LIQUIDITY ENTRY 🟢🟢🟢
+                return f"""🟢🟢🟢 LIQUIDITY ENTRY 🟢🟢🟢
 
 Symbol: {symbol}
 Timeframe: {interval}
+Price Change: {price_change:.2f}%
 
-Strong Volume Inflow Detected
-Breakout Confirmed 🚀
+Strong Volume Inflow 🚀
 """
 
-        # خروج سيولة
+        # 🔴 خروج سيولة
         if last_volume > avg_volume * volume_multiplier and price_change < -price_break_percent:
             if signal_key not in sent_signals:
                 sent_signals.add(signal_key)
-              return f"""🔴🔴🔴 LIQUIDITY EXIT 🔴🔴🔴
+                return f"""🔴🔴🔴 LIQUIDITY EXIT 🔴🔴🔴
 
 Symbol: {symbol}
 Timeframe: {interval}
+Price Change: {price_change:.2f}%
 
 Strong Sell Pressure
-Liquidity Outflow Detected
 """
+
         return None
 
     except:
@@ -106,21 +139,30 @@ Liquidity Outflow Detected
 # MAIN LOOP
 # =============================
 def main():
-    print("Bot Started Successfully 🚀")
-    send_telegram("🚀 Smart Liquidity Scanner Started")
+    global last_update_day, top_symbols
 
-    symbols = get_all_usdt_symbols()
-    print(f"Scanning {len(symbols)} USDT pairs")
+    print("Bot Started Successfully 🚀")
+    send_telegram("🚀 Smart Liquidity Bot Started")
 
     while True:
-        for symbol in symbols:
+        current_day = datetime.utcnow().day
+
+        # تحديث أفضل 10 عملات مرة واحدة يومياً
+        if last_update_day != current_day:
+            top_symbols = get_top_10_symbols()
+            last_update_day = current_day
+            sent_signals.clear()
+
+            send_telegram(f"📊 Top 10 Coins Today:\n\n" + "\n".join(top_symbols))
+
+        for symbol in top_symbols:
             for tf in timeframes:
                 signal = analyze(symbol, tf)
                 if signal:
                     print(signal)
                     send_telegram(signal)
 
-                time.sleep(0.15)  # حماية من rate limit
+                time.sleep(0.3)  # حماية من Rate Limit
 
         time.sleep(60)
 
