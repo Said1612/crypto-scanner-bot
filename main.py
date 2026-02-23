@@ -11,7 +11,7 @@ MIN_PRICE_CHANGE = 2
 TOP_RESULTS = 10
 SLEEP_TIME = 300
 
-BINANCE_URL = "https://api3.binance.com/api/v3/ticker/24hr"
+BINANCE_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
 
 sent_cache = set()
 
