@@ -6,50 +6,70 @@ from datetime import datetime
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-BINANCE_SPOT_URL = "https://api.binance.com/api/v3"
+BINANCE_URL = "https://api.binance.com/api/v3"
 
-CHECK_INTERVAL = 300  # 5 minutes
-MIN_VOLUME = 5_000_000  # Minimum 24h USDT volume
-MIN_CHANGE = 3  # Minimum % change
-
-sent_coins = set()
+CHECK_INTERVAL = 300
+MIN_VOLUME = 5_000_000
+MIN_CHANGE = 3
 
 def send_telegram(message):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("Telegram variables missing")
+        return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
         "text": message,
         "parse_mode": "Markdown"
     }
-    requests.post(url, json=payload)
 
-def get_spot_pairs():
-    exchange_info = requests.get(f"{BINANCE_SPOT_URL}/exchangeInfo").json()
-    symbols = []
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print("Telegram Error:", e)
 
-    for s in exchange_info["symbols"]:
-        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING":
-            symbols.append(s["symbol"])
+def safe_request(url):
+    try:
+        r = requests.get(url, timeout=15)
+        data = r.json()
 
-    return symbols
+        if isinstance(data, dict) and "code" in data:
+            print("Binance API Error:", data)
+            return None
+
+        return data
+
+    except Exception as e:
+        print("Request Error:", e)
+        return None
 
 def analyze_market():
-    tickers = requests.get(f"{BINANCE_SPOT_URL}/ticker/24hr").json()
-    strong_coins = []
+    tickers = safe_request(f"{BINANCE_URL}/ticker/24hr")
+
+    if not isinstance(tickers, list):
+        print("Invalid ticker data")
+        return []
+
+    strong = []
 
     for coin in tickers:
-        if coin["symbol"].endswith("USDT"):
+        try:
+            symbol = coin["symbol"]
             volume = float(coin["quoteVolume"])
             change = float(coin["priceChangePercent"])
 
-            if volume > MIN_VOLUME and abs(change) > MIN_CHANGE:
-                strong_coins.append({
-                    "symbol": coin["symbol"],
+            if symbol.endswith("USDT") and volume > MIN_VOLUME and abs(change) > MIN_CHANGE:
+                strong.append({
+                    "symbol": symbol,
                     "volume": volume,
                     "change": change
                 })
 
-    return sorted(strong_coins, key=lambda x: x["volume"], reverse=True)[:10]
+        except Exception:
+            continue
+
+    return sorted(strong, key=lambda x: x["volume"], reverse=True)[:10]
 
 def format_report(coins):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
@@ -63,6 +83,7 @@ def format_report(coins):
 
     for c in coins:
         direction = "🟢 LONG" if c["change"] > 0 else "🔴 SHORT"
+
         message += (
             f"*{c['symbol']}*\n"
             f"Volume: {round(c['volume']/1_000_000,2)}M USDT\n"
@@ -73,7 +94,7 @@ def format_report(coins):
     return message
 
 def main():
-    print("Smart Liquidity Engine v3 Started...")
+    print("Smart Liquidity Engine v3.1 Started...")
 
     while True:
         try:
@@ -87,7 +108,7 @@ def main():
             time.sleep(CHECK_INTERVAL)
 
         except Exception as e:
-            print("Error:", e)
+            print("Fatal Error:", e)
             time.sleep(60)
 
 if __name__ == "__main__":
