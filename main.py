@@ -20,4 +20,4 @@ def run_bot():
         time.sleep(3600)  # Wait 1 hour
 
 if __name__ == "__main__":
-    main()
+    run_bot()
