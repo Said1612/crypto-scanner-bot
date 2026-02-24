@@ -200,17 +200,27 @@ while True:
             last_dashboard_time = time.time()
 
         # ===== BTC & ETH =====
-        for major in ["BTCUSDT", "ETHUSDT"]:
-            result = major_liquidity(major)
+       import time
 
-            if result == "IN":
-                send_telegram(f"🟢 {major} 4H Liquidity Entry")
+if __name__ == "__main__":
 
-            elif result == "OUT":
-                send_telegram(f"🔴 {major} 4H Liquidity Exit")
+    print("BOT STARTED SUCCESSFULLY")
 
-        time.sleep(300)
+    while True:
+        try:
+            print("Checking BTC & ETH liquidity...")
 
-    except Exception as e:
-        print("MAIN LOOP ERROR:", e)
-        time.sleep(60)
+            for major in ["BTCUSDT", "ETHUSDT"]:
+                result = major_liquidity(major)
+
+                if result == "IN":
+                    send_telegram(f"🟢 {major} 4H Liquidity IN")
+
+                elif result == "OUT":
+                    send_telegram(f"🔴 {major} 4H Liquidity OUT")
+
+            time.sleep(300)
+
+        except Exception as e:
+            print("MAIN LOOP ERROR:", e)
+            time.sleep(60)
