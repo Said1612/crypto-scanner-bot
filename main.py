@@ -42,41 +42,41 @@ send_telegram("🔥 ULTRA BEAST IS ONLINE 🔥")
 # =============================
 def scan_market():
     try:
-        print("Ultra scanning market...", flush=True)
+def scan_market():
+    url = "https://api.mexc.com/api/v3/ticker/24hr"
+    response = requests.get(url)
+    data = response.json()
 
-        url = "https://api.mexc.com/api/v3/ticker/24hr"
-        response = requests.get(url, timeout=10)
-        data = response.json()
+    strong_coins = []
 
-        strong_coins = []
+    # ترتيب العملات حسب أعلى حجم تداول
+    usdt_pairs = [c for c in data if c["symbol"].endswith("USDT")]
 
-      strong_coins = []
+    sorted_coins = sorted(
+        usdt_pairs,
+        key=lambda x: float(x["quoteVolume"]),
+        reverse=True
+    )
 
-# ترتيب العملات حسب الحجم
-sorted_coins = sorted(
-    [c for c in data if c["symbol"].endswith("USDT")],
-    key=lambda x: float(x["quoteVolume"]),
-    reverse=True
-)
+    top_volume_coins = sorted_coins[:15]
 
-top_volume_coins = sorted_coins[:15]
+    for coin in top_volume_coins:
+        symbol = coin["symbol"]
+        change = float(coin["priceChangePercent"])
+        volume = float(coin["quoteVolume"])
 
-for coin in top_volume_coins:
-    symbol = coin["symbol"]
-    change = float(coin["priceChangePercent"])
-    volume = float(coin["quoteVolume"])
+        # فلترة سيولة حقيقية قبل الانفجار
+        if 3 < change < 12 and volume > 2000000:
+            strong_coins.append(
+                f"🟢 STRONG LIQUIDITY\n"
+                f"{symbol}\n"
+                f"📈 Change: {round(change,2)}%\n"
+                f"💰 Volume: {round(volume/1000000,2)}M\n"
+            )
 
-    if 3 < change < 12 and volume > 2000000:
-        strong_coins.append(
-            f"🟢 STRONG LIQUIDITY\n{symbol}\n📈 {round(change,2)}%\n💰 {round(volume/1000000,2)}M"
-        )
-                strong_coins.append(
-                    f"{symbol} | 🚀 {round(change,2)}% | 💰 Vol: {round(volume/1000000,2)}M"
-                )
-
-        if strong_coins:
-            message = "🔥 ULTRA BREAKOUT DETECTED 🔥\n\n" + "\n".join(strong_coins[:10])
-            send_telegram(message)
+    if strong_coins:
+        message = "\n".join(strong_coins)
+        send_telegram(message)
 
     except Exception as e:
         print("Scan error:", e)
