@@ -2,269 +2,215 @@ import requests
 import time
 import statistics
 
-TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
+# ================= CONFIG =================
+
+TELEGRAM_TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
 CHAT_ID = "1658477428"
 
-BASE_URL = "https://api.binance.com"
-
-cooldown = 14400
-SCORE_THRESHOLD = 8.5
+COOLDOWN = 3600
 DASHBOARD_INTERVAL = 1800
 
 sent_signals = {}
-last_scores = {}
 last_dashboard_time = 0
 
 # ================= TELEGRAM =================
 
 def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message}
-    requests.post(url, data=data)
-
-# ================= BINANCE =================
-
-# ================= RELATIVE STRENGTH =================
-
-def get_klines(symbol, interval="1h", limit=100):
     try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        response = requests.get(url, timeout=10)
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": CHAT_ID, "text": message}
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print("Telegram error:", e)
 
-        if response.status_code != 200:
+# ================= SAFE BINANCE REQUEST =================
+
+def safe_request(url):
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
             return None
-
         try:
-            data = response.json()
+            data = r.json()
         except:
             return None
-
-        if not isinstance(data, list):
-            return None
-
-        closes = []
-        volumes = []
-
-        for candle in data:
-            if isinstance(candle, list) and len(candle) > 5:
-                closes.append(float(candle[4]))
-                volumes.append(float(candle[5]))
-
-        if len(closes) < 10:
-            return None
-
-        return closes, volumes
-
+        return data
     except:
         return None
 
-# ================= LIQUIDITY SWEEP =================
+# ================= TOP 10 SYMBOLS =================
 
-def liquidity_sweep(data):
+def get_top_10_symbols():
+    url = "https://api.binance.com/api/v3/ticker/24hr"
+    data = safe_request(url)
 
-    closes = [float(c[4]) for c in data]
-    opens = [float(c[1]) for c in data]
-    highs = [float(c[2]) for c in data]
-    lows = [float(c[3]) for c in data]
-    volumes = [float(c[5]) for c in data]
+    if not isinstance(data, list):
+        return []
 
-    last_close = closes[-1]
-    last_open = opens[-1]
-    last_low = lows[-1]
-    last_high = highs[-1]
-    last_volume = volumes[-1]
-    avg_volume = statistics.mean(volumes[:-1])
+    filtered = []
 
-    recent_low = min(lows[-20:])
-    recent_high = max(highs[-20:])
+    for item in data:
+        if not isinstance(item, dict):
+            continue
 
-    body = abs(last_close - last_open)
-    lower_wick = min(last_close, last_open) - last_low
-    upper_wick = last_high - max(last_close, last_open)
+        symbol = item.get("symbol")
+        volume = item.get("quoteVolume")
 
-    if (
-        last_low < recent_low and
-        last_close > recent_low and
-        lower_wick > body and
-        last_volume > avg_volume * 2
-    ):
-        return "BULL_SWEEP"
+        if not symbol or not volume:
+            continue
 
-    if (
-        last_high > recent_high and
-        last_close < recent_high and
-        upper_wick > body and
-        last_volume > avg_volume * 2
-    ):
-        return "BEAR_SWEEP"
+        try:
+            volume = float(volume)
+        except:
+            continue
 
-    return None
+        if symbol.endswith("USDT") and volume > 10000000:
+            filtered.append((symbol, volume))
 
-# ================= SCORE =================
+    filtered.sort(key=lambda x: x[1], reverse=True)
 
-def calculate_score(data, mode):
+    return [x[0] for x in filtered[:10]]
 
-    score = 0
+# ================= GET KLINES =================
 
-    closes = [float(c[4]) for c in data]
-    opens = [float(c[1]) for c in data]
-    volumes = [float(c[5]) for c in data]
-    highs = [float(c[2]) for c in data]
-    lows = [float(c[3]) for c in data]
+def get_klines(symbol, interval="1h", limit=100):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    data = safe_request(url)
 
-    last_close = closes[-1]
-    last_open = opens[-1]
-    last_volume = volumes[-1]
-    avg_volume = statistics.mean(volumes[:-1])
+    if not isinstance(data, list):
+        return None
 
-    volume_ratio = last_volume / avg_volume
-    price_change = ((last_close - closes[-2]) / closes[-2]) * 100
+    closes = []
+    volumes = []
 
-    recent_low = min(lows[-20:])
-    recent_high = max(highs[-20:])
-    range_percent = ((recent_high - recent_low) / recent_low) * 100
+    for candle in data:
+        if isinstance(candle, list) and len(candle) > 5:
+            try:
+                closes.append(float(candle[4]))
+                volumes.append(float(candle[5]))
+            except:
+                continue
 
-    body = abs(last_close - last_open)
-    upper_wick = highs[-1] - max(last_close, last_open)
-    lower_wick = min(last_close, last_open) - lows[-1]
+    if len(closes) < 20:
+        return None
 
-    if mode == "LONG":
-        if volume_ratio > 2.5: score += 1
-        if -3 <= price_change <= 6: score += 1
-        if range_percent < 18: score += 1
-        if last_close < recent_low * 1.15: score += 1
-        if volumes[-1] > volumes[-2] > volumes[-3]: score += 1
-        if last_close > (highs[-1] + lows[-1]) / 2: score += 1
-        if last_close < recent_high * 0.95: score += 1
-        if closes[-1] > closes[-2]: score += 1
-        if lower_wick > body: score += 1
-        if volume_ratio > 3 and last_close > last_open: score += 1
+    return closes, volumes
 
-    if mode == "SHORT":
-        if volume_ratio > 2: score += 1
-        if -6 <= price_change <= 3: score += 1
-        if range_percent < 18: score += 1
-        if last_close > recent_high * 0.85: score += 1
-        if volumes[-1] > volumes[-2] > volumes[-3]: score += 1
-        if last_close < (highs[-1] + lows[-1]) / 2: score += 1
-        if last_close > recent_low * 1.05: score += 1
-        if closes[-1] < closes[-2]: score += 1
-        if upper_wick > body: score += 1
-        if volume_ratio > 3 and last_close < last_open: score += 1
+# ================= LIQUIDITY SCORE =================
 
-    return score
+def liquidity_score(symbol):
 
-# ================= ENGINE =================
+    timeframes = ["15m", "1h", "4h"]
+    total_score = 0
 
-def liquidity_engine(symbol):
+    for tf in timeframes:
 
-    data_15m = get_klines(symbol, "15m")
-    data_1h = get_klines(symbol, "1h")
+        data = get_klines(symbol, tf)
+        if not data:
+            continue
 
-    if not data_15m or not data_1h:
-        return None, 0
+        closes, volumes = data
 
-    long_score = (calculate_score(data_15m, "LONG") + calculate_score(data_1h, "LONG")) / 2
-    short_score = (calculate_score(data_15m, "SHORT") + calculate_score(data_1h, "SHORT")) / 2
+        avg_volume = statistics.mean(volumes[:-1])
+        current_volume = volumes[-1]
 
-    if relative_strength(symbol):
-        long_score += 1
+        price_change = ((closes[-1] - closes[-2]) / closes[-2]) * 100
 
-    sweep_15 = liquidity_sweep(data_15m)
-    sweep_1h = liquidity_sweep(data_1h)
+        score = 0
 
-    if sweep_15 == "BULL_SWEEP" or sweep_1h == "BULL_SWEEP":
-        long_score += 1.5
+        # Volume spike
+        if current_volume > avg_volume * 1.5:
+            score += 2
 
-    if sweep_15 == "BEAR_SWEEP" or sweep_1h == "BEAR_SWEEP":
-        short_score += 1.5
+        # Strong move
+        if abs(price_change) > 1.2:
+            score += 2
 
-    final_score = max(long_score, short_score)
+        # Acceleration
+        if len(closes) > 5:
+            momentum = closes[-1] - closes[-5]
+            if momentum > 0:
+                score += 1
 
-    if long_score >= SCORE_THRESHOLD:
-        return "LONG", long_score
+        total_score += score
 
-    if short_score >= SCORE_THRESHOLD:
-        return "SHORT", short_score
+    return total_score
 
-    return None, final_score
-
-# ================= BTC/ETH =================
+# ================= BTC & ETH 4H =================
 
 def major_liquidity(symbol):
-    data = get_klines(symbol, "4h")
+
+    data = get_klines(symbol, "4h", 50)
     if not data:
         return None
 
-    closes = [float(c[4]) for c in data]
-    volumes = [float(c[5]) for c in data]
+    closes, volumes = data
 
-    volume_ratio = volumes[-1] / statistics.mean(volumes[:-1])
+    avg_volume = statistics.mean(volumes[:-1])
+    current_volume = volumes[-1]
 
-    if volume_ratio > 2 and closes[-1] > closes[-2]:
-        return "IN"
-
-    if volume_ratio > 2 and closes[-1] < closes[-2]:
-        return "OUT"
+    if current_volume > avg_volume * 1.7:
+        if closes[-1] > closes[-2]:
+            return "IN"
+        else:
+            return "OUT"
 
     return None
 
 # ================= MAIN LOOP =================
 
-send_telegram("🚀 Ultimate Liquidity System Started")
-
 while True:
     try:
-        top_symbols = get_top_10_symbols()
+
+        symbols = get_top_10_symbols()
         watchlist = []
 
-        for symbol in top_symbols:
+        for symbol in symbols:
 
-            signal, score = liquidity_engine(symbol)
-            watchlist.append((symbol, round(score,2)))
+            if symbol in sent_signals:
+                if time.time() - sent_signals[symbol] < COOLDOWN:
+                    continue
 
-            # Acceleration Detection
-            if symbol in last_scores:
-                if last_scores[symbol] < 6 and score >= 8:
-                    send_telegram(f"⚡ SCORE ACCELERATION\n{symbol}\nFrom {last_scores[symbol]} ➜ {round(score,1)}")
+            score = liquidity_score(symbol)
+            watchlist.append((symbol, score))
 
-            last_scores[symbol] = score
+            # Strong Entry
+            if score >= 8:
+                send_telegram(f"🟢 STRONG LIQUIDITY ENTRY\n{symbol}\nScore: {score}/10")
+                sent_signals[symbol] = time.time()
 
-            if signal:
-                if symbol not in sent_signals or time.time() - sent_signals[symbol] > cooldown:
-
-                    if signal == "LONG":
-                        send_telegram(f"🟢 STRONG LIQUIDITY ENTRY\n{symbol}\nScore: {round(score,1)}/10")
-                    else:
-                        send_telegram(f"🔴 STRONG LIQUIDITY EXIT\n{symbol}\nScore: {round(score,1)}/10")
-
-                    sent_signals[symbol] = time.time()
+            # Strong Exit
+            elif score <= -8:
+                send_telegram(f"🔴 STRONG LIQUIDITY EXIT\n{symbol}\nScore: {score}/10")
+                sent_signals[symbol] = time.time()
 
             time.sleep(0.4)
 
-        # Dashboard
-        
+        # ===== DASHBOARD =====
         if time.time() - last_dashboard_time > DASHBOARD_INTERVAL:
 
-            watchlist_sorted = sorted(watchlist, key=lambda x: x[1], reverse=True)[:3]
-            message = "📊 Liquidity Watchlist (Top 3)\n\n"
+            sorted_watch = sorted(watchlist, key=lambda x: x[1], reverse=True)[:3]
 
-            for i, (symbol, score) in enumerate(watchlist_sorted, 1):
-                message += f"{i}️⃣ {symbol} — Score: {score}/10\n"
+            msg = "📊 Liquidity Watchlist (Top 3)\n\n"
 
-            send_telegram(message)
+            for i, (symbol, score) in enumerate(sorted_watch, 1):
+                msg += f"{i}️⃣ {symbol} — {score}/10\n"
+
+            send_telegram(msg)
             last_dashboard_time = time.time()
 
-        # BTC / ETH
+        # ===== BTC & ETH =====
         for major in ["BTCUSDT", "ETHUSDT"]:
             result = major_liquidity(major)
+
             if result == "IN":
                 send_telegram(f"🟢 {major} 4H Liquidity Entry")
+
             elif result == "OUT":
                 send_telegram(f"🔴 {major} 4H Liquidity Exit")
 
         time.sleep(300)
 
     except Exception as e:
-        print("Error:", e)
+        print("MAIN LOOP ERROR:", e)
         time.sleep(60)
