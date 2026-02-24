@@ -1,24 +1,29 @@
+print("ULTRA BEAST FILE LOADED", flush=True)
+
 import requests
 import time
 import os
 
 print("=== MEXC ULTRA BEAST ACTIVATED ===", flush=True)
 
-BOT_TOKEN = os.environ.get("7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ")
-CHAT_ID = os.environ.get("1658477428")
+# ✅ جلب القيم من Environment Variables
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
 def send_telegram(message):
     if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram config missing", flush=True)
+        print("Missing BOT_TOKEN or CHAT_ID")
         return
-
+    
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
-
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message
+    }
     try:
-        requests.post(url, json=payload, timeout=10)
+        requests.post(url, data=payload)
     except Exception as e:
-        print("Telegram Error:", e, flush=True)
+        print("Telegram error:", e)
 
 # =========================
 # GET USDT PAIRS
