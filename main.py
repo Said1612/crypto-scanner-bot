@@ -3,25 +3,30 @@ import time
 import os
 
 # ==============================
-# 🔐 TELEGRAM CONFIG
+# TELEGRAM CONFIG
 # ==============================
 
 BOT_TOKEN = os.environ.get("7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ")
 CHAT_ID = os.environ.get("1658477428")
 
 def send_telegram(message):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("Telegram config missing")
+        return
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
         "text": message
     }
+
     try:
-        requests.post(url, json=payload)
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print("Telegram Error:", e)
 
 # ==============================
-# 📊 BINANCE DATA
+# BINANCE DATA
 # ==============================
 
 def get_klines(symbol, interval="4h", limit=50):
@@ -31,20 +36,38 @@ def get_klines(symbol, interval="4h", limit=50):
         "interval": interval,
         "limit": limit
     }
-    response = requests.get(url, params=params)
-    data = response.json()
-    return data
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+
+        # حماية إذا Binance رجع خطأ
+        if not isinstance(data, list):
+            print("Binance API Error:", data)
+            return None
+
+        return data
+
+    except Exception as e:
+        print("Request Error:", e)
+        return None
 
 # ==============================
-# 💧 LIQUIDITY LOGIC
+# LIQUIDITY LOGIC
 # ==============================
 
 def major_liquidity(symbol):
-    try:
-        klines = get_klines(symbol)
+    klines = get_klines(symbol)
 
-        volumes = [float(k[5]) for k in klines]
-        closes = [float(k[4]) for k in klines]
+    if klines is None or len(klines) < 10:
+        return None
+
+    try:
+        volumes = [float(k[5]) for k in klines if len(k) > 5]
+        closes = [float(k[4]) for k in klines if len(k) > 4]
+
+        if len(volumes) < 10 or len(closes) < 2:
+            return None
 
         avg_volume = sum(volumes[:-1]) / len(volumes[:-1])
         current_volume = volumes[-1]
@@ -52,19 +75,19 @@ def major_liquidity(symbol):
         if current_volume > avg_volume * 1.8:
 
             if closes[-1] > closes[-2]:
-                return "IN"   # دخول سيولة صعود
+                return "IN"
 
             elif closes[-1] < closes[-2]:
-                return "OUT"  # خروج سيولة هبوط
+                return "OUT"
 
         return None
 
     except Exception as e:
-        print("Liquidity Error:", e)
+        print("Liquidity Calculation Error:", e)
         return None
 
 # ==============================
-# 🚀 MAIN LOOP
+# MAIN LOOP
 # ==============================
 
 if __name__ == "__main__":
@@ -84,7 +107,7 @@ if __name__ == "__main__":
                 elif result == "OUT":
                     send_telegram(f"🔴 {major} 4H Liquidity OUT")
 
-            time.sleep(300)  # كل 5 دقائق
+            time.sleep(300)
 
         except Exception as e:
             print("MAIN LOOP ERROR:", e)
