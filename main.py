@@ -234,7 +234,7 @@ while True:
             time.sleep(0.4)
 
         # Dashboard
-        global last_dashboard_time
+        
         if time.time() - last_dashboard_time > DASHBOARD_INTERVAL:
 
             watchlist_sorted = sorted(watchlist, key=lambda x: x[1], reverse=True)[:3]
