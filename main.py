@@ -50,17 +50,26 @@ def scan_market():
 
         strong_coins = []
 
-        for coin in data:
-            symbol = coin["symbol"]
+      strong_coins = []
 
-            if not symbol.endswith("USDT"):
-                continue
+# ترتيب العملات حسب الحجم
+sorted_coins = sorted(
+    [c for c in data if c["symbol"].endswith("USDT")],
+    key=lambda x: float(x["quoteVolume"]),
+    reverse=True
+)
 
-            change = float(coin["priceChangePercent"])
-            volume = float(coin["quoteVolume"])
+top_volume_coins = sorted_coins[:15]
 
-            # 🔥 فلتر الانفجار
-            if change > 5 and volume > 1000000:
+for coin in top_volume_coins:
+    symbol = coin["symbol"]
+    change = float(coin["priceChangePercent"])
+    volume = float(coin["quoteVolume"])
+
+    if 3 < change < 12 and volume > 2000000:
+        strong_coins.append(
+            f"🟢 STRONG LIQUIDITY\n{symbol}\n📈 {round(change,2)}%\n💰 {round(volume/1000000,2)}M"
+        )
                 strong_coins.append(
                     f"{symbol} | 🚀 {round(change,2)}% | 💰 Vol: {round(volume/1000000,2)}M"
                 )
