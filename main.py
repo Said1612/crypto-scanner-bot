@@ -24,30 +24,39 @@ def send_telegram(message):
 
 # ================= BINANCE =================
 
-def get_top_10_symbols():
-    url = BASE_URL + "/api/v3/ticker/24hr"
-    data = requests.get(url).json()
-    usdt_pairs = [x for x in data if x["symbol"].endswith("USDT")]
-    sorted_pairs = sorted(usdt_pairs, key=lambda x: float(x["quoteVolume"]), reverse=True)
-    return [x["symbol"] for x in sorted_pairs[:10]]
-
-def get_klines(symbol, interval, limit=50):
-    url = BASE_URL + f"/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    return requests.get(url).json()
-
 # ================= RELATIVE STRENGTH =================
 
-def relative_strength(symbol):
-    btc = get_klines("BTCUSDT", "1h", 10)
-    coin = get_klines(symbol, "1h", 10)
+def get_klines(symbol, interval="1h", limit=100):
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        response = requests.get(url, timeout=10)
 
-    if not btc or not coin:
-        return False
+        if response.status_code != 200:
+            return None
 
-    btc_change = (float(btc[-1][4]) - float(btc[-4][4])) / float(btc[-4][4])
-    coin_change = (float(coin[-1][4]) - float(coin[-4][4])) / float(coin[-4][4])
+        try:
+            data = response.json()
+        except:
+            return None
 
-    return coin_change > btc_change
+        if not isinstance(data, list):
+            return None
+
+        closes = []
+        volumes = []
+
+        for candle in data:
+            if isinstance(candle, list) and len(candle) > 5:
+                closes.append(float(candle[4]))
+                volumes.append(float(candle[5]))
+
+        if len(closes) < 10:
+            return None
+
+        return closes, volumes
+
+    except:
+        return None
 
 # ================= LIQUIDITY SWEEP =================
 
