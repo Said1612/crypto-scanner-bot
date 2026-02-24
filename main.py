@@ -1,17 +1,12 @@
 import requests
 import time
-import os
 
-# =========================
-# TELEGRAM SETTINGS
-# =========================
+# ==============================
+# TELEGRAM CONFIG
+# ==============================
 
 TELEGRAM_TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
 CHAT_ID = "PUT_YOUR_CHAT_ID_HERE"
-
-# =========================
-# SEND TELEGRAM FUNCTION
-# =========================
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -21,56 +16,59 @@ def send_telegram(message):
     }
     try:
         requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print("Telegram Error:", e)
 
-    except:
-        print("Telegram send failed")
 
-# =========================
+# ==============================
 # MEXC SCANNER
-# =========================
+# ==============================
 
 def scan_market():
     try:
-      def scan_market():
-    try:
         print("Scanning market...", flush=True)
-
-        send_telegram("✅ BOT WORKING TEST")
 
         url = "https://api.mexc.com/api/v3/ticker/24hr"
         response = requests.get(url, timeout=10)
         data = response.json()
 
-        strong_coins = []
-
+        # فقط أزواج USDT
         usdt_pairs = [c for c in data if c["symbol"].endswith("USDT")]
 
+        # ترتيب حسب أعلى حجم تداول
         sorted_coins = sorted(
             usdt_pairs,
             key=lambda x: float(x["quoteVolume"]),
             reverse=True
         )
 
-        top_volume_coins = sorted_coins[:15]
+        top_15 = sorted_coins[:15]
 
-        for coin in top_volume_coins:
+        signals = []
+
+        for coin in top_15:
             symbol = coin["symbol"]
             change = float(coin["priceChangePercent"])
             volume = float(coin["quoteVolume"])
 
-            if volume > 1000000:
-                strong_coins.append(f"{symbol} | {change}%")
+            # شرط تجريبي بسيط
+            if change > 3 and volume > 1000000:
+                signals.append(f"{symbol} | {change:.2f}%")
 
-        if strong_coins:
-            send_telegram("🔥 TEST SIGNAL\n" + "\n".join(strong_coins[:5]))
+        if signals:
+            message = "🔥 MEXC SIGNALS 🔥\n\n" + "\n".join(signals[:5])
+            send_telegram(message)
 
     except Exception as e:
-        print("Error:", e)
-# =========================
-# LOOP
-# =========================
+        print("Scan Error:", e)
 
-if __name__ == "__main__":
-    while True:
-        scan_market()
-        time.sleep(300)  # كل 5 دقائق
+
+# ==============================
+# LOOP
+# ==============================
+
+print("Starting Container...", flush=True)
+
+while True:
+    scan_market()
+    time.sleep(60)
