@@ -7,8 +7,8 @@ import os
 print("=== MEXC ULTRA BEAST ACTIVATED ===", flush=True)
 
 # ✅ جلب القيم من Environment Variables
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+BOT_TOKEN = os.environ.get("7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ")
+CHAT_ID = os.environ.get("1658477428")
 
 def send_telegram(message):
     if not BOT_TOKEN or not CHAT_ID:
