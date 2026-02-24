@@ -2,14 +2,18 @@ import requests
 import time
 import statistics
 
-TOKEN = "YOUR_TELEGRAM_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
+TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
+CHAT_ID = "1658477428"
 
 BASE_URL = "https://api.binance.com"
-cooldown = 14400  # 4 ساعات
-sent_signals = {}
 
+cooldown = 14400
 SCORE_THRESHOLD = 8.5
+DASHBOARD_INTERVAL = 1800
+
+sent_signals = {}
+last_scores = {}
+last_dashboard_time = 0
 
 # ================= TELEGRAM =================
 
@@ -87,7 +91,7 @@ def liquidity_sweep(data):
 
     return None
 
-# ================= SCORE CALCULATION =================
+# ================= SCORE =================
 
 def calculate_score(data, mode):
 
@@ -141,7 +145,7 @@ def calculate_score(data, mode):
 
     return score
 
-# ================= LIQUIDITY ENGINE =================
+# ================= ENGINE =================
 
 def liquidity_engine(symbol):
 
@@ -151,35 +155,32 @@ def liquidity_engine(symbol):
     if not data_15m or not data_1h:
         return None, 0
 
-    long_15 = calculate_score(data_15m, "LONG")
-    long_1h = calculate_score(data_1h, "LONG")
-    short_15 = calculate_score(data_15m, "SHORT")
-    short_1h = calculate_score(data_1h, "SHORT")
-
-    avg_long = (long_15 + long_1h) / 2
-    avg_short = (short_15 + short_1h) / 2
+    long_score = (calculate_score(data_15m, "LONG") + calculate_score(data_1h, "LONG")) / 2
+    short_score = (calculate_score(data_15m, "SHORT") + calculate_score(data_1h, "SHORT")) / 2
 
     if relative_strength(symbol):
-        avg_long += 1
+        long_score += 1
 
     sweep_15 = liquidity_sweep(data_15m)
     sweep_1h = liquidity_sweep(data_1h)
 
     if sweep_15 == "BULL_SWEEP" or sweep_1h == "BULL_SWEEP":
-        avg_long += 1.5
+        long_score += 1.5
 
     if sweep_15 == "BEAR_SWEEP" or sweep_1h == "BEAR_SWEEP":
-        avg_short += 1.5
+        short_score += 1.5
 
-    if avg_long >= SCORE_THRESHOLD:
-        return "LONG", avg_long
+    final_score = max(long_score, short_score)
 
-    if avg_short >= SCORE_THRESHOLD:
-        return "SHORT", avg_short
+    if long_score >= SCORE_THRESHOLD:
+        return "LONG", long_score
 
-    return None, max(avg_long, avg_short)
+    if short_score >= SCORE_THRESHOLD:
+        return "SHORT", short_score
 
-# ================= BTC & ETH 4H =================
+    return None, final_score
+
+# ================= BTC/ETH =================
 
 def major_liquidity(symbol):
     data = get_klines(symbol, "4h")
@@ -189,10 +190,7 @@ def major_liquidity(symbol):
     closes = [float(c[4]) for c in data]
     volumes = [float(c[5]) for c in data]
 
-    last_volume = volumes[-1]
-    avg_volume = statistics.mean(volumes[:-1])
-
-    volume_ratio = last_volume / avg_volume
+    volume_ratio = volumes[-1] / statistics.mean(volumes[:-1])
 
     if volume_ratio > 2 and closes[-1] > closes[-2]:
         return "IN"
@@ -204,33 +202,53 @@ def major_liquidity(symbol):
 
 # ================= MAIN LOOP =================
 
-send_telegram("🚀 Ultimate Institutional Liquidity Bot Started")
+send_telegram("🚀 Ultimate Liquidity System Started")
 
 while True:
     try:
         top_symbols = get_top_10_symbols()
+        watchlist = []
 
         for symbol in top_symbols:
 
-            if symbol in sent_signals:
-                if time.time() - sent_signals[symbol] < cooldown:
-                    continue
-
             signal, score = liquidity_engine(symbol)
+            watchlist.append((symbol, round(score,2)))
 
-            if signal == "LONG":
-                send_telegram(f"🟢 STRONG LIQUIDITY ENTRY\n{symbol}\nScore: {round(score,1)}/10")
-                sent_signals[symbol] = time.time()
+            # Acceleration Detection
+            if symbol in last_scores:
+                if last_scores[symbol] < 6 and score >= 8:
+                    send_telegram(f"⚡ SCORE ACCELERATION\n{symbol}\nFrom {last_scores[symbol]} ➜ {round(score,1)}")
 
-            elif signal == "SHORT":
-                send_telegram(f"🔴 STRONG LIQUIDITY EXIT\n{symbol}\nScore: {round(score,1)}/10")
-                sent_signals[symbol] = time.time()
+            last_scores[symbol] = score
 
-            time.sleep(0.5)
+            if signal:
+                if symbol not in sent_signals or time.time() - sent_signals[symbol] > cooldown:
 
+                    if signal == "LONG":
+                        send_telegram(f"🟢 STRONG LIQUIDITY ENTRY\n{symbol}\nScore: {round(score,1)}/10")
+                    else:
+                        send_telegram(f"🔴 STRONG LIQUIDITY EXIT\n{symbol}\nScore: {round(score,1)}/10")
+
+                    sent_signals[symbol] = time.time()
+
+            time.sleep(0.4)
+
+        # Dashboard
+        global last_dashboard_time
+        if time.time() - last_dashboard_time > DASHBOARD_INTERVAL:
+
+            watchlist_sorted = sorted(watchlist, key=lambda x: x[1], reverse=True)[:3]
+            message = "📊 Liquidity Watchlist (Top 3)\n\n"
+
+            for i, (symbol, score) in enumerate(watchlist_sorted, 1):
+                message += f"{i}️⃣ {symbol} — Score: {score}/10\n"
+
+            send_telegram(message)
+            last_dashboard_time = time.time()
+
+        # BTC / ETH
         for major in ["BTCUSDT", "ETHUSDT"]:
             result = major_liquidity(major)
-
             if result == "IN":
                 send_telegram(f"🟢 {major} 4H Liquidity Entry")
             elif result == "OUT":
