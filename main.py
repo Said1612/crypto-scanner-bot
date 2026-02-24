@@ -57,7 +57,7 @@ def scan_market():
             volume = float(coin["quoteVolume"])
 
             # فلتر السيولة الذكي
-            if 3 < change < 12 and volume > 2000000:
+            if 3 < change < 12 and volume > 1000000:
                 strong_coins.append(
                     f"🟢 STRONG LIQUIDITY\n"
                     f"{symbol}\n"
