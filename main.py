@@ -26,11 +26,11 @@ def send_telegram(message):
         print("Telegram Error:", e)
 
 # ==============================
-# BINANCE DATA
+# MEXC KLINES (Spot)
 # ==============================
 
 def get_klines(symbol, interval="4h", limit=50):
-    url = "https://api.binance.com/api/v3/klines"
+    url = "https://api.mexc.com/api/v3/klines"
 
     params = {
         "symbol": symbol,
@@ -43,7 +43,7 @@ def get_klines(symbol, interval="4h", limit=50):
         data = response.json()
 
         if not isinstance(data, list):
-            print("Binance API Error:", data)
+            print("MEXC API Error:", data)
             return None
 
         return data
@@ -56,23 +56,22 @@ def get_klines(symbol, interval="4h", limit=50):
 # LIQUIDITY LOGIC
 # ==============================
 
+last_signal = {}
+
 def major_liquidity(symbol):
     klines = get_klines(symbol)
 
-    if klines is None or len(klines) < 10:
+    if klines is None or len(klines) < 20:
         return None
 
     try:
-        volumes = [float(k[5]) for k in klines if len(k) > 5]
-        closes = [float(k[4]) for k in klines if len(k) > 4]
-
-        if len(volumes) < 10 or len(closes) < 2:
-            return None
+        volumes = [float(k[5]) for k in klines]
+        closes = [float(k[4]) for k in klines]
 
         avg_volume = sum(volumes[:-1]) / len(volumes[:-1])
         current_volume = volumes[-1]
 
-        if current_volume > avg_volume * 1.8:
+        if current_volume > avg_volume * 2:
 
             if closes[-1] > closes[-2]:
                 return "IN"
@@ -83,29 +82,35 @@ def major_liquidity(symbol):
         return None
 
     except Exception as e:
-        print("Liquidity Calculation Error:", e)
+        print("Liquidity Error:", e)
         return None
 
 # ==============================
 # MAIN LOOP
 # ==============================
 
-if __name__ == "__main__":
+if name == "main":
 
-    print("BOT STARTED SUCCESSFULLY")
+    print("MEXC BOT STARTED SUCCESSFULLY")
 
     while True:
         try:
-            print("Checking BTC & ETH 4H liquidity...")
+            print("Checking BTC & ETH 4H liquidity on MEXC...")
 
             for major in ["BTCUSDT", "ETHUSDT"]:
+
                 result = major_liquidity(major)
 
-                if result == "IN":
-                    send_telegram(f"🟢 {major} 4H Liquidity IN")
+                # منع التكرار
+                if result and last_signal.get(major) != result:
 
-                elif result == "OUT":
-                    send_telegram(f"🔴 {major} 4H Liquidity OUT")
+                    if result == "IN":
+                        send_telegram(f"🟢 {major} 4H Liquidity IN (MEXC)")
+
+                    elif result == "OUT":
+                        send_telegram(f"🔴 {major} 4H Liquidity OUT (MEXC)")
+
+                    last_signal[major] = result
 
             time.sleep(300)
 
