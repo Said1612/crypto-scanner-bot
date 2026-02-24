@@ -27,6 +27,9 @@ def send_telegram(message):
 def scan_market():
     try:
         print("Scanning market...", flush=True)
+send_telegram("🚀 BOT STARTED SUCCESSFULLY")
+
+while True:
 
         url = "https://api.mexc.com/api/v3/ticker/24hr"
         response = requests.get(url, timeout=10)
