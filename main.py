@@ -21,6 +21,7 @@ def send_telegram(message):
     }
     try:
         requests.post(url, json=payload, timeout=10)
+
     except:
         print("Telegram send failed")
 
@@ -30,7 +31,11 @@ def send_telegram(message):
 
 def scan_market():
     try:
+      def scan_market():
+    try:
         print("Scanning market...", flush=True)
+
+        send_telegram("✅ BOT WORKING TEST")
 
         url = "https://api.mexc.com/api/v3/ticker/24hr"
         response = requests.get(url, timeout=10)
@@ -38,17 +43,14 @@ def scan_market():
 
         strong_coins = []
 
-        # فلترة أزواج USDT فقط
         usdt_pairs = [c for c in data if c["symbol"].endswith("USDT")]
 
-        # ترتيب حسب أعلى حجم تداول
         sorted_coins = sorted(
             usdt_pairs,
             key=lambda x: float(x["quoteVolume"]),
             reverse=True
         )
 
-        # أفضل 15 عملة من حيث السيولة
         top_volume_coins = sorted_coins[:15]
 
         for coin in top_volume_coins:
@@ -56,23 +58,14 @@ def scan_market():
             change = float(coin["priceChangePercent"])
             volume = float(coin["quoteVolume"])
 
-            # فلتر السيولة الذكي
-            if 3 < change < 12 and volume > 1000000:
-                strong_coins.append(
-                    f"🟢 STRONG LIQUIDITY\n"
-                    f"{symbol}\n"
-                    f"📈 Change: {round(change,2)}%\n"
-                    f"💰 Volume: {round(volume/1000000,2)}M\n"
-                )
+            if volume > 1000000:
+                strong_coins.append(f"{symbol} | {change}%")
 
         if strong_coins:
-            message = "🔥 ULTRA LIQUIDITY DETECTED 🔥\n\n"
-            message += "\n".join(strong_coins[:5])
-            send_telegram(message)
+            send_telegram("🔥 TEST SIGNAL\n" + "\n".join(strong_coins[:5]))
 
     except Exception as e:
-        print("Error in scan_market:", e)
-
+        print("Error:", e)
 # =========================
 # LOOP
 # =========================
