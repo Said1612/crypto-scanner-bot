@@ -89,7 +89,11 @@ def major_liquidity(symbol):
 # MAIN LOOP
 # ==============================
 
-if name == "main":
+# ==============================
+# MAIN LOOP
+# ==============================
+
+if __name__ == "__main__":
 
     print("MEXC BOT STARTED SUCCESSFULLY")
 
@@ -101,7 +105,6 @@ if name == "main":
 
                 result = major_liquidity(major)
 
-                # منع التكرار
                 if result and last_signal.get(major) != result:
 
                     if result == "IN":
