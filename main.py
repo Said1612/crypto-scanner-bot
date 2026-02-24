@@ -30,7 +30,8 @@ def send_telegram(message):
 # ==============================
 
 def get_klines(symbol, interval="4h", limit=50):
-    url = "https://fapi.binance.com/fapi/v1/klines"
+    url = "https://api.binance.com/api/v3/klines"
+
     params = {
         "symbol": symbol,
         "interval": interval,
@@ -41,7 +42,6 @@ def get_klines(symbol, interval="4h", limit=50):
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
 
-        # حماية إذا Binance رجع خطأ
         if not isinstance(data, list):
             print("Binance API Error:", data)
             return None
