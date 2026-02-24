@@ -2,6 +2,8 @@ import requests
 import time
 import os
 
+print("=== BOT IS RUNNING ===", flush=True)
+
 # ==============================
 # TELEGRAM CONFIG
 # ==============================
@@ -11,22 +13,24 @@ CHAT_ID = os.environ.get("1658477428")
 
 def send_telegram(message):
     if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram config missing")
+        print("Telegram config missing", flush=True)
         return
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
     payload = {
         "chat_id": CHAT_ID,
         "text": message
     }
 
     try:
-        requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=10)
+        print("Telegram sent:", response.status_code, flush=True)
     except Exception as e:
-        print("Telegram Error:", e)
+        print("Telegram Error:", e, flush=True)
 
 # ==============================
-# MEXC KLINES (Spot)
+# MEXC KLINES (4H)
 # ==============================
 
 def get_klines(symbol, interval="4h", limit=50):
@@ -43,13 +47,13 @@ def get_klines(symbol, interval="4h", limit=50):
         data = response.json()
 
         if not isinstance(data, list):
-            print("MEXC API Error:", data)
+            print("MEXC API Error:", data, flush=True)
             return None
 
         return data
 
     except Exception as e:
-        print("Request Error:", e)
+        print("Request Error:", e, flush=True)
         return None
 
 # ==============================
@@ -62,6 +66,7 @@ def major_liquidity(symbol):
     klines = get_klines(symbol)
 
     if klines is None or len(klines) < 20:
+        print(f"Not enough data for {symbol}", flush=True)
         return None
 
     try:
@@ -70,6 +75,8 @@ def major_liquidity(symbol):
 
         avg_volume = sum(volumes[:-1]) / len(volumes[:-1])
         current_volume = volumes[-1]
+
+        print(f"{symbol} Current Vol: {current_volume} | Avg Vol: {avg_volume}", flush=True)
 
         if current_volume > avg_volume * 2:
 
@@ -82,12 +89,8 @@ def major_liquidity(symbol):
         return None
 
     except Exception as e:
-        print("Liquidity Error:", e)
+        print("Liquidity Error:", e, flush=True)
         return None
-
-# ==============================
-# MAIN LOOP
-# ==============================
 
 # ==============================
 # MAIN LOOP
@@ -95,11 +98,11 @@ def major_liquidity(symbol):
 
 if __name__ == "__main__":
 
-    print("MEXC BOT STARTED SUCCESSFULLY")
+    print("MEXC BOT STARTED SUCCESSFULLY", flush=True)
 
     while True:
         try:
-            print("Checking BTC & ETH 4H liquidity on MEXC...")
+            print("Checking BTC & ETH 4H liquidity on MEXC...", flush=True)
 
             for major in ["BTCUSDT", "ETHUSDT"]:
 
@@ -118,5 +121,5 @@ if __name__ == "__main__":
             time.sleep(300)
 
         except Exception as e:
-            print("MAIN LOOP ERROR:", e)
+            print("MAIN LOOP ERROR:", e, flush=True)
             time.sleep(60)
