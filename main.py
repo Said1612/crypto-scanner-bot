@@ -8,8 +8,8 @@ from datetime import datetime
 # 🔐 TELEGRAM SETTINGS
 # ==========================================
 
-TELEGRAM_BOT_TOKEN = "your_token"
-TELEGRAM_CHAT_ID = "your_chat_id"
+TELEGRAM_BOT_TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
+TELEGRAM_CHAT_ID = "1658477428"
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -38,30 +38,37 @@ sent_signals = {}
 # 🟢 GET BINANCE SYMBOLS
 # ==========================================
 
-import requests
-
 def get_symbols():
-    url = "https://api.mexc.com/api/v3/exchangeInfo"
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+    data = requests.get(url).json()
+    symbols = [
+        s["symbol"]
+        for s in data["symbols"]
+        if s["quoteAsset"] == "USDT"
+        and s["status"] == "TRADING"
+        and not s["symbol"].endswith("UPUSDT")
+        and not s["symbol"].endswith("DOWNUSDT")
+    ]
+    return symbols
+
+# =========================
+# GET KLINES (MEXC)
+# =========================
+def get_klines(symbol):
+    url = "https://api.mexc.com/api/v3/klines"
+
+    params = {
+        "symbol": symbol,
+        "interval": TIMEFRAME,
+        "limit": LIMIT
+    }
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
-
-        if "symbols" not in data:
-            print("❌ MEXC API Error:", data)
-            return []
-
-        symbols = [
-            s["symbol"]
-            for s in data["symbols"]
-            if s["quoteAsset"] == "USDT" and s["status"] == "1"
-        ]
-
-        print(f"✅ Loaded {len(symbols)} USDT pairs from MEXC")
-        return symbols
-
+        return data
     except Exception as e:
-        print("❌ Error fetching MEXC symbols:", e)
+        print(f"❌ Error fetching klines for {symbol}:", e)
         return []
 
 # ==========================================
