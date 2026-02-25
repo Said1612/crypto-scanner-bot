@@ -1,124 +1,135 @@
 import requests
+import pandas as pd
 import time
+from datetime import datetime
+from binance.client import Client
 
 # ==============================
-# SETTINGS
+# API SETTINGS
 # ==============================
 
-TIMEFRAME = "1h"
-LIMIT = 100
-CHECK_EVERY = 300        # seconds
-REQUEST_DELAY = 0.2      # seconds between requests
+API_KEY = "PUT_YOUR_API_KEY"
+API_SECRET = "PUT_YOUR_SECRET_KEY"
 
-sent_signals = {}
+TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_BOT_TOKEN"
+CHAT_ID = "PUT_YOUR_CHAT_ID"
 
-# ==============================
-# GET MEXC SYMBOLS
-# ==============================
+client = Client(API_KEY, API_SECRET)
 
-def get_symbols():
-    url = "https://api.mexc.com/api/v3/exchangeInfo"
+TIMEFRAMES = ["15m", "1h", "4h"]
+TOP_COINS_LIMIT = 20
+VOLUME_THRESHOLD = 150  # نسبة قوة السيولة
 
-    try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-
-        if "symbols" not in data:
-            print("❌ Unexpected API response:", data)
-            return []
-
-        symbols = []
-
-        for s in data["symbols"]:
-            if s.get("quoteAsset") == "USDT" and s.get("status") == "1":
-                symbols.append(s.get("symbol"))
-
-        print(f"✅ Loaded {len(symbols)} USDT pairs from MEXC")
-        return symbols
-
-    except Exception as e:
-        print("❌ Error fetching symbols:", e)
-        return []
+last_signals = {}
 
 # ==============================
-# GET KLINES
+# TELEGRAM FUNCTION
 # ==============================
 
-def get_klines(symbol):
-    url = "https://api.mexc.com/api/v3/klines"
-    params = {
-        "symbol": symbol,
-        "interval": TIMEFRAME,
-        "limit": LIMIT
-    }
-
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-
-        # تأكد أن البيانات قائمة وليست رسالة خطأ
-        if not isinstance(data, list):
-            return None
-
-        return data
-
-    except:
-        return None
-# ==============================
-# SIMPLE SIGNAL CHECK
-# ==============================
-
-def check_signal(symbol):
-    klines = get_klines(symbol)
-
-    if not klines or len(klines) < 2:
-        return
-
-    try:
-        last_close = float(klines[-1][4])
-        prev_close = float(klines[-2][4])
-
-        if last_close > prev_close:
-            if symbol not in sent_signals:
-                print(f"📈 BUY Signal: {symbol}")
-                sent_signals[symbol] = "BUY"
-
-        elif last_close < prev_close:
-            if symbol not in sent_signals:
-                print(f"📉 SELL Signal: {symbol}")
-                sent_signals[symbol] = "SELL"
-
-    except Exception as e:
-        print(f"Signal error {symbol}:", e)
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    params = {"chat_id": CHAT_ID, "text": message}
+    requests.get(url, params=params)
 
 # ==============================
-# MAIN LOOP
+# GET TOP 20 COINS BY VOLUME
 # ==============================
 
-def main():
-    print("🔥 Ultra Beast Running...")
+def get_top_20_symbols():
+    tickers = client.futures_ticker()
+    usdt_pairs = [t for t in tickers if t['symbol'].endswith("USDT")]
 
-    symbols = get_symbols()
+    sorted_pairs = sorted(
+        usdt_pairs,
+        key=lambda x: float(x['quoteVolume']),
+        reverse=True
+    )
 
-    if not symbols:
-        print("No symbols loaded. Retrying in 60s...")
-        time.sleep(60)
-        return
+    return [s['symbol'] for s in sorted_pairs[:TOP_COINS_LIMIT]]
 
-    while True:
-        for symbol in symbols:
+# ==============================
+# GET DATA
+# ==============================
+
+def get_klines(symbol, interval):
+    klines = client.futures_klines(symbol=symbol, interval=interval, limit=100)
+    df = pd.DataFrame(klines, columns=[
+        "time","open","high","low","close","volume",
+        "c1","c2","c3","c4","c5","c6"
+    ])
+
+    df["close"] = df["close"].astype(float)
+    df["volume"] = df["volume"].astype(float)
+    return df
+
+# ==============================
+# CHECK LIQUIDITY BREAKOUT
+# ==============================
+
+def check_signal(df):
+    avg_volume = df["volume"].rolling(20).mean().iloc[-2]
+    last_volume = df["volume"].iloc[-1]
+
+    volume_strength = (last_volume / avg_volume) * 100
+
+    high_break = df["high"].iloc[-1] > df["high"].rolling(20).max().iloc[-2]
+    low_break = df["low"].iloc[-1] < df["low"].rolling(20).min().iloc[-2]
+
+    if volume_strength > VOLUME_THRESHOLD:
+        if high_break:
+            return "LONG", volume_strength
+        elif low_break:
+            return "SHORT", volume_strength
+
+    return None, volume_strength
+
+# ==============================
+# MAIN BOT
+# ==============================
+
+def run_bot():
+    print("Scanning market...")
+    symbols = get_top_20_symbols()
+
+    for symbol in symbols:
+        for tf in TIMEFRAMES:
             try:
-                check_signal(symbol)
-                time.sleep(REQUEST_DELAY)
+                df = get_klines(symbol, tf)
+                signal, strength = check_signal(df)
+
+                if signal:
+                    key = f"{symbol}_{tf}"
+
+                    # إذا تكررت الإشارة = سيولة جديدة
+                    repeated = ""
+                    if key in last_signals:
+                        repeated = "🚨 NEW LIQUIDITY ADDED 🚨\n"
+
+                    last_signals[key] = datetime.now()
+
+                    message = f"""
+🔥 ULTRABEAST SIGNAL 🔥
+
+Symbol: {symbol}
+Timeframe: {tf}
+Direction: {signal}
+
+Liquidity قوة السيولة: {strength:.2f}%
+
+{repeated}
+Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+
+                    print(message)
+                    send_telegram(message)
+
             except Exception as e:
-                print("Error:", e)
-
-        print("⏳ Cycle completed. Waiting...")
-        time.sleep(CHECK_EVERY)
+                print(f"Error {symbol} {tf}:", e)
 
 # ==============================
-# START
+# LOOP
 # ==============================
 
-if __name__ == "__main__":
-    main()
+while True:
+    run_bot()
+    time.sleep(300)  # كل 5 دقائق
