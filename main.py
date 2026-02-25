@@ -1,7 +1,27 @@
 import requests
 import time
 from datetime import datetime
+import os
+# ========= TELEGRAM SETTINGS =========
 
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("Telegram variables missing")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    params = {
+        "chat_id": CHAT_ID,
+        "text": message
+    }
+
+    try:
+        requests.get(url, params=params, timeout=10)
+    except Exception as e:
+        print("Telegram error:", e)
 # ================= SETTINGS =================
 
 TIMEFRAMES = ["15m", "1h", "4h"]
