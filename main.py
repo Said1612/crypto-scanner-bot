@@ -55,11 +55,15 @@ def get_klines(symbol):
     try:
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
-        return data
-    except Exception as e:
-        print(f"❌ Error fetching klines for {symbol}:", e)
-        return None
 
+        # تأكد أن البيانات قائمة وليست رسالة خطأ
+        if not isinstance(data, list):
+            return None
+
+        return data
+
+    except:
+        return None
 # ==============================
 # SIMPLE SIGNAL CHECK
 # ==============================
