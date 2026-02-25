@@ -39,36 +39,27 @@ sent_signals = {}
 # ==========================================
 
 def get_symbols():
-    url = "https://api.binance.com/api/v3/exchangeInfo"
-    data = requests.get(url).json()
-    symbols = [
-        s["symbol"]
-        for s in data["symbols"]
-        if s["quoteAsset"] == "USDT"
-        and s["status"] == "TRADING"
-        and not s["symbol"].endswith("UPUSDT")
-        and not s["symbol"].endswith("DOWNUSDT")
-    ]
-    return symbols
-
-# =========================
-# GET KLINES (MEXC)
-# =========================
-def get_klines(symbol):
-    url = "https://api.mexc.com/api/v3/klines"
-
-    params = {
-        "symbol": symbol,
-        "interval": TIMEFRAME,
-        "limit": LIMIT
-    }
+    url = "https://api.mexc.com/api/v3/exchangeInfo"
 
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, timeout=10)
         data = response.json()
-        return data
+
+        if "symbols" not in data:
+            print("❌ MEXC API structure changed:", data)
+            return []
+
+        symbols = []
+
+        for s in data["symbols"]:
+            if s.get("quoteAsset") == "USDT" and s.get("status") == "1":
+                symbols.append(s.get("symbol"))
+
+        print(f"✅ Loaded {len(symbols)} USDT pairs from MEXC")
+        return symbols
+
     except Exception as e:
-        print(f"❌ Error fetching klines for {symbol}:", e)
+        print("❌ Error fetching MEXC symbols:", e)
         return []
 
 # ==========================================
