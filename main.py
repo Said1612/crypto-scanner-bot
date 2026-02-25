@@ -121,4 +121,3 @@ def main():
         time.sleep(CHECK_EVERY)
 
 if __name__ == "__main__":
-    main()
