@@ -8,8 +8,8 @@ from datetime import datetime
 # 🔐 TELEGRAM SETTINGS
 # ==========================================
 
-TELEGRAM_BOT_TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
-TELEGRAM_CHAT_ID = "1658477428"
+TELEGRAM_BOT_TOKEN = "your_token"
+TELEGRAM_CHAT_ID = "your_chat_id"
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
