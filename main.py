@@ -112,6 +112,8 @@ Time: {datetime.now()}
 def main():
     print("🚀 ULTRA BEAST MEXC MODE ACTIVE")
 
+    send_telegram("🚀 BOT RESTARTED SUCCESSFULLY")  # ← أضف هذا السطر فقط
+
     while True:
         symbols = get_top_symbols()
 
