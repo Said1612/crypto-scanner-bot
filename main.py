@@ -1,135 +1,131 @@
 import requests
-import pandas as pd
 import time
 from datetime import datetime
-from binance.client import Client
 
-# ==============================
-# API SETTINGS
-# ==============================
-
-API_KEY = "PUT_YOUR_API_KEY"
-API_SECRET = "PUT_YOUR_SECRET_KEY"
-
-TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_BOT_TOKEN"
-CHAT_ID = "PUT_YOUR_CHAT_ID"
-
-client = Client(API_KEY, API_SECRET)
+# ================= SETTINGS =================
 
 TIMEFRAMES = ["15m", "1h", "4h"]
-TOP_COINS_LIMIT = 20
-VOLUME_THRESHOLD = 150  # نسبة قوة السيولة
+TOP_COINS = 20
+CHECK_EVERY = 180
+VOLUME_THRESHOLD = 170  # قوة السيولة %
 
 last_signals = {}
 
-# ==============================
-# TELEGRAM FUNCTION
-# ==============================
+# ===========================================
 
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    params = {"chat_id": CHAT_ID, "text": message}
-    requests.get(url, params=params)
+def get_top_symbols():
+    url = "https://api.mexc.com/api/v3/ticker/24hr"
 
-# ==============================
-# GET TOP 20 COINS BY VOLUME
-# ==============================
+    try:
+        data = requests.get(url, timeout=10).json()
 
-def get_top_20_symbols():
-    tickers = client.futures_ticker()
-    usdt_pairs = [t for t in tickers if t['symbol'].endswith("USDT")]
+        usdt_pairs = [
+            s for s in data
+            if s["symbol"].endswith("USDT")
+        ]
 
-    sorted_pairs = sorted(
-        usdt_pairs,
-        key=lambda x: float(x['quoteVolume']),
-        reverse=True
-    )
+        sorted_pairs = sorted(
+            usdt_pairs,
+            key=lambda x: float(x["quoteVolume"]),
+            reverse=True
+        )
 
-    return [s['symbol'] for s in sorted_pairs[:TOP_COINS_LIMIT]]
+        top = [s["symbol"] for s in sorted_pairs[:TOP_COINS]]
 
-# ==============================
-# GET DATA
-# ==============================
+        print(f"🔥 Scanning Top {TOP_COINS} High Liquidity Coins")
+        return top
 
-def get_klines(symbol, interval):
-    klines = client.futures_klines(symbol=symbol, interval=interval, limit=100)
-    df = pd.DataFrame(klines, columns=[
-        "time","open","high","low","close","volume",
-        "c1","c2","c3","c4","c5","c6"
-    ])
+    except Exception as e:
+        print("Symbol load error:", e)
+        return []
 
-    df["close"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
-    return df
 
-# ==============================
-# CHECK LIQUIDITY BREAKOUT
-# ==============================
+def get_klines(symbol, timeframe):
+    url = "https://api.mexc.com/api/v3/klines"
+    params = {
+        "symbol": symbol,
+        "interval": timeframe,
+        "limit": 100
+    }
 
-def check_signal(df):
-    avg_volume = df["volume"].rolling(20).mean().iloc[-2]
-    last_volume = df["volume"].iloc[-1]
+    try:
+        data = requests.get(url, params=params, timeout=10).json()
 
-    volume_strength = (last_volume / avg_volume) * 100
+        if not isinstance(data, list):
+            return None
 
-    high_break = df["high"].iloc[-1] > df["high"].rolling(20).max().iloc[-2]
-    low_break = df["low"].iloc[-1] < df["low"].rolling(20).min().iloc[-2]
+        return data
 
-    if volume_strength > VOLUME_THRESHOLD:
-        if high_break:
-            return "LONG", volume_strength
-        elif low_break:
-            return "SHORT", volume_strength
+    except:
+        return None
 
-    return None, volume_strength
 
-# ==============================
-# MAIN BOT
-# ==============================
+def check_signal(symbol, timeframe):
 
-def run_bot():
-    print("Scanning market...")
-    symbols = get_top_20_symbols()
+    klines = get_klines(symbol, timeframe)
+    if not klines or len(klines) < 30:
+        return
 
-    for symbol in symbols:
-        for tf in TIMEFRAMES:
-            try:
-                df = get_klines(symbol, tf)
-                signal, strength = check_signal(df)
+    closes = [float(k[4]) for k in klines]
+    highs = [float(k[2]) for k in klines]
+    lows = [float(k[3]) for k in klines]
+    volumes = [float(k[5]) for k in klines]
 
-                if signal:
-                    key = f"{symbol}_{tf}"
+    last_close = closes[-1]
+    last_volume = volumes[-1]
 
-                    # إذا تكررت الإشارة = سيولة جديدة
-                    repeated = ""
-                    if key in last_signals:
-                        repeated = "🚨 NEW LIQUIDITY ADDED 🚨\n"
+    avg_volume = sum(volumes[-21:-1]) / 20
+    liquidity_strength = (last_volume / avg_volume) * 100
 
-                    last_signals[key] = datetime.now()
+    highest_20 = max(highs[-21:-1])
+    lowest_20 = min(lows[-21:-1])
 
-                    message = f"""
-🔥 ULTRABEAST SIGNAL 🔥
+    direction = None
 
+    if liquidity_strength > VOLUME_THRESHOLD:
+        if last_close > highest_20:
+            direction = "LONG"
+        elif last_close < lowest_20:
+            direction = "SHORT"
+
+    if direction:
+
+        key = f"{symbol}_{timeframe}"
+        repeated = ""
+
+        if key in last_signals:
+            repeated = "🚨 NEW LIQUIDITY ENTERED 🚨\n"
+
+        last_signals[key] = datetime.now()
+
+        print(f"""
+🔥 ULTRA BEAST SIGNAL 🔥
 Symbol: {symbol}
-Timeframe: {tf}
-Direction: {signal}
-
-Liquidity قوة السيولة: {strength:.2f}%
-
+Timeframe: {timeframe}
+Direction: {direction}
+Liquidity Strength: {liquidity_strength:.1f}%
 {repeated}
-Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
+Time: {datetime.now()}
+""")
 
-                    print(message)
-                    send_telegram(message)
 
-            except Exception as e:
-                print(f"Error {symbol} {tf}:", e)
+def main():
+    print("🚀 ULTRA BEAST MEXC MODE ACTIVE")
 
-# ==============================
-# LOOP
-# ==============================
+    while True:
+        symbols = get_top_symbols()
 
-while True:
-    run_bot()
-    time.sleep(300)  # كل 5 دقائق
+        for symbol in symbols:
+            for tf in TIMEFRAMES:
+                try:
+                    check_signal(symbol, tf)
+                    time.sleep(0.15)
+                except Exception as e:
+                    print("Error:", e)
+
+        print("⏳ Waiting next cycle...\n")
+        time.sleep(CHECK_EVERY)
+
+
+if __name__ == "__main__":
+    main()
