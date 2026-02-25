@@ -94,8 +94,10 @@ def check_signal(symbol, timeframe):
     last_close = closes[-1]
     last_volume = volumes[-1]
 
-    avg_volume = sum(volumes[-21:-1]) / 20
-    liquidity_strength = (last_volume / avg_volume) * 100
+    avg_volume = sum(volumes[-20:-1]) / 19
+              current_volume = volumes[-1]
+
+liquidity_percent = (current_volume / avg_volume) * 100
 
     highest_20 = max(highs[-21:-1])
     lowest_20 = min(lows[-21:-1])
@@ -120,13 +122,12 @@ def check_signal(symbol, timeframe):
 
         print(f"""
 🔥 ULTRA BEAST SIGNAL 🔥
+
 Symbol: {symbol}
-Timeframe: {timeframe}
-Direction: {direction}
-Liquidity Strength: {liquidity_strength:.1f}%
-{repeated}
-Time: {datetime.now()}
-""")
+Timeframe: {tf}
+Liquidity: {liquidity_percent:.1f}%
+Breakout + Volume Spike
+"""
 
 
 def main():
