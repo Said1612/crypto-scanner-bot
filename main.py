@@ -1,42 +1,20 @@
 import requests
-import pandas as pd
 import time
-import ta
-from datetime import datetime
 
-# ==========================================
-# 🔐 TELEGRAM SETTINGS
-# ==========================================
+# ==============================
+# SETTINGS
+# ==============================
 
-TELEGRAM_BOT_TOKEN = "7696119722:AAFL7MP3c_3tJ8MkXufEHSQTCd1gNiIdtgQ"
-TELEGRAM_CHAT_ID = "1658477428"
-
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text
-    }
-    try:
-        requests.post(url, data=payload, timeout=10)
-    except Exception as e:
-        print("Telegram Error:", e)
-
-# ==========================================
-# ⚙️ CONFIG
-# ==========================================
-
-INTERVAL = "15m"
-LIMIT = 50
-CHECK_EVERY = 60  # 60 للاختبار - غيّرها إلى 900 لاحقاً
-MIN_VOLUME_MULTIPLIER = 1.5
-REQUEST_DELAY = 0.2
+TIMEFRAME = "1h"
+LIMIT = 100
+CHECK_EVERY = 300        # seconds
+REQUEST_DELAY = 0.2      # seconds between requests
 
 sent_signals = {}
 
-# ==========================================
-# 🟢 GET BINANCE SYMBOLS
-# ==========================================
+# ==============================
+# GET MEXC SYMBOLS
+# ==============================
 
 def get_symbols():
     url = "https://api.mexc.com/api/v3/exchangeInfo"
@@ -46,7 +24,7 @@ def get_symbols():
         data = response.json()
 
         if "symbols" not in data:
-            print("❌ MEXC API structure changed:", data)
+            print("❌ Unexpected API response:", data)
             return []
 
         symbols = []
@@ -59,56 +37,69 @@ def get_symbols():
         return symbols
 
     except Exception as e:
-        print("❌ Error fetching MEXC symbols:", e)
+        print("❌ Error fetching symbols:", e)
         return []
 
-# ==========================================
-# 🚀 CHECK SIGNAL
-# ==========================================
+# ==============================
+# GET KLINES
+# ==============================
+
+def get_klines(symbol):
+    url = "https://api.mexc.com/api/v3/klines"
+    params = {
+        "symbol": symbol,
+        "interval": TIMEFRAME,
+        "limit": LIMIT
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        return data
+    except Exception as e:
+        print(f"❌ Error fetching klines for {symbol}:", e)
+        return None
+
+# ==============================
+# SIMPLE SIGNAL CHECK
+# ==============================
 
 def check_signal(symbol):
-    df = get_klines(symbol)
+    klines = get_klines(symbol)
 
-    if len(df) < 30:
+    if not klines or len(klines) < 2:
         return
 
-    df["ema"] = ta.trend.ema_indicator(df["close"], window=20)
+    try:
+        last_close = float(klines[-1][4])
+        prev_close = float(klines[-2][4])
 
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
+        if last_close > prev_close:
+            if symbol not in sent_signals:
+                print(f"📈 BUY Signal: {symbol}")
+                sent_signals[symbol] = "BUY"
 
-    avg_volume = df["volume"].rolling(20).mean().iloc[-1]
+        elif last_close < prev_close:
+            if symbol not in sent_signals:
+                print(f"📉 SELL Signal: {symbol}")
+                sent_signals[symbol] = "SELL"
 
-    breakout = last["close"] > df["high"].rolling(15).max().iloc[-2]
-    volume_spike = last["volume"] > avg_volume * MIN_VOLUME_MULTIPLIER
-    above_ema = last["close"] > last["ema"]
-    green_candle = last["close"] > prev["close"]
+    except Exception as e:
+        print(f"Signal error {symbol}:", e)
 
-    if breakout and volume_spike and above_ema and green_candle:
-
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        if symbol not in sent_signals:
-            message = f"""🔥 ULTRA BEAST SIGNAL 🔥
-
-Symbol: {symbol}
-Timeframe: {INTERVAL}
-Time: {now}
-
-Breakout + Volume Spike
-"""
-
-            send_telegram_message(message)
-            sent_signals[symbol] = now
-            print(f"Signal sent: {symbol}")
-
-# ==========================================
-# 🔁 MAIN LOOP
-# ==========================================
+# ==============================
+# MAIN LOOP
+# ==============================
 
 def main():
     print("🔥 Ultra Beast Running...")
+
     symbols = get_symbols()
+
+    if not symbols:
+        print("No symbols loaded. Retrying in 60s...")
+        time.sleep(60)
+        return
 
     while True:
         for symbol in symbols:
@@ -118,6 +109,12 @@ def main():
             except Exception as e:
                 print("Error:", e)
 
+        print("⏳ Cycle completed. Waiting...")
         time.sleep(CHECK_EVERY)
 
+# ==============================
+# START
+# ==============================
+
 if __name__ == "__main__":
+    main()
