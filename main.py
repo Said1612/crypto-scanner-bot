@@ -38,39 +38,31 @@ sent_signals = {}
 # 🟢 GET BINANCE SYMBOLS
 # ==========================================
 
+import requests
+
 def get_symbols():
-    url = "https://api.binance.com/api/v3/exchangeInfo"
-    data = requests.get(url).json()
-    symbols = [
-        s["symbol"]
-        for s in data["symbols"]
-        if s["quoteAsset"] == "USDT"
-        and s["status"] == "TRADING"
-        and not s["symbol"].endswith("UPUSDT")
-        and not s["symbol"].endswith("DOWNUSDT")
-    ]
-    return symbols
+    url = "https://api.mexc.com/api/v3/exchangeInfo"
 
-# ==========================================
-# 📊 GET KLINES
-# ==========================================
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
 
-def get_klines(symbol):
-    url = "https://api.binance.com/api/v3/klines"
-    params = {
-        "symbol": symbol,
-        "interval": INTERVAL,
-        "limit": LIMIT
-    }
-    data = requests.get(url, params=params).json()
-    df = pd.DataFrame(data)
-    df = df.iloc[:, :6]
-    df.columns = ["time", "open", "high", "low", "close", "volume"]
-    df["close"] = df["close"].astype(float)
-    df["high"] = df["high"].astype(float)
-    df["low"] = df["low"].astype(float)
-    df["volume"] = df["volume"].astype(float)
-    return df
+        if "symbols" not in data:
+            print("❌ MEXC API Error:", data)
+            return []
+
+        symbols = [
+            s["symbol"]
+            for s in data["symbols"]
+            if s["quoteAsset"] == "USDT" and s["status"] == "1"
+        ]
+
+        print(f"✅ Loaded {len(symbols)} USDT pairs from MEXC")
+        return symbols
+
+    except Exception as e:
+        print("❌ Error fetching MEXC symbols:", e)
+        return []
 
 # ==========================================
 # 🚀 CHECK SIGNAL
