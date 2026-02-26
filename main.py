@@ -33,33 +33,42 @@ def send_telegram(message):
 # ================= DATA FETCH =================
 
 def get_klines(symbol, interval="15m", limit=50):
-    url = f"https://api.binance.com/api/v3/klines"
+    url = "https://api.mexc.com/api/v3/klines"
     params = {
         "symbol": symbol,
         "interval": interval,
         "limit": limit
     }
+
     try:
         response = requests.get(url, params=params, timeout=10)
         return response.json()
-    except:
+    except Exception as e:
+        print("Klines error:", e)
         return None
 
 
 def get_symbols():
-    url = "https://api.binance.com/api/v3/exchangeInfo"
+    url = "https://api.mexc.com/api/v3/exchangeInfo"
     try:
-        data = requests.get(url, timeout=10).json()
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        if "symbols" not in data:
+            print("MEXC Error:", data)
+            return []
+
         symbols = [
             s["symbol"] for s in data["symbols"]
             if s["quoteAsset"] == "USDT"
-            and s["status"] == "TRADING"
-            and not s["symbol"].startswith(("USDC","FDUSD","TUSD","USDP"))
+            and s["status"] == "1"   # 1 = trading on MEXC
         ]
-        return symbols
-    except:
-        return []
 
+        return symbols
+
+    except Exception as e:
+        print("Error fetching symbols:", e)
+        return []
 
 # ================= CORE LOGIC =================
 
