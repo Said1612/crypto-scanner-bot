@@ -2,6 +2,7 @@ import requests
 import os
 import time
 from datetime import datetime, timedelta
+import statistics
 
 # ================= CONFIG =================
 
@@ -11,9 +12,11 @@ CHAT_ID = os.getenv("CHAT_ID")
 TIMEFRAME = "15m"
 COOLDOWN_MINUTES = 60
 SLEEP_BETWEEN_SYMBOLS = 0.05
-CYCLE_SLEEP = 180  # 3 minutes
+CYCLE_SLEEP = 180
 
 last_alert_time = {}
+
+EXCLUDED = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
 
 # ================= TELEGRAM =================
 
@@ -34,57 +37,64 @@ def send_telegram(message):
     except Exception as e:
         print("Telegram error:", e)
 
-
-# ================= MEXC DATA =================
+# ================= MEXC SYMBOLS =================
 
 def get_symbols():
     """
-    Get Top 20 USDT pairs by 24h quote volume
+    Get ALL USDT pairs (not top volume)
     """
     url = "https://api.mexc.com/api/v3/ticker/24hr"
     try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
+        data = requests.get(url, timeout=10).json()
 
-        usdt_pairs = [
-            s for s in data
+        symbols = [
+            s["symbol"]
+            for s in data
             if s["symbol"].endswith("USDT")
             and not any(x in s["symbol"] for x in ["3L", "3S", "BULL", "BEAR"])
+            and s["symbol"] not in EXCLUDED
+            and float(s["quoteVolume"]) > 300000   # سيولة مقبولة
+            and float(s["quoteVolume"]) < 20000000 # ليست عملات ضخمة
         ]
 
-        sorted_pairs = sorted(
-            usdt_pairs,
-            key=lambda x: float(x["quoteVolume"]),
-            reverse=True
-        )
-
-        top_20 = [s["symbol"] for s in sorted_pairs[:20]]
-
-        print(f"Scanning {len(top_20)} symbols...")
-        print("Top 20:", top_20)
-
-        return top_20
+        print(f"Scanning {len(symbols)} symbols...")
+        return symbols
 
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
 
+# ================= INDICATORS =================
 
-def get_klines(symbol, interval="15m", limit=50):
-    url = "https://api.mexc.com/api/v3/klines"
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "limit": limit
-    }
+def calculate_rsi(closes, period=14):
+    gains = []
+    losses = []
 
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        return response.json()
-    except Exception as e:
-        print(f"Klines error for {symbol}:", e)
-        return None
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i-1]
+        if diff > 0:
+            gains.append(diff)
+            losses.append(0)
+        else:
+            gains.append(0)
+            losses.append(abs(diff))
 
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+
+    if avg_loss == 0:
+        return 100
+
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def bollinger_width(closes, period=20):
+    sma = sum(closes[-period:]) / period
+    std = statistics.stdev(closes[-period:])
+    upper = sma + (2 * std)
+    lower = sma - (2 * std)
+    width = ((upper - lower) / sma) * 100
+    return width
 
 # ================= CORE LOGIC =================
 
@@ -104,20 +114,17 @@ def check_symbol(symbol):
     recent_low = min(lows[-10:])
     range_percent = ((recent_high - recent_low) / recent_low) * 100
 
-    # Price Change
-    price_change = abs((closes[-1] - closes[-2]) / closes[-2]) * 100
-    if price_change == 0:
-        return
+    # RSI
+    rsi = calculate_rsi(closes)
 
-    # Volume Strength
+    # Bollinger
+    bb_width = bollinger_width(closes)
+
+    # Volume build
+    gradual = volumes[-3] < volumes[-2] < volumes[-1]
+
     avg_volume = sum(volumes[-20:-1]) / 19
     volume_percent = (volumes[-1] / avg_volume) * 100
-
-    # Liquidity Efficiency
-    efficiency = volume_percent / price_change
-
-    # Gradual Volume Build
-    gradual = volumes[-3] < volumes[-2] < volumes[-1]
 
     # Cooldown
     now = datetime.utcnow()
@@ -125,40 +132,47 @@ def check_symbol(symbol):
         if now - last_alert_time[symbol] < timedelta(minutes=COOLDOWN_MINUTES):
             return
 
-    # Final Conditions
+    # ================= CONDITIONS =================
+
     if (
-        range_percent < 6
-        and price_change < 5
-        and volume_percent > 180
-        and efficiency > 60
+        range_percent < 5
+        and 40 < rsi < 60
+        and bb_width < 6
         and gradual
+        and volume_percent > 150
     ):
 
-        strength = "Normal"
-        if efficiency > 100:
-            strength = "Strong"
-        if efficiency > 180:
-            strength = "Whale Accumulation"
-
         message = f"""
-🧠 SMART LIQUIDITY ACCUMULATION
+🚀 ACCUMULATION ZONE DETECTED
 
 Symbol: {symbol}
 TF: {TIMEFRAME}
 
 Range: {range_percent:.2f}%
-Price Move: {price_change:.2f}%
-Liquidity: {volume_percent:.1f}%
-Efficiency: {efficiency:.1f}
+RSI: {rsi:.1f}
+BB Width: {bb_width:.2f}
+Volume: {volume_percent:.1f}%
 
-Strength: {strength}
-
-⚠ Pre-Breakout Build Detected
+🔥 Potential Pre-Breakout Structure
 """
 
         send_telegram(message)
         last_alert_time[symbol] = now
 
+# ================= MEXC KLINES =================
+
+def get_klines(symbol, interval="15m", limit=50):
+    url = "https://api.mexc.com/api/v3/klines"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
+
+    try:
+        return requests.get(url, params=params, timeout=10).json()
+    except:
+        return None
 
 # ================= MAIN LOOP =================
 
@@ -167,7 +181,6 @@ def main():
     for symbol in symbols:
         check_symbol(symbol)
         time.sleep(SLEEP_BETWEEN_SYMBOLS)
-
 
 if __name__ == "__main__":
     while True:
