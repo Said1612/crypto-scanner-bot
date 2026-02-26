@@ -93,12 +93,9 @@ def calculate_score(symbol):
         return 0
 
 def score_label(score):
+    # VIP GOLD Only → ترسل فقط إذا GOLD
     if score >= 90:
         return "🟢 *GOLD SIGNAL*"
-    elif score >= 80:
-        return "🟡 *SILVER SIGNAL*"
-    elif score >= 70:
-        return "🔵 *BASIC SIGNAL*"
     else:
         return None
 
@@ -127,14 +124,15 @@ def discover_symbols():
 def handle_signal(symbol, price):
     now = time.time()
     
+    score = calculate_score(symbol)
+    label = score_label(score)
+
+    # VIP GOLD Only → تجاهل أي عملة Score < 90
+    if not label:
+        return
+
     # SIGNAL #1 → أول اكتشاف
     if symbol not in tracked:
-        if not valid_setup(symbol):
-            return
-        score = calculate_score(symbol)
-        label = score_label(score)
-        if not label:
-            return
         tracked[symbol] = {"entry": price, "level": 1, "score": score}
         discovered[symbol] = {"price": price, "time": now, "score": score}
         send_telegram(
@@ -148,12 +146,10 @@ def handle_signal(symbol, price):
 
     entry = tracked[symbol]["entry"]
     level = tracked[symbol]["level"]
-    score = tracked[symbol]["score"]
     change = (price - entry) / entry * 100
 
     # SIGNAL 2
-    if level == 1 and change >= 2 and score >= 75:
-        label = score_label(score)
+    if level == 1 and change >= 2 and score >= 90:
         send_telegram(
             f"🚀 {label} | SIGNAL #2\n"
             f"💰 {symbol}\n"
@@ -164,8 +160,7 @@ def handle_signal(symbol, price):
         tracked[symbol]["level"] = 2
 
     # SIGNAL 3
-    elif level == 2 and change >= 4 and score >= 80:
-        label = score_label(score)
+    elif level == 2 and change >= 4 and score >= 90:
         send_telegram(
             f"🔥 {label} | SIGNAL #3\n"
             f"💰 {symbol}\n"
@@ -212,7 +207,7 @@ def send_report():
 
 # ================= MAIN LOOP =================
 def run():
-    send_telegram("🤖 SOURCE BOT STARTED")
+    send_telegram("🤖 SOURCE BOT VIP GOLD ONLY STARTED")
     symbols = discover_symbols()
     while True:
         try:
