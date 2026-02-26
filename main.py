@@ -1,127 +1,172 @@
 import os
-import json
 import time
 import requests
-from datetime import datetime
 
 # ================= CONFIG =================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-EXCLUDED = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
+EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
 
+DISCOVERY_MIN_VOL = 800_000
+DISCOVERY_MAX_VOL = 20_000_000
+DISCOVERY_MAX_CHANGE = 8
+
+CHECK_INTERVAL = 10          # seconds
+REPORT_INTERVAL = 6 * 3600   # 6 hours
+
+# ================= GLOBAL =================
 tracked = {}
-top_20_symbols = {}
+discovered = {}
+last_report = 0
 
-MEXC_TICKER = "https://api.mexc.com/api/v3/ticker/price"
 MEXC_24H = "https://api.mexc.com/api/v3/ticker/24hr"
+MEXC_PRICE = "https://api.mexc.com/api/v3/ticker/price"
+MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
 
 # ================= TELEGRAM =================
 def send_telegram(msg):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("Missing Telegram credentials")
         return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "parse_mode": "Markdown"
-    }
-
     try:
-        requests.post(url, data=payload, timeout=10)
-    except Exception as e:
-        print("Telegram Error:", e)
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"},
+            timeout=10
+        )
+    except:
+        pass
 
-# ================= TOP 20 SYMBOLS =================
-def get_top_symbols():
-    global top_20_symbols
-    print("Fetching Top 20 symbols...")
+# ================= FAKE PUMP FILTER =================
+def valid_setup(symbol):
+    k = requests.get(
+        MEXC_KLINES,
+        params={"symbol": symbol, "interval": "5m", "limit": 12},
+        timeout=10
+    ).json()
 
+    vols = [float(c[5]) for c in k]
+    closes = [float(c[4]) for c in k]
+
+    avg_vol = sum(vols[:-1]) / len(vols[:-1])
+    last_vol = vols[-1]
+
+    price_change = (closes[-1] - closes[0]) / closes[0] * 100
+
+    if price_change > 6 and last_vol < avg_vol * 1.5:
+        return False
+
+    if closes[-1] < closes[-2] * 0.97:
+        return False
+
+    return True
+
+# ================= DISCOVERY =================
+def discover_symbols():
     data = requests.get(MEXC_24H, timeout=10).json()
-    candidates = []
+    result = []
 
     for s in data:
-        symbol = s["symbol"]
+        sym = s["symbol"]
+        if not sym.endswith("USDT"):
+            continue
+        if sym in EXCLUDED:
+            continue
+        if any(x in sym for x in ["3L","3S","BULL","BEAR"]):
+            continue
 
-        if (
-            symbol.endswith("USDT")
-            and symbol not in EXCLUDED
-            and not any(x in symbol for x in ["3L", "3S", "BULL", "BEAR"])
-        ):
-            vol = float(s["quoteVolume"])
-            change = abs(float(s["priceChangePercent"]))
+        vol = float(s["quoteVolume"])
+        change = abs(float(s["priceChangePercent"]))
 
-            if 800_000 < vol < 20_000_000 and change < 8:
-                candidates.append((symbol, vol))
+        if DISCOVERY_MIN_VOL < vol < DISCOVERY_MAX_VOL and change < DISCOVERY_MAX_CHANGE:
+            result.append(sym)
 
-    candidates.sort(key=lambda x: -x[1])
-    top_20_symbols = {s[0]: None for s in candidates[:20]}
+    return result[:20]
 
-    print("Tracking:", list(top_20_symbols.keys()))
-
-# ================= SIGNAL HANDLER =================
+# ================= SIGNAL =================
 def handle_signal(symbol, price):
-    score = 80
-
     if symbol in tracked:
-        entry = tracked[symbol]["entry"]
-        level = tracked[symbol]["level"]
-
-        change = (price - entry) / entry * 100
-
-        if level == 1 and change >= 2:
-            send_telegram(
-                f"🚀 SIGNAL #2\n💰 {symbol}\n📈 +{change:.2f}%\n💵 {price}"
-            )
-            tracked[symbol]["level"] = 2
-
-        elif level == 2 and change >= 4:
-            send_telegram(
-                f"🔥 SIGNAL #3\n💰 {symbol}\n📈 +{change:.2f}%\n💵 {price}"
-            )
-            tracked[symbol]["level"] = 3
-
         return
 
-    if score < 70:
+    if not valid_setup(symbol):
         return
 
-    send_telegram(
-        f"👑 SOURCE BOT\n💰 {symbol}\n🔔 SIGNAL #1\n💵 {price}\n📊 Score: {score}"
-    )
-
-    tracked[symbol] = {
-        "entry": price,
-        "level": 1
+    tracked[symbol] = price
+    discovered[symbol] = {
+        "price": price,
+        "time": time.time()
     }
 
-# ================= MAIN LOOP =================
-def run_bot():
-    get_top_symbols()
+    send_telegram(
+        f"👑 *SOURCE BOT*\n"
+        f"💰 *{symbol}*\n"
+        f"🔔 *SIGNAL #1*\n"
+        f"💵 Price: `{price}`\n"
+        f"📊 Score: *80*"
+    )
+
+# ================= REPORT =================
+def send_report():
+    global last_report
+    now = time.time()
+
+    if now - last_report < REPORT_INTERVAL:
+        return
+
+    last_report = now
+    rows = []
+
+    for sym, d in list(discovered.items()):
+        r = requests.get(
+            MEXC_PRICE,
+            params={"symbol": sym},
+            timeout=10
+        ).json()
+
+        cur = float(r["price"])
+        growth = (cur - d["price"]) / d["price"] * 100
+
+        if growth > 5:
+            rows.append((sym, d["price"], cur, growth))
+
+    if not rows:
+        return
+
+    rows.sort(key=lambda x: -x[3])
+    rows = rows[:5]
+
+    msg = "⚡ *SOURCE BOT PERFORMANCE REPORT*\n\n"
+    for s, d, c, g in rows:
+        msg += (
+            f"🔥 *{s}*\n"
+            f"Discovery: `{d}`\n"
+            f"Now: `{c}`\n"
+            f"Growth: *+{g:.2f}%*\n\n"
+        )
+
+    send_telegram(msg)
+
+# ================= MAIN =================
+def run():
+    send_telegram("🤖 SOURCE BOT STARTED")
+
+    symbols = discover_symbols()
 
     while True:
         try:
-            prices = requests.get(MEXC_TICKER, timeout=10).json()
+            prices = requests.get(MEXC_PRICE, timeout=10).json()
 
-            for item in prices:
-                symbol = item["symbol"]
-                if symbol in top_20_symbols:
-                    price = float(item["price"])
-                    handle_signal(symbol, price)
+            for p in prices:
+                sym = p["symbol"]
+                if sym in symbols:
+                    handle_signal(sym, float(p["price"]))
 
-            time.sleep(10)
+            send_report()
+            time.sleep(CHECK_INTERVAL)
 
-        except Exception as e:
-            print("Loop Error:", e)
+        except Exception:
             time.sleep(5)
 
 # ================= ENTRY =================
 if __name__ == "__main__":
-    while True:
-        try:
-            run_bot()
-        except Exception as e:
-            print("Bot crashed:", e)
-            time.sleep(30)
+    run()
