@@ -1,230 +1,164 @@
-import requests
 import os
+import json
 import time
+import requests
 from datetime import datetime, timedelta
-import statistics
+from websocket import create_connection
 
 # ================= CONFIG =================
-
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-TIMEFRAME = "15m"
-COOLDOWN_MINUTES = 60
-SLEEP_BETWEEN_SYMBOLS = 0.05
-CYCLE_SLEEP = 120
-
-EXCLUDED = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
+EXCLUDED = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 
 last_alert_time = {}
 tracked = {}
+top_20_symbols = []
 
 # ================= TELEGRAM =================
-
 def send_telegram(msg):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         print("Missing Telegram credentials")
         return
-
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "parse_mode": "Markdown"
-    }
-
+    payload = {"chat_id": CHAT_ID,"text": msg,"parse_mode":"Markdown"}
     try:
-        requests.post(url, data=payload, timeout=10)
+        r = requests.post(url,data=payload,timeout=10)
+        print("Telegram response:", r.text)
     except Exception as e:
         print("Telegram Error:", e)
 
-# ================= API =================
-
-def get_symbols():
+# ================= TOP 20 SYMBOLS =================
+def get_top_symbols():
+    global top_20_symbols
     try:
         data = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10).json()
-
         candidates = []
-
         for s in data:
             symbol = s["symbol"]
-
             if (
-                symbol.endswith("USDT")
-                and not any(x in symbol for x in ["3L", "3S", "BULL", "BEAR"])
+                symbol.endswith("USDT") 
+                and not any(x in symbol for x in ["3L","3S","BULL","BEAR"])
                 and symbol not in EXCLUDED
             ):
-
                 quote_vol = float(s["quoteVolume"])
                 price_change = abs(float(s["priceChangePercent"]))
-
-                # سيولة قوية ولكن ليست ضخمة جداً
-                if 800000 < quote_vol < 20000000:
-                    
-                    # لم تنفجر اليوم
-                    if price_change < 8:
-                        candidates.append({
-                            "symbol": symbol,
-                            "volume": quote_vol,
-                            "change": price_change
-                        })
-
-        # ترتيب حسب أعلى سيولة وأقل تغير
-        sorted_candidates = sorted(
-            candidates,
-            key=lambda x: (x["change"], -x["volume"])
-        )
-
-        top_20 = [x["symbol"] for x in sorted_candidates[:20]]
-
-        print(f"Scanning {len(top_20)} explosion-ready symbols...")
-        return top_20
-
+                if 800000 < quote_vol < 20000000 and price_change < 8:
+                    candidates.append({"symbol": symbol,"volume": quote_vol,"change": price_change})
+        sorted_candidates = sorted(candidates, key=lambda x: (x["change"],-x["volume"]))
+        top_20_symbols = [x["symbol"] for x in sorted_candidates[:20]]
+        print(f"Top 20 explosion-ready symbols: {top_20_symbols}")
     except Exception as e:
-        print("Error fetching symbols:", e)
-        return []
+        print("Error fetching top symbols:", e)
 
-def get_klines(symbol, limit=50):
-    try:
-        r = requests.get(
-            "https://api.mexc.com/api/v3/klines",
-            params={"symbol": symbol, "interval": TIMEFRAME, "limit": limit},
-            timeout=10
-        ).json()
-        return r if isinstance(r, list) else None
-    except:
-        return None
+# ================= SCORE SYSTEM =================
+def calculate_score(price_history):
+    score = 0
+    closes = [float(k['close']) for k in price_history]
+    volumes = [float(k['volume']) for k in price_history]
 
-# ================= INDICATORS =================
+    # Volume Score
+    avg_vol = sum(volumes[-20:-1])/19 if len(volumes)>20 else sum(volumes)/len(volumes)
+    vol_pct = (volumes[-1]/avg_vol)*100 if avg_vol>0 else 0
+    if vol_pct>150: score+=40
+    elif vol_pct>130: score+=30
+    elif vol_pct>110: score+=20
+    else: score+=10
 
-def rsi(closes, period=14):
+    # Momentum Score
+    if len(closes)>=5:
+        change_pct = ((closes[-1]-closes[-5])/closes[-5])*100
+    else: change_pct = 0
+    if 0<change_pct<=2: score+=30
+    elif change_pct<=4: score+=20
+    else: score+=10
+
+    # Range/BB Score
+    if len(closes)>=20:
+        sma = sum(closes[-20:])/20
+        std = (sum([(c-sma)**2 for c in closes[-20:]])/20)**0.5
+        upper = sma + 2*std
+        lower = sma - 2*std
+        bb_width = ((upper-lower)/sma)*100
+        recent_range = (max(closes[-10:])-min(closes[-10:]))/min(closes[-10:])*100
+        if recent_range<4 and bb_width<5: score+=20
+        elif recent_range<5: score+=15
+        else: score+=10
+    else:
+        score+=10
+
+    # RSI Neutrality
     gains, losses = [], []
-    for i in range(1, len(closes)):
-        diff = closes[i] - closes[i-1]
-        gains.append(max(diff, 0))
-        losses.append(abs(min(diff, 0)))
-    avg_gain = sum(gains[-period:]) / period
-    avg_loss = sum(losses[-period:]) / period
-    if avg_loss == 0:
-        return 100
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    for i in range(1,len(closes)):
+        diff = closes[i]-closes[i-1]
+        gains.append(max(diff,0))
+        losses.append(abs(min(diff,0)))
+    avg_gain = sum(gains[-14:])/14 if len(gains)>=14 else sum(gains)/len(gains)
+    avg_loss = sum(losses[-14:])/14 if len(losses)>=14 else sum(losses)/len(losses)
+    rsi = 100 if avg_loss==0 else 100-(100/(1+(avg_gain/avg_loss)))
+    if 45<=rsi<=55: score+=10
+    elif 40<=rsi<=60: score+=5
 
-def bb_width(closes, period=20):
-    sma = sum(closes[-period:]) / period
-    std = statistics.stdev(closes[-period:])
-    upper = sma + (2 * std)
-    lower = sma - (2 * std)
-    return ((upper - lower) / sma) * 100
+    return score
 
-# ================= SIGNAL SYSTEM =================
-
-def check_followup(symbol, price):
-    entry = tracked[symbol]["entry"]
-    level = tracked[symbol]["level"]
-    change = ((price - entry) / entry) * 100
-
-    if level == 1 and change >= 2:
-        msg = f"""
-🚀 SIGNAL #2
-
-💰 {symbol}
-📈 Gain: +{change:.2f}%
-💵 Price: {price}
-
-🔥 Momentum Building
-"""
-        send_telegram(msg)
-        tracked[symbol]["level"] = 2
-
-    elif level == 2 and change >= 4:
-        msg = f"""
-🔥 SIGNAL #3
-
-💰 {symbol}
-📈 Gain: +{change:.2f}%
-💵 Price: {price}
-
-🚀 Breakout Confirmed
-"""
-        send_telegram(msg)
-        tracked[symbol]["level"] = 3
-
-def check_symbol(symbol):
-
-    kl = get_klines(symbol)
-    if not kl or len(kl) < 30:
-        return
-
-    closes = [float(k[4]) for k in kl]
-    volumes = [float(k[5]) for k in kl]
-    highs = [float(k[2]) for k in kl]
-    lows = [float(k[3]) for k in kl]
-
-    price = closes[-1]
-
-    if symbol in tracked:
-        check_followup(symbol, price)
-        return
-
-    recent_high = max(highs[-10:])
-    recent_low = min(lows[-10:])
-    range_pct = ((recent_high - recent_low) / recent_low) * 100
-
-    r = rsi(closes)
-    bb = bb_width(closes)
-
-    gradual = volumes[-3] < volumes[-2] < volumes[-1]
-    avg_vol = sum(volumes[-20:-1]) / 19
-    vol_pct = (volumes[-1] / avg_vol) * 100
-
+# ================= SIGNAL LOGIC =================
+def handle_signal(symbol, price_history):
+    price = float(price_history[-1]['close'])
     now = datetime.utcnow()
 
-    if symbol in last_alert_time:
-        if now - last_alert_time[symbol] < timedelta(minutes=COOLDOWN_MINUTES):
-            return
+    if symbol in tracked:
+        entry = tracked[symbol]['entry']
+        level = tracked[symbol]['level']
+        score = tracked[symbol]['score']
+        change = ((price-entry)/entry)*100
 
-    if (
-        range_pct < 4
-        and 45 < r < 60
-        and bb < 5
-        and gradual
-        and vol_pct > 180
-    ):
+        # SIGNAL2
+        if level==1 and change>=2 and score>=75:
+            msg = f"🚀 SIGNAL #2\n💰 {symbol}\n📈 Gain: +{change:.2f}%\n💵 Price: {price}\n🔥 Momentum Building"
+            send_telegram(msg)
+            tracked[symbol]['level']=2
 
-        msg = f"""
-👑 SOURCE BOT
+        # SIGNAL3
+        elif level==2 and change>=4 and score>=80:
+            msg = f"🔥 SIGNAL #3\n💰 {symbol}\n📈 Gain: +{change:.2f}%\n💵 Price: {price}\n🚀 Breakout Confirmed"
+            send_telegram(msg)
+            tracked[symbol]['level']=3
+        return
 
-💰 {symbol}
-🔔 SIGNAL #1
+    # SIGNAL1
+    score = calculate_score(price_history)
+    if score<70: return
+    msg = f"👑 SOURCE BOT\n💰 {symbol}\n🔔 SIGNAL #1\n💵 Price: {price}\n📊 Score: {score}\n⚡ Early Liquidity Detected"
+    send_telegram(msg)
+    tracked[symbol]={'entry':price,'level':1,'score':score}
+    last_alert_time[symbol]=now
 
-💵 Price: {price}
-📊 Volume Spike: {vol_pct:.1f}%
-📉 Range: {range_pct:.2f}%
-📈 RSI: {r:.1f}
-
-⚡ Early Liquidity Detected
-"""
-
-        send_telegram(msg)
-
-        tracked[symbol] = {
-            "entry": price,
-            "level": 1
-        }
-
-        last_alert_time[symbol] = now
-
-# ================= LOOP =================
-
+# ================= MAIN LOOP =================
 def main():
-    symbols = get_symbols()
-    for s in symbols:
-        check_symbol(s)
-        time.sleep(SLEEP_BETWEEN_SYMBOLS)
+    get_top_symbols()
+    ws_list = []
+    for symbol in top_20_symbols:
+        try:
+            ws = create_connection(f"wss://www.mexc.com/ws?symbol={symbol.lower()}_usdt&channel=kline_{symbol.lower()}_15m")
+            ws_list.append((symbol, ws))
+        except Exception as e:
+            print(f"WebSocket connection failed for {symbol}: {e}")
 
-if __name__ == "__main__":
+    print("Listening WebSocket for top 20 symbols...")
+
     while True:
-        main()
-        print("Cycle finished. Sleeping...")
-        time.sleep(CYCLE_SLEEP)
+        for symbol, ws in ws_list:
+            try:
+                data = ws.recv()
+                msg = json.loads(data)
+                # تحقق من Kline
+                if 'k' in msg:
+                    kline = msg['k']
+                    price_history = [{'close': kline['c'], 'volume': kline['v']}]
+                    handle_signal(symbol, price_history)
+            except Exception as e:
+                print(f"Error receiving data for {symbol}: {e}")
+                continue
+
+if __name__=="__main__":
+    main()
