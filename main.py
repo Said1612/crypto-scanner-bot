@@ -152,7 +152,7 @@ Range: {range_percent:.2f}%
 RSI: {rsi:.1f}
 BB Width: {bb_width:.2f}
 Volume: {volume_percent:.1f}%
-
+print(f"{symbol} | Range:{range_percent:.2f} RSI:{rsi:.1f} BB:{bb_width:.2f} Vol:{volume_percent:.0f}%")
 🔥 Potential Pre-Breakout Structure
 """
 
