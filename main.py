@@ -135,11 +135,11 @@ def check_symbol(symbol):
     # ================= CONDITIONS =================
 
     if (
-        range_percent < 5
-        and 40 < rsi < 60
-        and bb_width < 6
+        range_percent < 7
+        and 40 < rsi < 65
+        and bb_width < 8
         and gradual
-        and volume_percent > 150
+        and volume_percent > 130
     ):
 
         message = f"""
