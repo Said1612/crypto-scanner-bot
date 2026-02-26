@@ -43,17 +43,45 @@ def send_telegram(msg):
 def get_symbols():
     try:
         data = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10).json()
-        symbols = [
-            s["symbol"]
-            for s in data
-            if s["symbol"].endswith("USDT")
-            and not any(x in s["symbol"] for x in ["3L", "3S", "BULL", "BEAR"])
-            and s["symbol"] not in EXCLUDED
-            and 300000 < float(s["quoteVolume"]) < 15000000
-        ]
-        print(f"Scanning {len(symbols)} symbols...")
-        return symbols
-    except:
+
+        candidates = []
+
+        for s in data:
+            symbol = s["symbol"]
+
+            if (
+                symbol.endswith("USDT")
+                and not any(x in symbol for x in ["3L", "3S", "BULL", "BEAR"])
+                and symbol not in EXCLUDED
+            ):
+
+                quote_vol = float(s["quoteVolume"])
+                price_change = abs(float(s["priceChangePercent"]))
+
+                # سيولة قوية ولكن ليست ضخمة جداً
+                if 800000 < quote_vol < 20000000:
+                    
+                    # لم تنفجر اليوم
+                    if price_change < 8:
+                        candidates.append({
+                            "symbol": symbol,
+                            "volume": quote_vol,
+                            "change": price_change
+                        })
+
+        # ترتيب حسب أعلى سيولة وأقل تغير
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda x: (x["change"], -x["volume"])
+        )
+
+        top_20 = [x["symbol"] for x in sorted_candidates[:20]]
+
+        print(f"Scanning {len(top_20)} explosion-ready symbols...")
+        return top_20
+
+    except Exception as e:
+        print("Error fetching symbols:", e)
         return []
 
 def get_klines(symbol, limit=50):
