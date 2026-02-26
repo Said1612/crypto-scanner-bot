@@ -126,7 +126,7 @@ def discover_symbols():
 # ================= SIGNALS =================
 def handle_signal(symbol, price):
     now = time.time()
-
+    
     # SIGNAL #1 → أول اكتشاف
     if symbol not in tracked:
         if not valid_setup(symbol):
@@ -140,13 +140,12 @@ def handle_signal(symbol, price):
         send_telegram(
             f"👑 *SOURCE BOT*\n"
             f"💰 *{symbol}*\n"
-            f"{label}\n"
+            f"{label} | SIGNAL #1\n"
             f"💵 Price: `{price}`\n"
             f"📊 Score: *{score}*"
         )
         return
 
-    # SIGNAL 2 & 3 → بعد SIGNAL #1
     entry = tracked[symbol]["entry"]
     level = tracked[symbol]["level"]
     score = tracked[symbol]["score"]
@@ -154,21 +153,25 @@ def handle_signal(symbol, price):
 
     # SIGNAL 2
     if level == 1 and change >= 2 and score >= 75:
+        label = score_label(score)
         send_telegram(
-            f"🚀 *SIGNAL #2*\n"
+            f"🚀 {label} | SIGNAL #2\n"
             f"💰 {symbol}\n"
             f"📈 Gain: +{change:.2f}%\n"
-            f"💵 Price: `{price}`"
+            f"💵 Price: `{price}`\n"
+            f"📊 Score: *{score}*"
         )
         tracked[symbol]["level"] = 2
 
     # SIGNAL 3
     elif level == 2 and change >= 4 and score >= 80:
+        label = score_label(score)
         send_telegram(
-            f"🔥 *SIGNAL #3*\n"
+            f"🔥 {label} | SIGNAL #3\n"
             f"💰 {symbol}\n"
             f"📈 Gain: +{change:.2f}%\n"
-            f"💵 Price: `{price}`"
+            f"💵 Price: `{price}`\n"
+            f"📊 Score: *{score}*"
         )
         tracked[symbol]["level"] = 3
 
