@@ -1,153 +1,151 @@
 import requests
-import time
-from datetime import datetime
 import os
-# ========= TELEGRAM SETTINGS =========
+import time
+from datetime import datetime, timedelta
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
+TIMEFRAME = "15m"
+COOLDOWN_MINUTES = 60
+
+last_alert_time = {}
+
+# ================= TELEGRAM =================
+
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("Telegram variables missing")
+        print("Missing Telegram credentials")
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    params = {
+    payload = {
         "chat_id": CHAT_ID,
-        "text": message
+        "text": message,
+        "parse_mode": "Markdown"
     }
-
     try:
-        requests.get(url, params=params, timeout=10)
-    except Exception as e:
-        print("Telegram error:", e)
-# ================= SETTINGS =================
-
-TIMEFRAMES = ["15m", "1h", "4h"]
-TOP_COINS = 20
-CHECK_EVERY = 180
-VOLUME_THRESHOLD = 170  # قوة السيولة %
-
-last_signals = {}
-
-# ===========================================
-
-def get_top_symbols():
-    url = "https://api.mexc.com/api/v3/ticker/24hr"
-
-    try:
-        data = requests.get(url, timeout=10).json()
-
-        usdt_pairs = [
-            s for s in data
-            if s["symbol"].endswith("USDT")
-        ]
-
-        sorted_pairs = sorted(
-            usdt_pairs,
-            key=lambda x: float(x["quoteVolume"]),
-            reverse=True
-        )
-
-        top = [s["symbol"] for s in sorted_pairs[:TOP_COINS]]
-
-        print(f"🔥 Scanning Top {TOP_COINS} High Liquidity Coins")
-        return top
-
-    except Exception as e:
-        print("Symbol load error:", e)
-        return []
+        requests.post(url, data=payload, timeout=10)
+    except:
+        pass
 
 
-def get_klines(symbol, timeframe):
-    url = "https://api.mexc.com/api/v3/klines"
+# ================= DATA FETCH =================
+
+def get_klines(symbol, interval="15m", limit=50):
+    url = f"https://api.binance.com/api/v3/klines"
     params = {
         "symbol": symbol,
-        "interval": timeframe,
-        "limit": 100
+        "interval": interval,
+        "limit": limit
     }
-
     try:
-        data = requests.get(url, params=params, timeout=10).json()
-
-        if not isinstance(data, list):
-            return None
-
-        return data
-
+        response = requests.get(url, params=params, timeout=10)
+        return response.json()
     except:
         return None
 
 
-def check_signal(symbol, timeframe):
+def get_symbols():
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+    try:
+        data = requests.get(url, timeout=10).json()
+        symbols = [
+            s["symbol"] for s in data["symbols"]
+            if s["quoteAsset"] == "USDT"
+            and s["status"] == "TRADING"
+            and not s["symbol"].startswith(("USDC","FDUSD","TUSD","USDP"))
+        ]
+        return symbols
+    except:
+        return []
 
-    klines = get_klines(symbol, timeframe)
+
+# ================= CORE LOGIC =================
+
+def check_symbol(symbol):
+
+    klines = get_klines(symbol, TIMEFRAME)
     if not klines or len(klines) < 30:
         return
 
     closes = [float(k[4]) for k in klines]
+    volumes = [float(k[5]) for k in klines]
     highs = [float(k[2]) for k in klines]
     lows = [float(k[3]) for k in klines]
-    volumes = [float(k[5]) for k in klines]
 
-    last_close = closes[-1]
-    last_volume = volumes[-1]
+    # ===== Range Compression =====
+    recent_high = max(highs[-10:])
+    recent_low = min(lows[-10:])
+    range_percent = ((recent_high - recent_low) / recent_low) * 100
 
+    # ===== Price Change (must be < 5%) =====
+    price_change = abs((closes[-1] - closes[-2]) / closes[-2]) * 100
+    if price_change == 0:
+        return
+
+    # ===== Volume Strength =====
     avg_volume = sum(volumes[-20:-1]) / 19
-              current_volume = volumes[-1]
+    volume_percent = (volumes[-1] / avg_volume) * 100
 
-liquidity_percent = (current_volume / avg_volume) * 100
+    # ===== Liquidity Efficiency =====
+    efficiency = volume_percent / price_change
 
-    highest_20 = max(highs[-21:-1])
-    lowest_20 = min(lows[-21:-1])
+    # ===== Gradual Volume Build =====
+    gradual = volumes[-3] < volumes[-2] < volumes[-1]
 
-    direction = None
+    # ===== Cooldown =====
+    now = datetime.utcnow()
+    if symbol in last_alert_time:
+        if now - last_alert_time[symbol] < timedelta(minutes=COOLDOWN_MINUTES):
+            return
 
-    if liquidity_strength > VOLUME_THRESHOLD:
-        if last_close > highest_20:
-            direction = "LONG"
-        elif last_close < lowest_20:
-            direction = "SHORT"
+    # ================= FINAL CONDITIONS =================
 
-    if direction:
+    if (
+        range_percent < 6
+        and price_change < 5
+        and volume_percent > 180
+        and efficiency > 60
+        and gradual
+    ):
 
-        key = f"{symbol}_{timeframe}"
-        repeated = ""
+        # Strength Rating
+        strength = "Normal"
+        if efficiency > 100:
+            strength = "Strong"
+        if efficiency > 180:
+            strength = "Whale Accumulation"
 
-        if key in last_signals:
-            repeated = "🚨 NEW LIQUIDITY ENTERED 🚨\n"
+        message = f"""
+🧠 *SMART LIQUIDITY ACCUMULATION*
 
-        last_signals[key] = datetime.now()
+Symbol: `{symbol}`
+TF: {TIMEFRAME}
 
-        print(f"""
-🔥 ULTRA BEAST SIGNAL 🔥
+Range: {range_percent:.2f}%
+Price Move: {price_change:.2f}%
+Liquidity: {volume_percent:.1f}%
+Efficiency: {efficiency:.1f}
 
-Symbol: {symbol}
-Timeframe: {tf}
-Liquidity: {liquidity_percent:.1f}%
-Breakout + Volume Spike
+Strength: {strength}
+
+⚠ Pre-Breakout Build Detected
 """
 
+        send_telegram(message)
+        last_alert_time[symbol] = now
+
+
+# ================= MAIN LOOP =================
 
 def main():
-    print("🚀 ULTRA BEAST MEXC MODE ACTIVE")
+    symbols = get_symbols()
+    print(f"Scanning {len(symbols)} symbols...")
 
-    send_telegram("🚀 BOT RESTARTED SUCCESSFULLY")  # ← أضف هذا السطر فقط
-
-    while True:
-        symbols = get_top_symbols()
-
-        for symbol in symbols:
-            for tf in TIMEFRAMES:
-                try:
-                    check_signal(symbol, tf)
-                    time.sleep(0.15)
-                except Exception as e:
-                    print("Error:", e)
-
-        print("⏳ Waiting next cycle...\n")
-        time.sleep(CHECK_EVERY)
+    for symbol in symbols:
+        check_symbol(symbol)
+        time.sleep(0.1)
 
 
 if __name__ == "__main__":
