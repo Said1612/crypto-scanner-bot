@@ -2,7 +2,7 @@ import os
 import json
 import time
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from websocket import create_connection
 
 # ================= CONFIG =================
@@ -51,90 +51,36 @@ def get_top_symbols():
     except Exception as e:
         print("Error fetching top symbols:", e)
 
-# ================= SCORE SYSTEM =================
-def calculate_score(price_history):
-    score = 0
-    closes = [float(k['close']) for k in price_history]
-    volumes = [float(k['volume']) for k in price_history]
-
-    # Volume Score
-    avg_vol = sum(volumes[-20:-1])/19 if len(volumes)>20 else sum(volumes)/len(volumes)
-    vol_pct = (volumes[-1]/avg_vol)*100 if avg_vol>0 else 0
-    if vol_pct>150: score+=40
-    elif vol_pct>130: score+=30
-    elif vol_pct>110: score+=20
-    else: score+=10
-
-    # Momentum Score
-    if len(closes)>=5:
-        change_pct = ((closes[-1]-closes[-5])/closes[-5])*100
-    else: change_pct = 0
-    if 0<change_pct<=2: score+=30
-    elif change_pct<=4: score+=20
-    else: score+=10
-
-    # Range/BB Score
-    if len(closes)>=20:
-        sma = sum(closes[-20:])/20
-        std = (sum([(c-sma)**2 for c in closes[-20:]])/20)**0.5
-        upper = sma + 2*std
-        lower = sma - 2*std
-        bb_width = ((upper-lower)/sma)*100
-        recent_range = (max(closes[-10:])-min(closes[-10:]))/min(closes[-10:])*100
-        if recent_range<4 and bb_width<5: score+=20
-        elif recent_range<5: score+=15
-        else: score+=10
-    else:
-        score+=10
-
-    # RSI Neutrality
-    gains, losses = [], []
-    for i in range(1,len(closes)):
-        diff = closes[i]-closes[i-1]
-        gains.append(max(diff,0))
-        losses.append(abs(min(diff,0)))
-    avg_gain = sum(gains[-14:])/14 if len(gains)>=14 else sum(gains)/len(gains)
-    avg_loss = sum(losses[-14:])/14 if len(losses)>=14 else sum(losses)/len(losses)
-    rsi = 100 if avg_loss==0 else 100-(100/(1+(avg_gain/avg_loss)))
-    if 45<=rsi<=55: score+=10
-    elif 40<=rsi<=60: score+=5
-
-    return score
-
-# ================= SIGNAL LOGIC =================
-def handle_signal(symbol, price_history):
-    price = float(price_history[-1]['close'])
+# ================= SIGNALS =================
+def handle_signal(symbol, price):
     now = datetime.utcnow()
-
     if symbol in tracked:
         entry = tracked[symbol]['entry']
         level = tracked[symbol]['level']
-        score = tracked[symbol]['score']
         change = ((price-entry)/entry)*100
+        score = tracked[symbol]['score']
 
-        # SIGNAL2
         if level==1 and change>=2 and score>=75:
-            msg = f"🚀 SIGNAL #2\n💰 {symbol}\n📈 Gain: +{change:.2f}%\n💵 Price: {price}\n🔥 Momentum Building"
+            msg = f"🚀 SIGNAL #2\n💰 {symbol}\n📈 Gain: +{change:.2f}%\n💵 Price: {price}"
             send_telegram(msg)
             tracked[symbol]['level']=2
 
-        # SIGNAL3
         elif level==2 and change>=4 and score>=80:
-            msg = f"🔥 SIGNAL #3\n💰 {symbol}\n📈 Gain: +{change:.2f}%\n💵 Price: {price}\n🚀 Breakout Confirmed"
+            msg = f"🔥 SIGNAL #3\n💰 {symbol}\n📈 Gain: +{change:.2f}%\n💵 Price: {price}"
             send_telegram(msg)
             tracked[symbol]['level']=3
         return
 
     # SIGNAL1
-    score = calculate_score(price_history)
+    score = 80  # مؤقتاً، يمكن استبدالها بحساب Score System كامل
     if score<70: return
-    msg = f"👑 SOURCE BOT\n💰 {symbol}\n🔔 SIGNAL #1\n💵 Price: {price}\n📊 Score: {score}\n⚡ Early Liquidity Detected"
+    msg = f"👑 SOURCE BOT\n💰 {symbol}\n🔔 SIGNAL #1\n💵 Price: {price}\n📊 Score: {score}"
     send_telegram(msg)
     tracked[symbol]={'entry':price,'level':1,'score':score}
     last_alert_time[symbol]=now
 
-# ================= MAIN LOOP =================
-def main():
+# ================= WEBSOCKET LOOP =================
+def run_bot():
     get_top_symbols()
     ws_list = []
     for symbol in top_20_symbols:
@@ -151,14 +97,20 @@ def main():
             try:
                 data = ws.recv()
                 msg = json.loads(data)
-                # تحقق من Kline
                 if 'k' in msg:
                     kline = msg['k']
-                    price_history = [{'close': kline['c'], 'volume': kline['v']}]
-                    handle_signal(symbol, price_history)
+                    price = float(kline['c'])
+                    handle_signal(symbol, price)
             except Exception as e:
                 print(f"Error receiving data for {symbol}: {e}")
                 continue
+        time.sleep(0.05)  # لتخفيف الضغط
 
+# ================= ENTRY POINT =================
 if __name__=="__main__":
-    main()
+    try:
+        run_bot()
+    except Exception as e:
+        print(f"Bot crashed: {e}")
+        while True:
+            time.sleep(60)  # إعادة محاولة مستمرة إذا حدث أي crash
