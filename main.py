@@ -32,31 +32,35 @@ def send_telegram(message):
 
 # ================= DATA FETCH =================
 
-def get_klines(symbol, interval="15m", limit=50):
-    url = "https://api.mexc.com/api/v3/klines"
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "limit": limit
-    }
-
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        return response.json()
-    except Exception as e:
-        print("Klines error:", e)
-        return None
-
-
 def get_symbols():
-    url = "https://api.mexc.com/api/v3/exchangeInfo"
+    url = "https://api.mexc.com/api/v3/ticker/24hr"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
 
-        if "symbols" not in data:
-            print("MEXC Error:", data)
-            return []
+        # USDT pairs فقط
+        usdt_pairs = [
+            s for s in data
+            if s["symbol"].endswith("USDT")
+            and not any(x in s["symbol"] for x in ["3L", "3S", "BULL", "BEAR"])
+        ]
+
+        # ترتيب حسب حجم التداول
+        sorted_pairs = sorted(
+            usdt_pairs,
+            key=lambda x: float(x["quoteVolume"]),
+            reverse=True
+        )
+
+        top_20 = [s["symbol"] for s in sorted_pairs[:20]]
+
+        print("Top 20 symbols:", top_20)
+
+        return top_20
+
+    except Exception as e:
+        print("Error fetching symbols:", e)
+        return []
 
         symbols = [
             s["symbol"] for s in data["symbols"]
