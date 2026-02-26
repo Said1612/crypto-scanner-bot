@@ -3,11 +3,15 @@ import os
 import time
 from datetime import datetime, timedelta
 
+# ================= CONFIG =================
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 TIMEFRAME = "15m"
 COOLDOWN_MINUTES = 60
+SLEEP_BETWEEN_SYMBOLS = 0.05
+CYCLE_SLEEP = 180  # 3 minutes
 
 last_alert_time = {}
 
@@ -24,28 +28,30 @@ def send_telegram(message):
         "text": message,
         "parse_mode": "Markdown"
     }
+
     try:
         requests.post(url, data=payload, timeout=10)
-    except:
-        pass
+    except Exception as e:
+        print("Telegram error:", e)
 
 
-# ================= DATA FETCH =================
+# ================= MEXC DATA =================
 
 def get_symbols():
+    """
+    Get Top 20 USDT pairs by 24h quote volume
+    """
     url = "https://api.mexc.com/api/v3/ticker/24hr"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
 
-        # USDT pairs فقط
         usdt_pairs = [
             s for s in data
             if s["symbol"].endswith("USDT")
             and not any(x in s["symbol"] for x in ["3L", "3S", "BULL", "BEAR"])
         ]
 
-        # ترتيب حسب حجم التداول
         sorted_pairs = sorted(
             usdt_pairs,
             key=lambda x: float(x["quoteVolume"]),
@@ -54,7 +60,8 @@ def get_symbols():
 
         top_20 = [s["symbol"] for s in sorted_pairs[:20]]
 
-        print("Top 20 symbols:", top_20)
+        print(f"Scanning {len(top_20)} symbols...")
+        print("Top 20:", top_20)
 
         return top_20
 
@@ -62,17 +69,22 @@ def get_symbols():
         print("Error fetching symbols:", e)
         return []
 
-        symbols = [
-            s["symbol"] for s in data["symbols"]
-            if s["quoteAsset"] == "USDT"
-            and s["status"] == "1"   # 1 = trading on MEXC
-        ]
 
-        return symbols
+def get_klines(symbol, interval="15m", limit=50):
+    url = "https://api.mexc.com/api/v3/klines"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
 
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        return response.json()
     except Exception as e:
-        print("Error fetching symbols:", e)
-        return []
+        print(f"Klines error for {symbol}:", e)
+        return None
+
 
 # ================= CORE LOGIC =================
 
@@ -87,34 +99,33 @@ def check_symbol(symbol):
     highs = [float(k[2]) for k in klines]
     lows = [float(k[3]) for k in klines]
 
-    # ===== Range Compression =====
+    # Range Compression
     recent_high = max(highs[-10:])
     recent_low = min(lows[-10:])
     range_percent = ((recent_high - recent_low) / recent_low) * 100
 
-    # ===== Price Change (must be < 5%) =====
+    # Price Change
     price_change = abs((closes[-1] - closes[-2]) / closes[-2]) * 100
     if price_change == 0:
         return
 
-    # ===== Volume Strength =====
+    # Volume Strength
     avg_volume = sum(volumes[-20:-1]) / 19
     volume_percent = (volumes[-1] / avg_volume) * 100
 
-    # ===== Liquidity Efficiency =====
+    # Liquidity Efficiency
     efficiency = volume_percent / price_change
 
-    # ===== Gradual Volume Build =====
+    # Gradual Volume Build
     gradual = volumes[-3] < volumes[-2] < volumes[-1]
 
-    # ===== Cooldown =====
+    # Cooldown
     now = datetime.utcnow()
     if symbol in last_alert_time:
         if now - last_alert_time[symbol] < timedelta(minutes=COOLDOWN_MINUTES):
             return
 
-    # ================= FINAL CONDITIONS =================
-
+    # Final Conditions
     if (
         range_percent < 6
         and price_change < 5
@@ -123,7 +134,6 @@ def check_symbol(symbol):
         and gradual
     ):
 
-        # Strength Rating
         strength = "Normal"
         if efficiency > 100:
             strength = "Strong"
@@ -131,9 +141,9 @@ def check_symbol(symbol):
             strength = "Whale Accumulation"
 
         message = f"""
-🧠 *SMART LIQUIDITY ACCUMULATION*
+🧠 SMART LIQUIDITY ACCUMULATION
 
-Symbol: `{symbol}`
+Symbol: {symbol}
 TF: {TIMEFRAME}
 
 Range: {range_percent:.2f}%
@@ -154,12 +164,13 @@ Strength: {strength}
 
 def main():
     symbols = get_symbols()
-    print(f"Scanning {len(symbols)} symbols...")
-
     for symbol in symbols:
         check_symbol(symbol)
-        time.sleep(0.1)
+        time.sleep(SLEEP_BETWEEN_SYMBOLS)
 
 
 if __name__ == "__main__":
-    main()
+    while True:
+        main()
+        print("Cycle finished. Sleeping...")
+        time.sleep(CYCLE_SLEEP)
