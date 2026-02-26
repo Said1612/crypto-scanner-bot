@@ -61,6 +61,53 @@ def valid_setup(symbol):
 
     return True
 
+# ================= SCORE SYSTEM =================
+def calculate_score(symbol):
+    k = requests.get(
+        MEXC_KLINES,
+        params={"symbol": symbol, "interval": "5m", "limit": 12},
+        timeout=10
+    ).json()
+
+    volumes = [float(c[5]) for c in k]
+    closes = [float(c[4]) for c in k]
+
+    score = 0
+
+    # 1️⃣ Volume Strength (40)
+    avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
+    if volumes[-1] > avg_vol * 2:
+        score += 40
+    elif volumes[-1] > avg_vol * 1.5:
+        score += 30
+    elif volumes[-1] > avg_vol * 1.2:
+        score += 20
+
+    # 2️⃣ Price Stability (30)
+    drop = (max(closes) - min(closes)) / min(closes) * 100
+    if drop < 2:
+        score += 30
+    elif drop < 4:
+        score += 20
+    elif drop < 6:
+        score += 10
+
+    # 3️⃣ Trend (30)
+    if closes[-1] > closes[0]:
+        score += 30
+
+    return score
+
+def score_label(score):
+    if score >= 90:
+        return "🟢 *GOLD SIGNAL*"
+    elif score >= 80:
+        return "🟡 *SILVER SIGNAL*"
+    elif score >= 70:
+        return "🔵 *BASIC SIGNAL*"
+    else:
+        return None
+
 # ================= DISCOVERY =================
 def discover_symbols():
     data = requests.get(MEXC_24H, timeout=10).json()
@@ -91,18 +138,24 @@ def handle_signal(symbol, price):
     if not valid_setup(symbol):
         return
 
+    score = calculate_score(symbol)
+    label = score_label(score)
+    if not label:
+        return
+
     tracked[symbol] = price
     discovered[symbol] = {
         "price": price,
-        "time": time.time()
+        "time": time.time(),
+        "score": score
     }
 
     send_telegram(
         f"👑 *SOURCE BOT*\n"
         f"💰 *{symbol}*\n"
-        f"🔔 *SIGNAL #1*\n"
+        f"{label}\n"
         f"💵 Price: `{price}`\n"
-        f"📊 Score: *80*"
+        f"📊 Score: *{score}*"
     )
 
 # ================= REPORT =================
@@ -149,7 +202,6 @@ def send_report():
 # ================= MAIN =================
 def run():
     send_telegram("🤖 SOURCE BOT STARTED")
-
     symbols = discover_symbols()
 
     while True:
