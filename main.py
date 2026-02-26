@@ -6,7 +6,6 @@ import requests
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
 STABLECOINS = {"USDT", "BUSD", "USDC", "DAI", "TUSD", "PAX", "UST"}
 
 DISCOVERY_MIN_VOL = 800_000
@@ -14,7 +13,7 @@ DISCOVERY_MAX_VOL = 20_000_000
 DISCOVERY_MAX_CHANGE = 8
 
 CHECK_INTERVAL = 10          # seconds
-REPORT_INTERVAL = 6 * 3600   # 6 hours
+REPORT_INTERVAL = 4 * 3600   # 6 hours
 
 # ================= GLOBAL =================
 tracked = {}       # {'SYMBOL': {'entry': price, 'level': 1, 'score': 80}}
