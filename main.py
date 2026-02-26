@@ -7,6 +7,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
+STABLECOINS = {"USDT", "BUSD", "USDC", "DAI", "TUSD", "PAX", "UST"}
 
 DISCOVERY_MIN_VOL = 800_000
 DISCOVERY_MAX_VOL = 20_000_000
@@ -37,22 +38,23 @@ def send_telegram(msg):
     except:
         pass
 
-# ================= FAKE PUMP FILTER =================
+# ================= FAKE PUMP & LIQUIDITY FILTER =================
 def valid_setup(symbol):
     try:
         k = requests.get(
             MEXC_KLINES,
-            params={"symbol": symbol, "interval": "5m", "limit": 12},
+            params={"symbol": symbol, "interval": "15m", "limit": 12},
             timeout=10
         ).json()
         vols = [float(c[5]) for c in k]
         closes = [float(c[4]) for c in k]
         avg_vol = sum(vols[:-1]) / len(vols[:-1])
         last_vol = vols[-1]
-        price_change = (closes[-1] - closes[0]) / closes[0] * 100
-        if price_change > 6 and last_vol < avg_vol * 1.5:
+        # فلترة Pump وهمي
+        if last_vol < avg_vol * 1.2:
             return False
-        if closes[-1] < closes[-2] * 0.97:
+        # فحص السيولة: حجم التداول في آخر شمعة
+        if last_vol < DISCOVERY_MIN_VOL:
             return False
         return True
     except:
@@ -63,13 +65,13 @@ def calculate_score(symbol):
     try:
         k = requests.get(
             MEXC_KLINES,
-            params={"symbol": symbol, "interval": "5m", "limit": 12},
+            params={"symbol": symbol, "interval": "15m", "limit": 12},
             timeout=10
         ).json()
         vols = [float(c[5]) for c in k]
         closes = [float(c[4]) for c in k]
         score = 0
-        # Volume Strength (40)
+        # قوة السيولة (40)
         avg_vol = sum(vols[:-1]) / len(vols[:-1])
         if vols[-1] > avg_vol * 2:
             score += 40
@@ -77,7 +79,7 @@ def calculate_score(symbol):
             score += 30
         elif vols[-1] > avg_vol * 1.2:
             score += 20
-        # Price Stability (30)
+        # استقرار السعر (30)
         drop = (max(closes) - min(closes)) / min(closes) * 100
         if drop < 2:
             score += 30
@@ -85,7 +87,7 @@ def calculate_score(symbol):
             score += 20
         elif drop < 6:
             score += 10
-        # Trend (30)
+        # اتجاه السعر (30)
         if closes[-1] > closes[0]:
             score += 30
         return score
@@ -93,11 +95,10 @@ def calculate_score(symbol):
         return 0
 
 def score_label(score):
-    # VIP GOLD Only → ترسل فقط إذا GOLD
+    # GOLD Only
     if score >= 90:
         return "🟢 *GOLD SIGNAL*"
-    else:
-        return None
+    return None
 
 # ================= DISCOVERY =================
 def discover_symbols():
@@ -109,6 +110,9 @@ def discover_symbols():
             if not sym.endswith("USDT"):
                 continue
             if sym in EXCLUDED:
+                continue
+            base = sym.replace("USDT","")
+            if base in STABLECOINS:
                 continue
             if any(x in sym for x in ["3L","3S","BULL","BEAR"]):
                 continue
@@ -122,21 +126,25 @@ def discover_symbols():
 
 # ================= SIGNALS =================
 def handle_signal(symbol, price):
+    # تجاهل Stablecoins
+    base = symbol.replace("USDT","")
+    if base in STABLECOINS:
+        return
+
     now = time.time()
-    
     score = calculate_score(symbol)
     label = score_label(score)
-
-    # VIP GOLD Only → تجاهل أي عملة Score < 90
     if not label:
         return
 
-    # SIGNAL #1 → أول اكتشاف
+    # SIGNAL #1
     if symbol not in tracked:
+        if not valid_setup(symbol):
+            return
         tracked[symbol] = {"entry": price, "level": 1, "score": score}
         discovered[symbol] = {"price": price, "time": now, "score": score}
         send_telegram(
-            f"👑 *SOURCE BOT*\n"
+            f"👑 *SOURCE BOT VIP*\n"
             f"💰 *{symbol}*\n"
             f"{label} | SIGNAL #1\n"
             f"💵 Price: `{price}`\n"
@@ -195,7 +203,7 @@ def send_report():
         return
     rows.sort(key=lambda x: -x[3])
     rows = rows[:5]
-    msg = "⚡ *SOURCE BOT PERFORMANCE REPORT*\n\n"
+    msg = "⚡ *SOURCE BOT VIP PERFORMANCE REPORT*\n\n"
     for s, d, c, g in rows:
         msg += (
             f"🔥 *{s}*\n"
@@ -207,7 +215,7 @@ def send_report():
 
 # ================= MAIN LOOP =================
 def run():
-    send_telegram("🤖 SOURCE BOT VIP GOLD ONLY STARTED")
+    send_telegram("🤖 SOURCE BOT VIP GOLD ONLY – MAX FILTER STARTED")
     symbols = discover_symbols()
     while True:
         try:
