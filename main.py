@@ -1,5 +1,6 @@
 
 import os
+import sys
 import time
 import logging
 import requests
@@ -12,7 +13,6 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN_HERE")
 CHAT_ID        = os.getenv("CHAT_ID",        "YOUR_CHAT_ID_HERE")
 
 # ── فلاتر الاكتشاف ──────────────────────────────
-EXCLUDED = {"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"}
 STABLECOINS = {"USDT", "BUSD", "USDC", "DAI", "TUSD", "PAX", "UST", "FDUSD"}
 LEVERAGE_KEYWORDS = ["3L", "3S", "5L", "5S", "BULL", "BEAR", "UP", "DOWN"]
 
@@ -53,7 +53,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
-        logging.StreamHandler(),
+        logging.StreamHandler(sys.stdout),   # ← stdout بدلاً من stderr (يظهر أبيض في Railway)
         logging.FileHandler("mexc_bot.log", encoding="utf-8"),
     ]
 )
