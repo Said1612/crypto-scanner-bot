@@ -1,15 +1,16 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║         MEXC LIQUIDITY BOT v3 – PRE-EXPLOSION DETECTOR       ║
-║   Volume Accumulation + Price Consolidation + Market Filter  ║
+║         MEXC LIQUIDITY BOT v4 – SMART FILTER EDITION        ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-الميزات الجديدة v3:
-  🆕 Volume Accumulation  — حجم يرتفع + سعر ثابت = تراكم شراء خفي
-  🆕 Price Consolidation  — سعر في نطاق ضيق = استعداد للانفجار
-  🆕 Market Filter        — تجاهل العملات النازلة مع السوق
-  🆕 Pre-Explosion Score  — نقاط خاصة للإشارات المبكرة
-  ✅ كل ميزات v2 السابقة محفوظة
+الإصلاحات v4:
+  🔧 MIN_IMBALANCE     — رفض العملات ذات ضغط بيع قوي (Imbalance < 0.8)
+  🔧 Bid > Ask         — الشراء يجب أن يتفوق على البيع دائماً
+  🔧 Volume Spike      — كشف ارتفاع مفاجئ في الحجم خلال آخر شمعة
+  🔧 Higher Lows       — السعر يصنع قيعان أعلى = اتجاه صاعد حقيقي
+  🔧 Rejection Filter  — رفض العملات التي سبق رفضها مؤخراً (توفير API)
+  🔧 Min Candle Green  — أغلبية الشموع الأخيرة خضراء
+  ✅ كل ميزات v3 محفوظة
 """
 
 import os
@@ -31,38 +32,52 @@ EXCLUDED          = {"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"}
 STABLECOINS       = {"USDT", "BUSD", "USDC", "DAI", "TUSD", "PAX", "UST", "FDUSD"}
 LEVERAGE_KEYWORDS = ["3L", "3S", "5L", "5S", "BULL", "BEAR", "UP", "DOWN"]
 
-DISCOVERY_MIN_VOL    = 500_000     # خُفِّف قليلاً لاكتشاف عملات مبكراً
+DISCOVERY_MIN_VOL    = 500_000
 DISCOVERY_MAX_VOL    = 30_000_000
-DISCOVERY_MAX_CHANGE = 12          # رُفِع لاكتشاف العملات التي بدأت بالتحرك
-MAX_SYMBOLS          = 50          # زيادة لرصد أوسع
+DISCOVERY_MAX_CHANGE = 12
+MAX_SYMBOLS          = 50
 
-# ── Order Book ───────────────────────────────────
+# ── Order Book — فلاتر محسّنة ────────────────────
 ORDER_BOOK_LIMIT      = 20
-MIN_BID_DEPTH_USDT    = 30_000     # خُفِّف للعملات الصغيرة
-MAX_BID_ASK_IMBALANCE = 3.0
+MIN_BID_DEPTH_USDT    = 30_000
+MAX_BID_ASK_IMBALANCE = 3.0    # حد أقصى   → رفض إذا Bid/Ask > 3.0 (خلل كبير)
+MIN_BID_ASK_IMBALANCE = 0.8    # 🆕 حد أدنى → رفض إذا Bid/Ask < 0.8 (ضغط بيع)
+# ملاحظة: PEPE كانت 0.39 → ترفضها الآن
 
 # ── إعدادات الإشارات ────────────────────────────
-SCORE_MIN          = 65            # خُفِّف لاكتشاف الفرص المبكرة
+SCORE_MIN          = 65
 SIGNAL2_GAIN       = 2.0
 SIGNAL3_GAIN       = 4.0
 STOP_LOSS_PCT      = -4.0
 ALERT_COOLDOWN_SEC = 300
 
-# ── Volume Accumulation (ميزة جديدة) ─────────────
-# حجم يرتفع تدريجياً بينما السعر ثابت = تراكم شراء
-VOL_ACCUM_CANDLES      = 6         # عدد الشموع للفحص
-VOL_ACCUM_MIN_RATIO    = 1.5       # الحجم يجب أن يكون 1.5× المتوسط
-VOL_ACCUM_MAX_PRICE_MOVE = 3.0    # السعر لا يتحرك أكثر من 3% خلال التراكم
+# ── Volume Accumulation ───────────────────────────
+VOL_ACCUM_CANDLES        = 6
+VOL_ACCUM_MIN_RATIO      = 1.5
+VOL_ACCUM_MAX_PRICE_MOVE = 3.0
 
-# ── Price Consolidation (ميزة جديدة) ─────────────
-# سعر في نطاق ضيق = استعداد للانفجار
-CONSOL_CANDLES     = 8             # عدد الشموع للفحص
-CONSOL_MAX_RANGE   = 4.0           # النطاق الأقصى % بين أعلى وأدنى سعر
+# ── 🆕 Volume Spike — ارتفاع مفاجئ في الحجم ──────
+# آخر شمعة حجمها أكبر بكثير من المتوسط = دخول مفاجئ
+VOL_SPIKE_RATIO = 2.5          # الحجم أكبر من 2.5× المتوسط = Spike
 
-# ── فلتر السوق (ميزة جديدة) ──────────────────────
-# مقارنة العملة مع BTC لمعرفة إذا كانت تتحرك بشكل مستقل
-MARKET_FILTER_ENABLED  = True
-MARKET_INDEPENDENCE_MIN = 0.0      # العملة يجب أن تكون مستقلة أو أفضل من السوق
+# ── Price Consolidation ───────────────────────────
+CONSOL_CANDLES   = 8
+CONSOL_MAX_RANGE = 4.0
+
+# ── 🆕 Higher Lows Filter ─────────────────────────
+# السعر يصنع قيعان أعلى = اتجاه صاعد حقيقي
+HIGHER_LOWS_MIN_RATIO = 0.6    # 60% من الشموع يجب أن تكون قيعانها أعلى
+
+# ── 🆕 Green Candles Filter ───────────────────────
+# أغلبية الشموع الأخيرة خضراء = زخم شراء
+GREEN_CANDLES_MIN_RATIO = 0.55 # 55% من الشموع خضراء على الأقل
+
+# ── 🆕 Rejection Cache ────────────────────────────
+# تخزين العملات المرفوضة لتفادي إعادة فحصها فوراً
+REJECTION_CACHE_SEC = 120      # لا تعيد فحص العملة المرفوضة لمدة دقيقتين
+
+# ── فلتر السوق ───────────────────────────────────
+MARKET_FILTER_ENABLED = True
 
 # ── توقيتات ─────────────────────────────────────
 CHECK_INTERVAL        = 10
@@ -95,13 +110,15 @@ log = logging.getLogger("MexcBot")
 # ═══════════════════════════════════════════════
 tracked        = {}   # type: Dict[str, Dict[str, Any]]
 discovered     = {}   # type: Dict[str, Dict[str, Any]]
+rejection_cache= {}   # type: Dict[str, float]   🆕 {symbol: timestamp}
 last_report    = 0.0
 last_discovery = 0.0
 watch_symbols  = []   # type: List[str]
-btc_change_24h = 0.0  # تغيير BTC خلال 24 ساعة للمقارنة
+btc_change_24h = 0.0
+changes_map    = {}   # type: Dict[str, float]
 
 session = requests.Session()
-session.headers.update({"User-Agent": "MexcBot/3.0"})
+session.headers.update({"User-Agent": "MexcBot/4.0"})
 
 
 # ═══════════════════════════════════════════════
@@ -132,9 +149,9 @@ def send_telegram(msg):
             timeout=10,
         )
         if r.status_code != 200:
-            log.warning("Telegram API error %s: %s", r.status_code, r.text[:200])
+            log.warning("Telegram error %s: %s", r.status_code, r.text[:200])
     except requests.RequestException as e:
-        log.error("Telegram send failed: %s", e)
+        log.error("Telegram failed: %s", e)
 
 
 def safe_get(url, params=None):
@@ -148,30 +165,52 @@ def safe_get(url, params=None):
         return None
 
 
+def is_rejected_recently(symbol):
+    # type: (str) -> bool
+    """🆕 تحقق من Rejection Cache لتوفير طلبات API."""
+    ts = rejection_cache.get(symbol, 0)
+    return (time.time() - ts) < REJECTION_CACHE_SEC
+
+
+def mark_rejected(symbol):
+    # type: (str) -> None
+    rejection_cache[symbol] = time.time()
+
+
+def cleanup_rejection_cache():
+    # type: () -> None
+    now   = time.time()
+    stale = [s for s, t in list(rejection_cache.items())
+             if now - t > REJECTION_CACHE_SEC * 2]
+    for s in stale:
+        del rejection_cache[s]
+
+
 # ═══════════════════════════════════════════════
 #              MEXC DATA FETCHERS
 # ═══════════════════════════════════════════════
 def get_klines_data(symbol, interval="15m", limit=20):
     # type: (str, str, int) -> Optional[Dict]
-    """جلب بيانات الشموع مع عدد أكبر للتحليل المتقدم."""
     data = safe_get(MEXC_KLINES, {"symbol": symbol, "interval": interval, "limit": limit})
     if not data or len(data) < 6:
         return None
     try:
-        vols    = [float(c[5]) for c in data]
-        closes  = [float(c[4]) for c in data]
+        opens   = [float(c[1]) for c in data]
         highs   = [float(c[2]) for c in data]
         lows    = [float(c[3]) for c in data]
+        closes  = [float(c[4]) for c in data]
+        vols    = [float(c[5]) for c in data]
         avg_vol = sum(vols[:-1]) / len(vols[:-1])
         return {
-            "vols":    vols,
-            "closes":  closes,
+            "opens":   opens,
             "highs":   highs,
             "lows":    lows,
+            "closes":  closes,
+            "vols":    vols,
             "avg_vol": avg_vol,
         }
     except (IndexError, ValueError, ZeroDivisionError) as e:
-        log.debug("klines parse error %s: %s", symbol, e)
+        log.debug("klines error %s: %s", symbol, e)
         return None
 
 
@@ -184,91 +223,85 @@ def get_order_book(symbol):
         bid_depth = sum(float(b[0]) * float(b[1]) for b in data.get("bids", []))
         ask_depth = sum(float(a[0]) * float(a[1]) for a in data.get("asks", []))
         imbalance = (bid_depth / ask_depth) if ask_depth > 0 else 99
-        return {"bid_depth": bid_depth, "ask_depth": ask_depth, "imbalance": imbalance}
+        return {
+            "bid_depth": bid_depth,
+            "ask_depth": ask_depth,
+            "imbalance": imbalance,
+        }
     except (ValueError, ZeroDivisionError) as e:
-        log.debug("orderbook parse error %s: %s", symbol, e)
+        log.debug("orderbook error %s: %s", symbol, e)
         return None
 
 
 def update_btc_change():
     # type: () -> None
-    """تحديث تغيير BTC لفلتر السوق."""
     global btc_change_24h
     data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
     if data:
         try:
             btc_change_24h = float(data["priceChangePercent"])
-            log.debug("BTC 24h change: %.2f%%", btc_change_24h)
         except (KeyError, ValueError):
             pass
 
 
 # ═══════════════════════════════════════════════
-#   🆕 VOLUME ACCUMULATION DETECTOR
+#   ANALYSIS FUNCTIONS
 # ═══════════════════════════════════════════════
+
 def detect_volume_accumulation(kd):
     # type: (Dict) -> Tuple[bool, float]
-    """
-    يكتشف تراكم الشراء الخفي:
-    الحجم يرتفع تدريجياً بينما السعر ثابت نسبياً.
-    هذه من أقوى إشارات الانفجار القادم.
-
-    يُرجع: (هل يوجد تراكم, قوة التراكم 0-100)
-    """
+    """حجم يرتفع + سعر ثابت = تراكم شراء خفي."""
     vols   = kd["vols"]
     closes = kd["closes"]
-
     if len(vols) < VOL_ACCUM_CANDLES:
         return False, 0.0
 
-    # أخذ آخر N شمعة للفحص
     recent_vols   = vols[-VOL_ACCUM_CANDLES:]
     recent_closes = closes[-VOL_ACCUM_CANDLES:]
     avg_vol       = kd["avg_vol"]
+    avg_recent    = sum(recent_vols) / len(recent_vols)
 
-    # شرط 1: الحجم يجب أن يكون فوق المتوسط
-    avg_recent_vol = sum(recent_vols) / len(recent_vols)
-    if avg_recent_vol < avg_vol * VOL_ACCUM_MIN_RATIO:
+    if avg_recent < avg_vol * VOL_ACCUM_MIN_RATIO:
         return False, 0.0
 
-    # شرط 2: السعر لا يتحرك كثيراً (تراكم هادئ)
     price_range = (max(recent_closes) - min(recent_closes)) / min(recent_closes) * 100
     if price_range > VOL_ACCUM_MAX_PRICE_MOVE:
         return False, 0.0
 
-    # شرط 3: الحجم يتصاعد (كل شمعة أعلى من السابقة في المتوسط)
     vol_trend = sum(
         1 for i in range(1, len(recent_vols)) if recent_vols[i] >= recent_vols[i-1]
     )
-    vol_trend_ratio = vol_trend / (len(recent_vols) - 1)
-
-    if vol_trend_ratio < 0.5:
+    if vol_trend / (len(recent_vols) - 1) < 0.5:
         return False, 0.0
 
-    # حساب قوة التراكم (0-100)
-    vol_strength   = min((avg_recent_vol / avg_vol - 1) * 50, 50)
-    price_stability = max(0, (VOL_ACCUM_MAX_PRICE_MOVE - price_range) / VOL_ACCUM_MAX_PRICE_MOVE * 30)
-    trend_bonus    = vol_trend_ratio * 20
+    strength = min(
+        (avg_recent / avg_vol - 1) * 50
+        + max(0, (VOL_ACCUM_MAX_PRICE_MOVE - price_range) / VOL_ACCUM_MAX_PRICE_MOVE * 30)
+        + (vol_trend / (len(recent_vols) - 1)) * 20,
+        100
+    )
+    return True, round(strength, 1)
 
-    strength = vol_strength + price_stability + trend_bonus
-    return True, round(min(strength, 100), 1)
+
+def detect_volume_spike(kd):
+    # type: (Dict) -> Tuple[bool, float]
+    """🆕 ارتفاع مفاجئ في الحجم = دخول مال كبير فجأة."""
+    vols    = kd["vols"]
+    avg_vol = kd["avg_vol"]
+    if avg_vol == 0:
+        return False, 0.0
+    ratio = vols[-1] / avg_vol
+    if ratio >= VOL_SPIKE_RATIO:
+        return True, round(ratio, 2)
+    return False, round(ratio, 2)
 
 
-# ═══════════════════════════════════════════════
-#   🆕 PRICE CONSOLIDATION DETECTOR
-# ═══════════════════════════════════════════════
 def detect_price_consolidation(kd):
     # type: (Dict) -> Tuple[bool, float]
-    """
-    يكتشف تضيّق نطاق السعر (Consolidation):
-    السعر يتحرك في نطاق ضيق = ضغط يتراكم = انفجار قادم.
-
-    يُرجع: (هل يوجد consolidation, نسبة ضيق النطاق 0-100)
-    """
+    """سعر في نطاق ضيق = ضغط مكتنز = انفجار قادم."""
     highs  = kd["highs"]
     lows   = kd["lows"]
     closes = kd["closes"]
-
     if len(highs) < CONSOL_CANDLES:
         return False, 0.0
 
@@ -276,185 +309,221 @@ def detect_price_consolidation(kd):
     recent_lows   = lows[-CONSOL_CANDLES:]
     recent_closes = closes[-CONSOL_CANDLES:]
 
-    # حساب النطاق الكلي
     total_range = (max(recent_highs) - min(recent_lows)) / min(recent_lows) * 100
     if total_range > CONSOL_MAX_RANGE:
         return False, 0.0
 
-    # التحقق من أن السعر لم ينهار (يجب أن يكون مستقراً أو صاعداً قليلاً)
-    price_direction = (recent_closes[-1] - recent_closes[0]) / recent_closes[0] * 100
-    if price_direction < -2.0:
+    if (recent_closes[-1] - recent_closes[0]) / recent_closes[0] * 100 < -2.0:
         return False, 0.0
 
-    # كلما كان النطاق أضيق = ضغط أكبر = تحرك قريب
-    tightness = max(0, (CONSOL_MAX_RANGE - total_range) / CONSOL_MAX_RANGE * 100)
-
-    # مكافأة إذا كان السعر يرتفع تدريجياً داخل النطاق (Higher Lows)
     higher_lows = sum(
         1 for i in range(1, len(recent_lows)) if recent_lows[i] >= recent_lows[i-1]
     )
-    higher_lows_bonus = (higher_lows / (len(recent_lows) - 1)) * 20
-
-    strength = min(tightness * 0.8 + higher_lows_bonus, 100)
+    tightness = max(0, (CONSOL_MAX_RANGE - total_range) / CONSOL_MAX_RANGE * 100)
+    strength  = min(tightness * 0.8 + (higher_lows / (len(recent_lows)-1)) * 20, 100)
     return True, round(strength, 1)
 
 
-# ═══════════════════════════════════════════════
-#   🆕 MARKET FILTER
-# ═══════════════════════════════════════════════
+def detect_higher_lows(kd):
+    # type: (Dict) -> Tuple[bool, float]
+    """🆕 قيعان أعلى تدريجياً = اتجاه صاعد حقيقي وليس pump وهمي."""
+    lows = kd["lows"][-8:]
+    if len(lows) < 4:
+        return False, 0.0
+    higher = sum(1 for i in range(1, len(lows)) if lows[i] >= lows[i-1])
+    ratio  = higher / (len(lows) - 1)
+    return ratio >= HIGHER_LOWS_MIN_RATIO, round(ratio * 100, 1)
+
+
+def detect_green_candles(kd):
+    # type: (Dict) -> Tuple[bool, float]
+    """🆕 أغلبية الشموع خضراء = زخم شراء مستمر."""
+    opens  = kd["opens"][-8:]
+    closes = kd["closes"][-8:]
+    if len(opens) < 4:
+        return False, 0.0
+    green = sum(1 for o, c in zip(opens, closes) if c >= o)
+    ratio = green / len(opens)
+    return ratio >= GREEN_CANDLES_MIN_RATIO, round(ratio * 100, 1)
+
+
 def passes_market_filter(symbol_change_24h):
     # type: (float) -> Tuple[bool, str]
-    """
-    يتحقق من أن العملة تتحرك بشكل مستقل عن السوق.
-    إذا كان BTC ينزل والعملة تصمد أو ترتفع = إشارة قوية.
-
-    يُرجع: (هل تجتاز الفلتر, وصف الحالة)
-    """
+    """تجاهل العملات النازلة مع السوق."""
     if not MARKET_FILTER_ENABLED:
         return True, ""
 
-    # العملة أقوى من BTC بـ 3% أو أكثر = مستقلة تماماً
-    relative_strength = symbol_change_24h - btc_change_24h
+    relative = symbol_change_24h - btc_change_24h
 
     if btc_change_24h < -2.0:
-        # السوق نازل
-        if relative_strength >= 5.0:
-            return True, "💪 مقاومة السوق النازل"
-        elif relative_strength >= 2.0:
-            return True, "🛡️ صمود جيد"
-        elif relative_strength >= 0.0:
+        # السوق نازل — نبحث عن العملات الصامدة فقط
+        if relative >= 5.0:
+            return True, "💪 تقاوم السوق النازل بقوة"
+        elif relative >= 2.0:
+            return True, "🛡️ صمود جيد أمام النزول"
+        elif relative >= 0.0:
             return True, "⚡ مستقلة عن السوق"
         else:
-            return False, ""  # تنزل مع السوق
-    else:
-        # السوق محايد أو صاعد - قبول كل العملات الصاعدة
-        if symbol_change_24h >= 0:
-            return True, ""
-        elif symbol_change_24h >= -3.0:
-            return True, ""
-        else:
             return False, ""
+    else:
+        # السوق محايد/صاعد — نقبل العملات التي لا تنزل كثيراً
+        if symbol_change_24h >= -3.0:
+            return True, ""
+        return False, ""
 
 
 # ═══════════════════════════════════════════════
-#           SCORE SYSTEM v3
+#           SCORE SYSTEM v4
 # ═══════════════════════════════════════════════
-def calculate_score(kd, ob, vol_accum, consol):
-    # type: (Dict, Optional[Dict], Tuple[bool, float], Tuple[bool, float]) -> int
+def calculate_score(kd, ob, vol_accum, vol_spike, consol, higher_lows, green_candles):
+    # type: (Dict, Optional[Dict], Tuple, Tuple, Tuple, Tuple, Tuple) -> int
     """
-    نقاط السكور v3 (100 نقطة):
-      • قوة الحجم          → 25 نقطة
-      • استقرار السعر       → 15 نقطة
-      • اتجاه السعر         → 15 نقطة
-      • Order Book          → 15 نقطة
-      • Volume Accumulation → 15 نقطة (جديد)
-      • Price Consolidation → 15 نقطة (جديد)
+    100 نقطة موزعة:
+      حجم التداول       → 20
+      Order Book        → 15
+      Volume Accum      → 15  🆕
+      Volume Spike      → 10  🆕
+      Consolidation     → 10
+      Higher Lows       → 15  🆕
+      Green Candles     → 10  🆕
+      اتجاه السعر       → 5
     """
-    score   = 0
-    vols    = kd["vols"]
-    closes  = kd["closes"]
+    score = 0
+
+    # 1. حجم التداول (20)
     avg_vol = kd["avg_vol"]
+    ratio   = kd["vols"][-1] / avg_vol if avg_vol > 0 else 0
+    if ratio >= 3.0:   score += 20
+    elif ratio >= 2.0: score += 15
+    elif ratio >= 1.5: score += 10
+    elif ratio >= 1.2: score += 5
 
-    # 1. قوة حجم التداول (25)
-    ratio = vols[-1] / avg_vol if avg_vol > 0 else 0
-    if ratio >= 3.0:
-        score += 25
-    elif ratio >= 2.0:
-        score += 20
-    elif ratio >= 1.5:
-        score += 13
-    elif ratio >= 1.2:
-        score += 7
-
-    # 2. استقرار السعر (15)
-    price_swing = (max(closes) - min(closes)) / min(closes) * 100 if min(closes) > 0 else 99
-    if price_swing < 2:
-        score += 15
-    elif price_swing < 4:
-        score += 10
-    elif price_swing < 6:
-        score += 5
-
-    # 3. اتجاه السعر (15)
-    if closes[-1] > closes[0]:
-        trend_pct = (closes[-1] - closes[0]) / closes[0] * 100
-        if trend_pct >= 3:
-            score += 15
-        elif trend_pct >= 1:
-            score += 10
-        else:
-            score += 5
-
-    # 4. عمق Order Book (15)
+    # 2. Order Book (15)
     if ob:
         if ob["bid_depth"] >= MIN_BID_DEPTH_USDT:
-            score += 8
-        if ob["imbalance"] <= MAX_BID_ASK_IMBALANCE:
             score += 7
+        # كلما كان Imbalance أعلى من 1.0 = مشترون أقوى = نقاط أكثر
+        imb = ob["imbalance"]
+        if imb >= 2.0:   score += 8
+        elif imb >= 1.5: score += 6
+        elif imb >= 1.0: score += 4
+        elif imb >= 0.8: score += 2
 
-    # 5. 🆕 Volume Accumulation (15)
-    is_accum, accum_strength = vol_accum
+    # 3. Volume Accumulation (15)
+    is_accum, accum_str = vol_accum
     if is_accum:
-        bonus = int(accum_strength / 100 * 15)
-        score += max(bonus, 8)  # حد أدنى 8 نقاط إذا وُجد التراكم
+        score += max(int(accum_str / 100 * 15), 8)
 
-    # 6. 🆕 Price Consolidation (15)
-    is_consol, consol_strength = consol
+    # 4. Volume Spike (10)
+    is_spike, spike_ratio = vol_spike
+    if is_spike:
+        if spike_ratio >= 5.0:   score += 10
+        elif spike_ratio >= 3.5: score += 7
+        else:                    score += 5
+
+    # 5. Consolidation (10)
+    is_consol, consol_str = consol
     if is_consol:
-        bonus = int(consol_strength / 100 * 15)
-        score += max(bonus, 8)
+        score += max(int(consol_str / 100 * 10), 5)
+
+    # 6. Higher Lows (15)
+    is_hl, hl_pct = higher_lows
+    if is_hl:
+        if hl_pct >= 80: score += 15
+        elif hl_pct >= 70: score += 10
+        else:              score += 6
+
+    # 7. Green Candles (10)
+    is_green, green_pct = green_candles
+    if is_green:
+        if green_pct >= 75: score += 10
+        elif green_pct >= 60: score += 6
+        else:                 score += 3
+
+    # 8. اتجاه السعر (5)
+    closes = kd["closes"]
+    if closes[-1] > closes[0]:
+        score += 5
 
     return min(score, 100)
 
 
 def score_label(score):
     # type: (int) -> Optional[str]
-    if score >= 88:
-        return "🏆 *GOLD SIGNAL*"
-    if score >= 75:
-        return "🔵 *SILVER SIGNAL*"
-    if score >= SCORE_MIN:
-        return "🟡 *BRONZE SIGNAL*"
+    if score >= 88: return "🏆 *GOLD SIGNAL*"
+    if score >= 75: return "🔵 *SILVER SIGNAL*"
+    if score >= SCORE_MIN: return "🟡 *BRONZE SIGNAL*"
     return None
 
 
 # ═══════════════════════════════════════════════
-#     LIQUIDITY VALIDATION v3
+#     FULL VALIDATION v4
 # ═══════════════════════════════════════════════
 def valid_setup(symbol, symbol_change_24h=0.0):
-    # type: (str, float) -> Tuple[bool, Optional[Dict], Optional[Dict], Tuple[bool,float], Tuple[bool,float], str]
+    # type: (str, float) -> Optional[Dict]
     """
-    يُرجع: (is_valid, kd, ob, vol_accum, consol, market_note)
+    يُرجع dict بكل النتائج أو None إذا فشل الفلتر.
     """
-    # فلتر السوق أولاً (سريع بدون API)
+    # 1. Rejection Cache (بدون API)
+    if is_rejected_recently(symbol):
+        return None
+
+    # 2. فلتر السوق (بدون API)
     passes, market_note = passes_market_filter(symbol_change_24h)
     if not passes:
-        return False, None, None, (False, 0), (False, 0), ""
+        mark_rejected(symbol)
+        return None
 
-    # جلب بيانات الشموع (20 شمعة للتحليل المتقدم)
-    kd = get_klines_data(symbol, limit=20)
+    # 3. بيانات الشموع
+    kd = get_klines_data(symbol)
     if kd is None:
-        return False, None, None, (False, 0), (False, 0), ""
+        mark_rejected(symbol)
+        return None
 
-    # فلتر الحجم الأساسي
-    if kd["vols"][-1] < kd["avg_vol"] * 1.2:
-        return False, None, None, (False, 0), (False, 0), ""
-    if kd["vols"][-1] < DISCOVERY_MIN_VOL:
-        return False, None, None, (False, 0), (False, 0), ""
+    # 4. فلتر الحجم الأساسي
+    if kd["vols"][-1] < kd["avg_vol"] * 1.2 or kd["vols"][-1] < DISCOVERY_MIN_VOL:
+        mark_rejected(symbol)
+        return None
 
-    # تحليل Volume Accumulation و Consolidation
-    vol_accum = detect_volume_accumulation(kd)
-    consol    = detect_price_consolidation(kd)
+    # 5. 🆕 فلتر الشموع الخضراء — رفض العملات ذات زخم بيع
+    is_green, green_pct = detect_green_candles(kd)
+    if not is_green:
+        log.debug("%s رُفض: شموع خضراء %.0f%%", symbol, green_pct)
+        mark_rejected(symbol)
+        return None
 
-    # Order Book
+    # 6. Order Book
     ob = get_order_book(symbol)
     if ob:
-        if ob["bid_depth"] < MIN_BID_DEPTH_USDT:
-            return False, None, None, (False, 0), (False, 0), ""
+        # 🆕 حد أدنى لـ Imbalance — يرفض PEPE (0.39) وأمثالها
+        if ob["imbalance"] < MIN_BID_ASK_IMBALANCE:
+            log.debug("%s رُفض: imbalance منخفض %.2f (ضغط بيع)", symbol, ob["imbalance"])
+            mark_rejected(symbol)
+            return None
         if ob["imbalance"] > MAX_BID_ASK_IMBALANCE:
-            return False, None, None, (False, 0), (False, 0), ""
+            log.debug("%s رُفض: imbalance مرتفع جداً %.2f", symbol, ob["imbalance"])
+            mark_rejected(symbol)
+            return None
+        if ob["bid_depth"] < MIN_BID_DEPTH_USDT:
+            mark_rejected(symbol)
+            return None
 
-    return True, kd, ob, vol_accum, consol, market_note
+    # 7. التحليلات المتقدمة
+    vol_accum   = detect_volume_accumulation(kd)
+    vol_spike   = detect_volume_spike(kd)
+    consol      = detect_price_consolidation(kd)
+    higher_lows = detect_higher_lows(kd)
+
+    return {
+        "kd":          kd,
+        "ob":          ob,
+        "vol_accum":   vol_accum,
+        "vol_spike":   vol_spike,
+        "consol":      consol,
+        "higher_lows": higher_lows,
+        "green":       (is_green, green_pct),
+        "market_note": market_note,
+    }
 
 
 # ═══════════════════════════════════════════════
@@ -462,16 +531,15 @@ def valid_setup(symbol, symbol_change_24h=0.0):
 # ═══════════════════════════════════════════════
 def discover_symbols():
     # type: () -> Tuple[List[str], Dict[str, float]]
-    """يُرجع (قائمة الأزواج, قاموس التغيرات)"""
     global btc_change_24h
     log.info("🔍 تحديث قائمة الأزواج...")
     data = safe_get(MEXC_24H)
     if not data:
-        log.error("فشل جلب بيانات السوق من MEXC")
-        return watch_symbols, {}
+        log.error("فشل جلب بيانات السوق")
+        return watch_symbols, changes_map
 
-    changes_map = {}  # type: Dict[str, float]
-    result      = []
+    ch_map = {}   # type: Dict[str, float]
+    result = []
 
     for s in data:
         sym = s.get("symbol", "")
@@ -481,29 +549,24 @@ def discover_symbols():
         except (KeyError, ValueError):
             continue
 
-        # تخزين تغيير BTC
         if sym == "BTCUSDT":
             btc_change_24h = change
 
-        if not sym.endswith("USDT"):
-            continue
-        if sym in EXCLUDED:
-            continue
+        if not sym.endswith("USDT"): continue
+        if sym in EXCLUDED: continue
         base = sym.replace("USDT", "")
-        if base in STABLECOINS:
-            continue
-        if any(kw in sym for kw in LEVERAGE_KEYWORDS):
-            continue
+        if base in STABLECOINS: continue
+        if any(kw in sym for kw in LEVERAGE_KEYWORDS): continue
 
-        changes_map[sym] = change
+        ch_map[sym] = change
 
         if DISCOVERY_MIN_VOL < vol < DISCOVERY_MAX_VOL and abs(change) < DISCOVERY_MAX_CHANGE:
             result.append((sym, vol))
 
     result.sort(key=lambda x: -x[1])
     symbols = [s for s, _ in result[:MAX_SYMBOLS]]
-    log.info("✅ تم اكتشاف %d زوج | BTC 24h: %.2f%%", len(symbols), btc_change_24h)
-    return symbols, changes_map
+    log.info("✅ %d زوج | BTC: %.2f%%", len(symbols), btc_change_24h)
+    return symbols, ch_map
 
 
 # ═══════════════════════════════════════════════
@@ -519,8 +582,7 @@ def check_stop_loss(symbol, price):
         send_telegram(
             "🛑 *STOP LOSS* | `{}`\n"
             "📉 خسارة: `{:.2f}%`\n"
-            "💵 سعر الدخول: `{}`\n"
-            "💵 السعر الحالي: `{}`".format(
+            "💵 دخول: `{}` ← الآن: `{}`".format(
                 symbol, change, format_price(entry), format_price(price)
             )
         )
@@ -531,12 +593,11 @@ def check_stop_loss(symbol, price):
 
 
 # ═══════════════════════════════════════════════
-#             SIGNAL HANDLER v3
+#             SIGNAL HANDLER v4
 # ═══════════════════════════════════════════════
 def handle_signal(symbol, price, change_24h=0.0):
     # type: (str, float, float) -> None
-    base = symbol.replace("USDT", "")
-    if base in STABLECOINS:
+    if symbol.replace("USDT","") in STABLECOINS:
         return
 
     now = time.time()
@@ -545,88 +606,101 @@ def handle_signal(symbol, price, change_24h=0.0):
         return
 
     if symbol in tracked:
-        last_alert = tracked[symbol].get("last_alert", 0)
-        if now - last_alert < ALERT_COOLDOWN_SEC:
+        if now - tracked[symbol].get("last_alert", 0) < ALERT_COOLDOWN_SEC:
             return
 
-    is_valid, kd, ob, vol_accum, consol, market_note = valid_setup(symbol, change_24h)
-    if not is_valid or kd is None:
+    result = valid_setup(symbol, change_24h)
+    if result is None:
         return
 
-    score = calculate_score(kd, ob, vol_accum, consol)
+    kd          = result["kd"]
+    ob          = result["ob"]
+    vol_accum   = result["vol_accum"]
+    vol_spike   = result["vol_spike"]
+    consol      = result["consol"]
+    higher_lows = result["higher_lows"]
+    green       = result["green"]
+    market_note = result["market_note"]
+
+    score = calculate_score(kd, ob, vol_accum, vol_spike, consol, higher_lows, green)
     label = score_label(score)
     if not label:
         return
 
-    # ── بناء نص الإشارات المتقدمة ────────────────
+    # ── بناء نص الإشارات ──────────────────────────
     signals_text = ""
-    is_accum, accum_str = vol_accum
+    is_accum,  accum_str  = vol_accum
+    is_spike,  spike_r    = vol_spike
     is_consol, consol_str = consol
+    is_hl,     hl_pct     = higher_lows
+    is_green,  green_pct  = green
 
+    if is_spike:
+        signals_text += "\n⚡ *Vol Spike:* `{:.1f}×` المتوسط".format(spike_r)
     if is_accum:
-        signals_text += "\n🔋 *Volume Accum:* `{:.0f}%`".format(accum_str)
+        signals_text += "\n🔋 *Vol Accum:* `{:.0f}%`".format(accum_str)
     if is_consol:
         signals_text += "\n🎯 *Consolidation:* `{:.0f}%`".format(consol_str)
+    if is_hl:
+        signals_text += "\n📈 *Higher Lows:* `{:.0f}%`".format(hl_pct)
+    if is_green:
+        signals_text += "\n🟢 *Green Candles:* `{:.0f}%`".format(green_pct)
     if market_note:
         signals_text += "\n{}".format(market_note)
 
     # ── Order Book text ───────────────────────────
     ob_text = ""
     if ob:
+        imb_emoji = "🟢" if ob["imbalance"] >= 1.2 else "🟡"
         ob_text = (
             "\n📗 Bid: `{:,.0f}` | 📕 Ask: `{:,.0f}`"
-            "\n⚖️ Imbalance: `{:.2f}`"
-        ).format(ob["bid_depth"], ob["ask_depth"], ob["imbalance"])
+            "\n{} Imbalance: `{:.2f}`"
+        ).format(ob["bid_depth"], ob["ask_depth"], imb_emoji, ob["imbalance"])
 
-    # ── اختيار إيموجي حسب نوع الإشارة ───────────
-    if is_accum and is_consol:
-        signal_type = "💎 *PRE-EXPLOSION*"
+    # ── نوع الإشارة ───────────────────────────────
+    active = sum([is_spike, is_accum, is_consol, is_hl])
+    if active >= 3:
+        stype = "💎 *PRE-EXPLOSION*"
+    elif is_accum and is_consol:
+        stype = "🔥 *ACCUMULATION+CONSOL*"
+    elif is_spike:
+        stype = "⚡ *VOLUME SPIKE*"
     elif is_accum:
-        signal_type = "🔋 *ACCUMULATION*"
+        stype = "🔋 *ACCUMULATION*"
     elif is_consol:
-        signal_type = "🎯 *CONSOLIDATION*"
+        stype = "🎯 *CONSOLIDATION*"
     else:
-        signal_type = "*SIGNAL*"
+        stype = "📊 *SIGNAL*"
 
     # ── إشارة #1 ─────────────────────────────────
     if symbol not in tracked:
-        tracked[symbol] = {
-            "entry":      price,
-            "level":      1,
-            "score":      score,
-            "entry_time": now,
-            "last_alert": now,
-        }
+        tracked[symbol]    = {"entry": price, "level": 1, "score": score,
+                               "entry_time": now, "last_alert": now}
         discovered[symbol] = {"price": price, "time": now, "score": score}
 
         send_telegram(
-            "👑 *SOURCE BOT VIP*\n"
+            "👑 *SOURCE BOT VIP v4*\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💰 *{sym}*\n"
-            "{label} | {stype} #1\n"
+            "{label} | {stype}\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💵 Price: `{price}`\n"
             "📊 Score: *{score}/100*\n"
             "🕐 Time: `{time}`"
             "{signals}"
             "{ob}\n"
-            "⚠️ Stop Loss: `-{sl}%`\n"
-            "📉 24h: `{change:.2f}%` | BTC: `{btc:.2f}%`".format(
-                sym=symbol,
-                label=label,
-                stype=signal_type,
-                price=format_price(price),
-                score=score,
+            "📉 24h: `{ch:.1f}%` | BTC: `{btc:.1f}%`\n"
+            "⚠️ Stop Loss: `-{sl}%`".format(
+                sym=symbol, label=label, stype=stype,
+                price=format_price(price), score=score,
                 time=datetime.now().strftime("%H:%M:%S"),
-                signals=signals_text,
-                ob=ob_text,
+                signals=signals_text, ob=ob_text,
+                ch=change_24h, btc=btc_change_24h,
                 sl=abs(STOP_LOSS_PCT),
-                change=change_24h,
-                btc=btc_change_24h,
             )
         )
-        log.info("🟢 SIGNAL #1 | %s | score=%d | accum=%s | consol=%s",
-                 symbol, score, is_accum, is_consol)
+        log.info("🟢 #1 | %s | score=%d | spike=%s accum=%s consol=%s hl=%s",
+                 symbol, score, is_spike, is_accum, is_consol, is_hl)
         return
 
     # ── إشارات المتابعة ───────────────────────────
@@ -639,8 +713,7 @@ def handle_signal(symbol, price, change_24h=0.0):
             "🚀 {label} | *SIGNAL #2*\n"
             "💰 *{sym}*\n"
             "📈 Gain: *+{gain:.2f}%*\n"
-            "💵 Price: `{price}`\n"
-            "📊 Score: *{score}/100*"
+            "💵 Price: `{price}` | Score: *{score}*"
             "{signals}{ob}".format(
                 label=label, sym=symbol, gain=change,
                 price=format_price(price), score=score,
@@ -649,15 +722,14 @@ def handle_signal(symbol, price, change_24h=0.0):
         )
         tracked[symbol]["level"]      = 2
         tracked[symbol]["last_alert"] = now
-        log.info("🔵 SIGNAL #2 | %s | +%.2f%%", symbol, change)
+        log.info("🔵 #2 | %s | +%.2f%%", symbol, change)
 
     elif level == 2 and change >= SIGNAL3_GAIN:
         send_telegram(
             "🔥 {label} | *SIGNAL #3*\n"
             "💰 *{sym}*\n"
             "📈 Gain: *+{gain:.2f}%*\n"
-            "💵 Price: `{price}`\n"
-            "📊 Score: *{score}/100*"
+            "💵 Price: `{price}` | Score: *{score}*"
             "{signals}{ob}".format(
                 label=label, sym=symbol, gain=change,
                 price=format_price(price), score=score,
@@ -666,19 +738,21 @@ def handle_signal(symbol, price, change_24h=0.0):
         )
         tracked[symbol]["level"]      = 3
         tracked[symbol]["last_alert"] = now
-        log.info("🔥 SIGNAL #3 | %s | +%.2f%%", symbol, change)
+        log.info("🔥 #3 | %s | +%.2f%%", symbol, change)
 
 
 # ═══════════════════════════════════════════════
-#         STALE SYMBOLS CLEANUP
+#         CLEANUP
 # ═══════════════════════════════════════════════
 def cleanup_stale():
     # type: () -> None
     now   = time.time()
-    stale = [s for s, d in list(tracked.items()) if now - d["entry_time"] > STALE_REMOVE_SEC]
+    stale = [s for s, d in list(tracked.items())
+             if now - d["entry_time"] > STALE_REMOVE_SEC]
     for s in stale:
-        log.info("🗑️ حذف زوج متوقف: %s", s)
+        log.info("🗑️ حذف متوقف: %s", s)
         del tracked[s]
+    cleanup_rejection_cache()
 
 
 # ═══════════════════════════════════════════════
@@ -694,11 +768,11 @@ def send_report():
 
     rows = []
     for sym, d in list(discovered.items()):
-        price_data = safe_get(MEXC_PRICE, {"symbol": sym})
-        if not price_data:
+        pd = safe_get(MEXC_PRICE, {"symbol": sym})
+        if not pd:
             continue
         try:
-            cur    = float(price_data["price"])
+            cur    = float(pd["price"])
             growth = (cur - d["price"]) / d["price"] * 100
             if growth > 5:
                 rows.append((sym, d["price"], cur, growth, d["score"]))
@@ -706,46 +780,45 @@ def send_report():
             continue
 
     if not rows:
-        log.info("📊 لا توجد نتائج قابلة للتقرير حالياً")
+        log.info("📊 لا توجد نتائج للتقرير")
         return
 
     rows.sort(key=lambda x: -x[3])
-    msg = "⚡ *PERFORMANCE REPORT v3*\n🕐 `{}`\n\n".format(
+    msg = "⚡ *PERFORMANCE REPORT v4*\n🕐 `{}`\n\n".format(
         datetime.now().strftime("%Y-%m-%d %H:%M")
     )
     for sym, disc, cur, growth, score in rows[:5]:
-        msg += "🔥 *{}*\n   Entry: `{}`  Now: `{}`\n   Growth: *+{:.2f}%* | Score: *{}*\n\n".format(
+        msg += "🔥 *{}*  Entry:`{}`  Now:`{}`\n   Growth: *+{:.2f}%* | Score:*{}*\n\n".format(
             sym, format_price(disc), format_price(cur), growth, score
         )
     send_telegram(msg)
-    log.info("📊 تم إرسال تقرير الأداء")
+    log.info("📊 تقرير الأداء أُرسل")
 
 
 # ═══════════════════════════════════════════════
 #                  MAIN LOOP
 # ═══════════════════════════════════════════════
 def run():
-    global watch_symbols, last_discovery
+    global watch_symbols, changes_map, last_discovery
 
-    log.info("🚀 بدء تشغيل MEXC Liquidity Bot v3...")
+    log.info("🚀 MEXC Bot v4 يبدأ...")
     send_telegram(
-        "🤖 *SOURCE BOT VIP v3* – تم التشغيل\n"
+        "🤖 *SOURCE BOT VIP v4*\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "⚙️ Score Min: `{score}` | Stop Loss: `-{sl}%`\n"
-        "📊 Interval: `{iv}s` | Max Pairs: `{mp}`\n"
-        "🆕 Volume Accumulation: ✅\n"
-        "🆕 Price Consolidation: ✅\n"
-        "🆕 Market Filter: ✅".format(
-            score=SCORE_MIN,
-            sl=abs(STOP_LOSS_PCT),
-            iv=CHECK_INTERVAL,
-            mp=MAX_SYMBOLS,
+        "✅ Min Imbalance: `{}` (رفض ضغط البيع)\n"
+        "✅ Green Candles Filter\n"
+        "✅ Higher Lows Filter\n"
+        "✅ Volume Spike Detector\n"
+        "✅ Rejection Cache\n"
+        "⚙️ Score: `{}` | SL: `-{}%` | Pairs: `{}`".format(
+            MIN_BID_ASK_IMBALANCE, SCORE_MIN,
+            abs(STOP_LOSS_PCT), MAX_SYMBOLS,
         )
     )
 
-    symbols_result = discover_symbols()
-    watch_symbols  = symbols_result[0]
-    changes_map    = symbols_result[1]
+    res            = discover_symbols()
+    watch_symbols  = res[0]
+    changes_map    = res[1]
     last_discovery = time.time()
     cycle          = 0
 
@@ -753,14 +826,12 @@ def run():
         try:
             now = time.time()
 
-            # تحديث الأزواج كل ساعة
             if now - last_discovery >= DISCOVERY_REFRESH_SEC:
-                symbols_result = discover_symbols()
-                watch_symbols  = symbols_result[0]
-                changes_map    = symbols_result[1]
+                res            = discover_symbols()
+                watch_symbols  = res[0]
+                changes_map    = res[1]
                 last_discovery = now
 
-            # جلب الأسعار دفعة واحدة
             prices_data = safe_get(MEXC_PRICE)
             if prices_data:
                 price_map = {}
@@ -769,35 +840,24 @@ def run():
                         price_map[p["symbol"]] = float(p["price"])
                     except (KeyError, ValueError):
                         pass
-
                 for sym in watch_symbols:
                     if sym in price_map:
-                        handle_signal(
-                            sym,
-                            price_map[sym],
-                            changes_map.get(sym, 0.0)
-                        )
+                        handle_signal(sym, price_map[sym], changes_map.get(sym, 0.0))
 
             cycle += 1
-            if cycle % 10 == 0:
-                cleanup_stale()
-            if cycle % 360 == 0:  # تحديث BTC كل ساعة
-                update_btc_change()
+            if cycle % 10  == 0: cleanup_stale()
+            if cycle % 360 == 0: update_btc_change()
 
             send_report()
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            log.info("⛔ تم إيقاف البوت يدوياً")
-            send_telegram("⛔ *SOURCE BOT VIP v3* – تم الإيقاف")
+            send_telegram("⛔ *SOURCE BOT VIP v4* – تم الإيقاف")
             break
         except Exception as e:
-            log.error("خطأ غير متوقع: %s", e, exc_info=True)
+            log.error("خطأ: %s", e, exc_info=True)
             time.sleep(5)
 
 
-# ═══════════════════════════════════════════════
-#                    ENTRY
-# ═══════════════════════════════════════════════
 if __name__ == "__main__":
     run()
