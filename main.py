@@ -869,19 +869,20 @@ def send_report():
 def run():
     global watch_symbols, changes_map, last_discovery
 
-    log.info("🚀 MEXC Bot v4 يبدأ...")
+    log.info("🚀 MEXC Bot v5 يبدأ...")
     send_telegram(
         "🤖 *SOURCE BOT VIP v5*\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "✅ Min Imbalance: `{}` (رفض ضغط البيع)\n"
-        "🆕 Dynamic Stop Loss: `{}-{}%`\n"
-        "✅ Green Candles Filter\n"
-        "✅ Higher Lows Filter\n"
-        "✅ Volume Spike Detector\n"
-        "✅ Rejection Cache\n"
-        "⚙️ Score: `{}` | SL: `-{}%` | Pairs: `{}`".format(
-            MIN_BID_ASK_IMBALANCE, SCORE_MIN,
-            SL_BASE_PCT, MAX_SYMBOLS,
+        "✅ Min Imbalance: `{imb}` (رفض ضغط البيع)\n"
+        "🆕 Dynamic SL: `{sl_min}-{sl_max}%` (تلقائي)\n"
+        "✅ Green Candles + Higher Lows\n"
+        "✅ Volume Spike + Rejection Cache\n"
+        "⚙️ Score Min: `{score}` | Max Pairs: `{pairs}`".format(
+            imb=MIN_BID_ASK_IMBALANCE,
+            sl_min=SL_MIN_PCT,
+            sl_max=SL_MAX_PCT,
+            score=SCORE_MIN,
+            pairs=MAX_SYMBOLS,
         )
     )
 
@@ -921,7 +922,7 @@ def run():
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            send_telegram("⛔ *SOURCE BOT VIP v4* – تم الإيقاف")
+            send_telegram("⛔ *SOURCE BOT VIP v5* – تم الإيقاف")
             break
         except Exception as e:
             log.error("خطأ: %s", e, exc_info=True)
