@@ -83,6 +83,20 @@ session.headers.update({"User-Agent": "MexcBot/2.0"})
 # ═══════════════════════════════════════════════
 #               TELEGRAM HELPERS
 # ═══════════════════════════════════════════════
+def format_price(price):
+    # type: (float) -> str
+    """تنسيق السعر بشكل مقروء بدون الصيغة العلمية"""
+    if price == 0:
+        return "0"
+    if price < 0.0001:
+        return "{:.10f}".format(price).rstrip("0")
+    if price < 1:
+        return "{:.8f}".format(price).rstrip("0")
+    if price < 1000:
+        return "{:.4f}".format(price).rstrip("0").rstrip(".")
+    return "{:,.2f}".format(price)
+
+
 def send_telegram(msg):
     # type: (str) -> None
     if not TELEGRAM_TOKEN or TELEGRAM_TOKEN.startswith("YOUR"):
@@ -286,7 +300,7 @@ def check_stop_loss(symbol, price):
             "🛑 *STOP LOSS* | `{}`\n"
             "📉 خسارة: `{:.2f}%`\n"
             "💵 سعر الدخول: `{}`\n"
-            "💵 السعر الحالي: `{}`".format(symbol, change, entry, price)
+            "💵 السعر الحالي: `{}`".format(symbol, change, format_price(entry), format_price(price))
         )
         log.info("🛑 Stop Loss: %s | %.2f%%", symbol, change)
         del tracked[symbol]
@@ -353,7 +367,7 @@ def handle_signal(symbol, price):
             "🕐 Time: `{}`"
             "{}\n"
             "⚠️ Stop Loss: `-{}%`".format(
-                symbol, label, price, score,
+                symbol, label, format_price(price), score,
                 datetime.now().strftime("%H:%M:%S"),
                 ob_text, abs(STOP_LOSS_PCT)
             )
