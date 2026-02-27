@@ -1,16 +1,17 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║         MEXC LIQUIDITY BOT v4 – SMART FILTER EDITION        ║
+║         MEXC LIQUIDITY BOT v5 – DYNAMIC STOP LOSS           ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-الإصلاحات v4:
+الإصلاحات v5:
   🔧 MIN_IMBALANCE     — رفض العملات ذات ضغط بيع قوي (Imbalance < 0.8)
   🔧 Bid > Ask         — الشراء يجب أن يتفوق على البيع دائماً
   🔧 Volume Spike      — كشف ارتفاع مفاجئ في الحجم خلال آخر شمعة
   🔧 Higher Lows       — السعر يصنع قيعان أعلى = اتجاه صاعد حقيقي
   🔧 Rejection Filter  — رفض العملات التي سبق رفضها مؤخراً (توفير API)
   🔧 Min Candle Green  — أغلبية الشموع الأخيرة خضراء
-  ✅ كل ميزات v3 محفوظة
+  🆕 Dynamic Stop Loss — يتكيف تلقائياً مع تقلب كل عملة
+  ✅ كل ميزات v4 محفوظة
 """
 
 import os
@@ -48,8 +49,14 @@ MIN_BID_ASK_IMBALANCE = 0.8    # 🆕 حد أدنى → رفض إذا Bid/Ask < 
 SCORE_MIN          = 65
 SIGNAL2_GAIN       = 2.0
 SIGNAL3_GAIN       = 4.0
-STOP_LOSS_PCT      = -4.0
 ALERT_COOLDOWN_SEC = 300
+
+# ── 🆕 Dynamic Stop Loss ──────────────────────────
+# يُحسب تلقائياً لكل عملة بناءً على تقلبها وقوة الإشارة
+# الحدود المسموح بها
+SL_MIN_PCT   = 2.0   # أضيق حد ممكن  (عملة هادئة + score عالي)
+SL_MAX_PCT   = 7.0   # أوسع حد ممكن  (عملة متقلبة + score منخفض)
+SL_BASE_PCT  = 4.0   # القيمة الافتراضية عند عدم وجود بيانات كافية
 
 # ── Volume Accumulation ───────────────────────────
 VOL_ACCUM_CANDLES        = 6
@@ -569,6 +576,63 @@ def discover_symbols():
     return symbols, ch_map
 
 
+
+# ═══════════════════════════════════════════════
+#   🆕 DYNAMIC STOP LOSS CALCULATOR
+# ═══════════════════════════════════════════════
+def calculate_dynamic_sl(kd, score, ob):
+    # type: (Dict, int, Optional[Dict]) -> float
+    """
+    يحسب نسبة Stop Loss المثلى لكل عملة بناءً على:
+      1. تقلب العملة  (ATR) — كلما كانت أكثر تقلباً = SL أوسع
+      2. قوة الإشارة  (Score) — كلما كان أعلى = SL أضيق
+      3. Imbalance    — كلما كان أقوى = SL أضيق
+
+    مثال:
+      عملة هادئة  + score 90 + imbalance 2.0 → SL = 2.5%
+      عملة متقلبة + score 65 + imbalance 0.9 → SL = 6.5%
+    """
+    closes = kd["closes"]
+    highs  = kd["highs"]
+    lows   = kd["lows"]
+
+    # ── 1. حساب ATR (متوسط نطاق الحركة) ─────────
+    # ATR = متوسط الفرق بين أعلى وأدنى سعر في كل شمعة
+    recent = list(zip(highs[-10:], lows[-10:]))
+    if recent and min(l for _, l in recent) > 0:
+        atr_pcts = [(h - l) / l * 100 for h, l in recent]
+        atr = sum(atr_pcts) / len(atr_pcts)
+    else:
+        atr = SL_BASE_PCT
+
+    # ── 2. تعديل بناءً على Score ──────────────────
+    # Score عالي = ثقة أعلى = SL أضيق
+    if score >= 88:
+        score_factor = 0.70    # تضييق 30%
+    elif score >= 75:
+        score_factor = 0.85    # تضييق 15%
+    elif score >= 65:
+        score_factor = 1.00    # لا تغيير
+    else:
+        score_factor = 1.15    # توسيع 15%
+
+    # ── 3. تعديل بناءً على Imbalance ─────────────
+    # Imbalance قوي = مشترون كثر = SL أضيق
+    imb_factor = 1.0
+    if ob:
+        imb = ob["imbalance"]
+        if imb >= 2.0:   imb_factor = 0.80
+        elif imb >= 1.5: imb_factor = 0.90
+        elif imb >= 1.0: imb_factor = 1.00
+        else:            imb_factor = 1.10
+
+    # ── الحساب النهائي ────────────────────────────
+    sl = atr * score_factor * imb_factor
+
+    # تطبيق الحدود
+    sl = max(SL_MIN_PCT, min(SL_MAX_PCT, sl))
+    return round(sl, 1)
+
 # ═══════════════════════════════════════════════
 #           STOP LOSS HANDLER
 # ═══════════════════════════════════════════════
@@ -576,17 +640,19 @@ def check_stop_loss(symbol, price):
     # type: (str, float) -> bool
     if symbol not in tracked:
         return False
-    entry  = tracked[symbol]["entry"]
-    change = (price - entry) / entry * 100
-    if change <= STOP_LOSS_PCT:
+    entry   = tracked[symbol]["entry"]
+    sl_pct  = tracked[symbol].get("sl_pct", SL_BASE_PCT)   # 🆕 Dynamic SL
+    change  = (price - entry) / entry * 100
+    if change <= -sl_pct:
         send_telegram(
-            "🛑 *STOP LOSS* | `{}`\n"
-            "📉 خسارة: `{:.2f}%`\n"
-            "💵 دخول: `{}` ← الآن: `{}`".format(
-                symbol, change, format_price(entry), format_price(price)
+            "🛑 *STOP LOSS* | `{sym}`\n"
+            "📉 خسارة: `{ch:.2f}%` | SL كان: `-{sl}%`\n"
+            "💵 دخول: `{entry}` ← الآن: `{now}`".format(
+                sym=symbol, ch=change, sl=sl_pct,
+                entry=format_price(entry), now=format_price(price)
             )
         )
-        log.info("🛑 Stop Loss: %s | %.2f%%", symbol, change)
+        log.info("🛑 Stop Loss: %s | %.2f%% (SL=%.1f%%)", symbol, change, sl_pct)
         del tracked[symbol]
         return True
     return False
@@ -674,8 +740,10 @@ def handle_signal(symbol, price, change_24h=0.0):
 
     # ── إشارة #1 ─────────────────────────────────
     if symbol not in tracked:
+        sl_pct = calculate_dynamic_sl(kd, score, ob)   # 🆕
         tracked[symbol]    = {"entry": price, "level": 1, "score": score,
-                               "entry_time": now, "last_alert": now}
+                               "entry_time": now, "last_alert": now,
+                               "sl_pct": sl_pct}             # 🆕
         discovered[symbol] = {"price": price, "time": now, "score": score}
 
         send_telegram(
@@ -690,13 +758,13 @@ def handle_signal(symbol, price, change_24h=0.0):
             "{signals}"
             "{ob}\n"
             "📉 24h: `{ch:.1f}%` | BTC: `{btc:.1f}%`\n"
-            "⚠️ Stop Loss: `-{sl}%`".format(
+            "⚠️ Stop Loss: `-{sl}%` (ديناميكي)".format(
                 sym=symbol, label=label, stype=stype,
                 price=format_price(price), score=score,
                 time=datetime.now().strftime("%H:%M:%S"),
                 signals=signals_text, ob=ob_text,
                 ch=change_24h, btc=btc_change_24h,
-                sl=abs(STOP_LOSS_PCT),
+                sl=sl_pct,
             )
         )
         log.info("🟢 #1 | %s | score=%d | spike=%s accum=%s consol=%s hl=%s",
@@ -803,16 +871,17 @@ def run():
 
     log.info("🚀 MEXC Bot v4 يبدأ...")
     send_telegram(
-        "🤖 *SOURCE BOT VIP v4*\n"
+        "🤖 *SOURCE BOT VIP v5*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Min Imbalance: `{}` (رفض ضغط البيع)\n"
+        "🆕 Dynamic Stop Loss: `{}-{}%`\n"
         "✅ Green Candles Filter\n"
         "✅ Higher Lows Filter\n"
         "✅ Volume Spike Detector\n"
         "✅ Rejection Cache\n"
         "⚙️ Score: `{}` | SL: `-{}%` | Pairs: `{}`".format(
             MIN_BID_ASK_IMBALANCE, SCORE_MIN,
-            abs(STOP_LOSS_PCT), MAX_SYMBOLS,
+            SL_BASE_PCT, MAX_SYMBOLS,
         )
     )
 
