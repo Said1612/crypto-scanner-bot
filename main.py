@@ -105,8 +105,31 @@ MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
 MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
 
 EXCLUDED          = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
-STABLECOINS       = {"USDT","BUSD","USDC","DAI","TUSD","PAX","UST","FDUSD"}
-LEVERAGE_KEYWORDS = ["3L","3S","5L","5S","BULL","BEAR","UP","DOWN"]
+
+# ── قائمة شاملة لكل العملات المستقرة ────────────
+STABLECOINS = {
+    # دولار أمريكي
+    "USDT","USDC","BUSD","FDUSD","USDP","GUSD","HUSD","USDN",
+    "USDX","USDJ","USDK","USDQ","USDD","USD1","USDE","USDZ",
+    "ZUSD","CUSD","SUSD","MUSD","RUSD","AUSD","NUSD","TUSD",
+    # يورو
+    "EURS","EURT","EURC","EURA","EUROC",
+    # ذهب وسلع
+    "PAXG","XAUT","CACHE","PMGT",
+    # خوارزمي / algo
+    "DAI","FRAX","MIM","LUSD","ALUSD","DOLA","USDD","CRVUSD",
+    "MKUSD","PYUSD","USDM","USDY","USDS","GHO","LISUSD","BEAN",
+    # آخرى
+    "PAX","UST","RSR","USDL","BUIDL",
+}
+
+# ── كلمات دالة على عملات غير قابلة للتداول ──────
+LEVERAGE_KEYWORDS = ["3L","3S","5L","5S","BULL","BEAR","UP","DOWN",
+                     "LONG","SHORT","HEDGE"]
+
+# ── كلمات في الاسم تدل على Stablecoin ───────────
+STABLE_KEYWORDS   = ["USD","EUR","GBP","JPY","CNY","AUD","CHF",
+                     "GOLD","SILVER","PAX","DAI","FRAX"]
 
 # ═══════════════════════════════════════════════
 #   SECTORS — 12 قطاع
@@ -133,9 +156,25 @@ SECTORS = {
     "Old":     ["LTCUSDT","ETCUSDT","XEMUSDT","LUNCUSDT","BTGUSDT"],
 }
 
-# ═══════════════════════════════════════════════
-#                   LOGGING
-# ═══════════════════════════════════════════════
+# ── 🆕 Smart Money Detection ─────────────────────
+SMART_MONEY_SIGMA      = 3.0    # Sigma ≥ 3 = حجم غير عادي
+SMART_MONEY_EVERY      = 86400  # تقرير يومي كل 24 ساعة
+SMART_MONEY_ACCUM_MIN  = 2      # عدد Stablecoins بحجم غير عادي للتأكيد
+SMART_MONEY_FALL_PCT   = 55     # % عملات نازلة = سوق في بيع
+SMART_MONEY_ALERT_SIGMA= 5.0    # Sigma ≥ 5 = تنبيه فوري (لا ينتظر 24h)
+
+# Stablecoins التي نراقب حجمها على MEXC
+SMART_MONEY_STABLES = [
+    "USDCUSDT",   # USDC — الأكثر استخداماً
+    "FDUSDUSDT",  # FDUSD — First Digital
+    "TUSDUSDT",   # TUSD
+    "USD1USDT",   # USD1 — مؤشر رئيسي
+    "RLUSDUSDT",  # RLUSD — Ripple
+    "BFUSDUSDT",  # BFUSD
+    "USDPUSDT",   # USDP — Paxos
+    "USDDUSDT",   # USDD — Tron
+]
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -171,12 +210,17 @@ all_tickers    = []        # type: List[Dict]
 klines_cache   = {}        # type: Dict[str, Tuple[Dict, float]]
 
 # توقيتات آخر تشغيل
-last_tickers   = 0.0
-last_btc       = 0.0
-last_sectors   = 0.0
-last_deep_scan = 0.0
-last_stale     = 0.0
-last_report    = 0.0
+last_tickers      = 0.0
+last_btc          = 0.0
+last_sectors      = 0.0
+last_deep_scan    = 0.0
+last_stale        = 0.0
+last_report       = 0.0
+last_smart_money  = 0.0
+
+# Smart Money — تاريخ حجم Stablecoins
+stable_vol_history = {}   # type: Dict[str, List[float]]
+smart_money_alert  = False  # هل يوجد تجميع نشط الآن؟
 
 # إحصائيات API (لمراقبة الاستخدام)
 api_calls_total    = 0
@@ -296,26 +340,60 @@ def clear_expired_cache():
 # ═══════════════════════════════════════════════
 #   PRE-FILTER — يرفض 90% من العملات بدون Klines
 # ═══════════════════════════════════════════════
-def pre_filter(sym, change, vol):
+def is_stablecoin(sym, last_price=0.0, change=0.0):
     # type: (str, float, float) -> bool
+    """
+    فلتر شامل للعملات المستقرة — 3 طبقات:
+    1. القائمة المباشرة
+    2. الكلمات الدالة في الاسم
+    3. السلوك السعري (تغيير < 0.5% = مستقرة)
+    """
+    base = sym.replace("USDT", "")
+
+    # طبقة 1: القائمة المباشرة
+    if base in STABLECOINS:
+        return True
+
+    # طبقة 2: كلمات في الاسم تدل على Stablecoin
+    # مثال: USD1, USDE, EUROC, GBPT...
+    for kw in STABLE_KEYWORDS:
+        if base.startswith(kw) or base.endswith(kw):
+            return True
+
+    # طبقة 3: السلوك السعري
+    # إذا التغيير 24h أقل من 0.5% = مستقرة على الأرجح
+    if abs(change) < 0.5 and last_price > 0:
+        return True
+
+    return False
+
+
+def pre_filter(sym, change, vol, price=0.0):
+    # type: (str, float, float, float) -> bool
     """
     فلتر سريع بدون أي طلب API إضافي.
     يستخدم البيانات الموجودة أصلاً من ticker/24hr.
-    يرفض العملات التي لا تستحق Scan عميق.
+    يرفض العملات المستقرة والرافعة وخارج النطاق.
     """
-    if sym in EXCLUDED: return False
-    base = sym.replace("USDT", "")
-    if base in STABLECOINS: return False
-    if any(k in sym for k in LEVERAGE_KEYWORDS): return False
     if not sym.endswith("USDT"): return False
+    if sym in EXCLUDED: return False
+    if any(k in sym for k in LEVERAGE_KEYWORDS): return False
+
+    # فلتر Stablecoin الشامل
+    if is_stablecoin(sym, price, change): return False
+
     # حجم
     if vol < PRE_MIN_VOL or vol > PRE_MAX_VOL: return False
+
     # تغيير
-    if change < PRE_MIN_CHANGE: return False     # نازل كثيراً
-    if change > PRE_MAX_CHANGE: return False     # Pump مشبوه
-    # السوق خطر: فقط العملات المستقلة
+    if change < PRE_MIN_CHANGE: return False
+    if change > PRE_MAX_CHANGE: return False
+
+    # السوق خطر
     if market_state == "DANGER":
         if change <= btc_change_24h: return False
+
+    return True
     return True
 
 
@@ -463,6 +541,245 @@ def analyze_sectors():
 # ═══════════════════════════════════════════════
 #   TICKERS — كل 30 دقيقة
 # ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════
+#   🆕 SMART MONEY DETECTION
+#   رصد تجميع الحيتان في Stablecoins
+# ═══════════════════════════════════════════════
+def analyze_smart_money(force_report=False):
+    # type: (bool) -> None
+    """
+    🐋 رصد تجميع الحيتان في Stablecoins
+
+    المنطق:
+    ┌─────────────────────────────────────────────┐
+    │  المرحلة 1 — بيع:                           │
+    │    الحيتان يبيعون عملاتهم → السوق ينزل      │
+    │    حجم Stablecoins يرتفع بشكل غير طبيعي     │
+    │                                             │
+    │  المرحلة 2 — تجميع:                         │
+    │    Sigma ≥ 3 = حجم 3× أعلى من المعتاد       │
+    │    Sigma ≥ 5 = تنبيه فوري (لا ينتظر 24h)   │
+    │                                             │
+    │  المرحلة 3 — ضخ:                            │
+    │    بعد 24-48h الحيتان يشترون عملات محددة    │
+    │    Sector Rotation يبدأ → إشارات قوية       │
+    └─────────────────────────────────────────────┘
+
+    التقرير:
+    • يومي كل 24 ساعة (ملخص الحالة)
+    • فوري إذا Sigma ≥ 5 (تجميع استثنائي)
+    """
+    global stable_vol_history, smart_money_alert, last_smart_money
+
+    if not all_tickers:
+        return
+
+    ticker_map  = {t["symbol"]: t for t in all_tickers}
+    detected    = []    # Stablecoins بحجم غير عادي
+    urgent      = []    # Stablecoins بـ Sigma ≥ 5 (تنبيه فوري)
+    total_sigma = 0.0
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 1: تحليل حجم كل Stablecoin
+    # ═══════════════════════════════════════════
+    for sym in SMART_MONEY_STABLES:
+        if sym not in ticker_map:
+            continue
+        try:
+            vol    = float(ticker_map[sym]["quoteVolume"])
+            change = float(ticker_map[sym]["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        # بناء تاريخ الحجم (آخر 48 قراءة = 48 ساعة)
+        if sym not in stable_vol_history:
+            stable_vol_history[sym] = []
+        hist = stable_vol_history[sym]
+        hist.append(vol)
+        if len(hist) > 48:
+            hist.pop(0)
+
+        # نحتاج على الأقل 4 نقاط تاريخية
+        if len(hist) < 4:
+            continue
+
+        # حساب Sigma
+        avg      = sum(hist) / len(hist)
+        variance = sum((v - avg) ** 2 for v in hist) / len(hist)
+        std      = variance ** 0.5
+
+        if std == 0 or avg == 0:
+            continue
+
+        sigma       = (vol - avg) / std
+        vol_ratio   = vol / avg  # كم مرة أعلى من المتوسط
+
+        if sigma >= SMART_MONEY_SIGMA:
+            entry = {
+                "sym":       sym.replace("USDT", ""),
+                "sigma":     round(sigma, 1),
+                "vol":       vol,
+                "vol_ratio": round(vol_ratio, 1),
+                "change":    change,
+            }
+            detected.append(entry)
+            total_sigma += sigma
+            if sigma >= SMART_MONEY_ALERT_SIGMA:
+                urgent.append(entry)
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 2: تحليل حالة السوق العام
+    # ═══════════════════════════════════════════
+    sell_pressure = 0.0
+    rising_count  = 0
+    falling_count = 0
+    top_falling   = []   # أكثر العملات انخفاضاً
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"): continue
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        try:
+            ch  = float(t["priceChangePercent"])
+            vol = float(t["quoteVolume"])
+            if ch > 0:
+                rising_count  += 1
+            else:
+                falling_count += 1
+                if ch < -5 and vol > 500_000:
+                    top_falling.append((base, ch, vol))
+            sell_pressure += ch
+        except (KeyError, ValueError):
+            pass
+
+    total_coins  = rising_count + falling_count
+    avg_market   = sell_pressure / total_coins if total_coins > 0 else 0
+    falling_pct  = falling_count / total_coins * 100 if total_coins > 0 else 0
+    top_falling.sort(key=lambda x: x[1])  # الأكثر انخفاضاً أولاً
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 3: تحديد مرحلة السوق
+    # ═══════════════════════════════════════════
+    is_accumulation = (
+        len(detected) >= SMART_MONEY_ACCUM_MIN and
+        falling_pct   >= SMART_MONEY_FALL_PCT  and
+        avg_market    <= -1.0
+    )
+    is_neutral = len(detected) > 0 and not is_accumulation
+
+    old_alert         = smart_money_alert
+    smart_money_alert = is_accumulation
+    last_smart_money  = time.time()
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 4: إرسال تنبيه فوري (Sigma ≥ 5)
+    # ═══════════════════════════════════════════
+    if urgent and not force_report:
+        urgent.sort(key=lambda x: -x["sigma"])
+        urgent_lines = ""
+        for d in urgent:
+            urgent_lines += "  🚨 *{}*  Sigma:`{}`  `{}×` المتوسط\n".format(
+                d["sym"], d["sigma"], d["vol_ratio"])
+
+        send(
+            "🚨 *تنبيه فوري — تجميع استثنائي!*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "{lines}\n"
+            "₿ BTC: `{btc:+.2f}%` | {mkt}`{fall:.0f}%` نازل\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🔴 *لا تشتري الآن — الحيتان يجمعون*".format(
+                lines=urgent_lines,
+                btc=btc_change_24h,
+                mkt="🔴" if falling_pct >= 55 else "🟡",
+                fall=falling_pct,
+            )
+        )
+        log.info("🚨 Urgent Smart Money! %d stables | sigma_max=%.1f",
+                 len(urgent), max(d["sigma"] for d in urgent))
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 5: التقرير اليومي الكامل
+    # ═══════════════════════════════════════════
+    if not force_report and not detected:
+        return
+
+    detected.sort(key=lambda x: -x["sigma"])
+
+    # بناء جدول Stablecoins
+    stable_lines = ""
+    if detected:
+        for d in detected[:6]:
+            bar   = "█" * min(int(d["sigma"]), 10)
+            stable_lines += (
+                "  • *{sym}*\n"
+                "    Sigma: `{sig}` | `{ratio}×` المتوسط\n"
+                "    [{bar}]\n"
+            ).format(
+                sym=d["sym"], sig=d["sigma"],
+                ratio=d["vol_ratio"], bar=bar,
+            )
+    else:
+        stable_lines = "  ✅ لا نشاط غير عادي\n"
+
+    # أكثر العملات انخفاضاً
+    falling_lines = ""
+    for base, ch, vol in top_falling[:3]:
+        falling_lines += "  • *{}* `{:.1f}%`\n".format(base, ch)
+
+    # تحديد الحالة
+    market_icon = "🔴" if falling_pct >= 55 else "🟡" if falling_pct >= 45 else "🟢"
+
+    if is_accumulation:
+        status_line  = "🐋 *تجميع نشط — الحيتان يجمعون!*"
+        warning_line = "🔴 *لا تشتري الآن — انتظر انتهاء التجميع*"
+        phase_desc   = "بيع في السوق + تجميع في Stablecoins"
+    elif is_neutral:
+        status_line  = "👀 *نشاط غير عادي — مراقبة*"
+        warning_line = "🟡 *تحذير خفيف — كن حذراً*"
+        phase_desc   = "حجم Stablecoins مرتفع بدون بيع واضح"
+    else:
+        status_line  = "🟢 *السوق طبيعي — لا تجميع*"
+        warning_line = "✅ *الإشارات مفعّلة بشكل طبيعي*"
+        phase_desc   = "لا نشاط غير عادي في Stablecoins"
+
+    msg = (
+        "🐋 *SMART MONEY DAILY REPORT*\n"
+        "📅 `{date}`\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{status}\n"
+        "_{desc}_\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 *Stablecoins (حجم غير عادي):*\n"
+        "{stables}\n"
+        "📉 *حالة السوق:*\n"
+        "  {mkt} `{fall:.0f}%` من العملات نازلة\n"
+        "  📊 متوسط: `{avg:+.2f}%`\n"
+        "  ₿ BTC 24h: `{btc:+.2f}%`\n"
+        "{falling_section}"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{warning}"
+    ).format(
+        date=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        status=status_line,
+        desc=phase_desc,
+        stables=stable_lines,
+        mkt=market_icon,
+        fall=falling_pct,
+        avg=avg_market,
+        btc=btc_change_24h,
+        falling_section=(
+            "📉 *أكثر انخفاضاً:*\n{}\n".format(falling_lines)
+            if falling_lines else ""
+        ),
+        warning=warning_line,
+    )
+
+    send(msg)
+    log.info("🐋 Smart Money Report | accum=%s | stables=%d | falling=%.0f%% | avg=%.2f%%",
+             is_accumulation, len(detected), falling_pct, avg_market)
+
+
 def refresh_tickers():
     # type: () -> None
     """
@@ -482,18 +799,19 @@ def refresh_tickers():
     for t in data:
         sym = t.get("symbol", "")
         try:
-            ch  = float(t["priceChangePercent"])
-            vol = float(t["quoteVolume"])
+            ch    = float(t["priceChangePercent"])
+            vol   = float(t["quoteVolume"])
+            price = float(t.get("lastPrice", 0))
         except (KeyError, ValueError):
             continue
 
         if sym == "BTCUSDT":
-            pass  # BTC يُحدَّث في analyze_btc
+            pass
 
         changes_map[sym] = ch
 
-        # الفلتر المسبق
-        if pre_filter(sym, ch, vol):
+        # الفلتر المسبق مع السعر
+        if pre_filter(sym, ch, vol, price):
             result.append((sym, vol))
 
     result.sort(key=lambda x: -x[1])
@@ -984,7 +1302,7 @@ def send_report():
 # ═══════════════════════════════════════════════
 def run():
     global last_tickers, last_btc, last_sectors
-    global last_deep_scan, last_stale
+    global last_deep_scan, last_stale, last_smart_money
 
     log.info("🚀 MAFIO BOT V10 يبدأ...")
 
@@ -1020,9 +1338,10 @@ def run():
             now = time.time()
 
             # ── تحديثات دورية ────────────────────────
-            if now - last_btc     >= BTC_EVERY:      analyze_btc()
-            if now - last_tickers >= TICKERS_EVERY: refresh_tickers()
+            if now - last_btc     >= BTC_EVERY:       analyze_btc()
+            if now - last_tickers >= TICKERS_EVERY:   refresh_tickers()
             if now - last_sectors >= SECTORS_EVERY:   analyze_sectors()
+            if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
             if now - last_stale   >= STALE_EVERY:
                 cleanup()
                 last_stale = now
