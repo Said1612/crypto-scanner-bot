@@ -1021,7 +1021,7 @@ def run():
 
             # ── تحديثات دورية ────────────────────────
             if now - last_btc     >= BTC_EVERY:      analyze_btc()
-            if now - last_tickers >= DISCOVERY_EVERY: refresh_tickers()
+            if now - last_tickers >= TICKERS_EVERY: refresh_tickers()
             if now - last_sectors >= SECTORS_EVERY:   analyze_sectors()
             if now - last_stale   >= STALE_EVERY:
                 cleanup()
