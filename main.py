@@ -497,7 +497,7 @@ def refresh_tickers():
             result.append((sym, vol))
 
     result.sort(key=lambda x: -x[1])
-    base_candidates = [s for s, _ in result[:MAX_SYMBOLS]]
+    base_candidates = [s for s, _ in result[:80]]
 
     # أضف عملات القطاعات الساخنة دائماً
     extra = [s for s in hot_symbols
