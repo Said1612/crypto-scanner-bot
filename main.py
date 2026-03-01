@@ -98,6 +98,14 @@ CACHE_15M          = 60        # شموع 15m صالحة 60 ثانية
 CACHE_1H           = 300       # شموع 1h صالحة 5 دقائق
 CACHE_4H           = 900       # شموع 4h صالحة 15 دقيقة
 
+# ── 🆕 Momentum Detector ─────────────────────────
+# يرصد الحركة اللحظية كل 12 ثانية بدون Klines
+# الهدف: الدخول عند 3-5% قبل الانفجار
+MOMENTUM_MOVE_MIN  = 2.0    # السعر تحرك 2%+ عن آخر قراءة
+MOMENTUM_MOVE_MAX  = 8.0    # لم يتجاوز 8% بعد (مبكر)
+MOMENTUM_MIN_VOL   = 300_000 # حجم 24h أدنى
+MOMENTUM_COOLDOWN  = 600     # 10 دقائق بين كل تنبيه لنفس العملة
+
 # ── MEXC Endpoints ──────────────────────────────
 MEXC_24H    = "https://api.mexc.com/api/v3/ticker/24hr"
 MEXC_PRICE  = "https://api.mexc.com/api/v3/ticker/price"
@@ -220,7 +228,11 @@ last_smart_money  = 0.0
 
 # Smart Money — تاريخ حجم Stablecoins
 stable_vol_history = {}   # type: Dict[str, List[float]]
-smart_money_alert  = False  # هل يوجد تجميع نشط الآن؟
+smart_money_alert  = False
+
+# 🆕 Momentum Detector — تتبع الأسعار اللحظية
+price_prev         = {}   # type: Dict[str, float]  السعر السابق
+momentum_alerted   = {}   # type: Dict[str, float]  آخر تنبيه {sym: time}
 
 # إحصائيات API (لمراقبة الاستخدام)
 api_calls_total    = 0
@@ -778,6 +790,81 @@ def analyze_smart_money(force_report=False):
     send(msg)
     log.info("🐋 Smart Money Report | accum=%s | stables=%d | falling=%.0f%% | avg=%.2f%%",
              is_accumulation, len(detected), falling_pct, avg_market)
+
+
+
+# ═══════════════════════════════════════════════
+#   🆕 MOMENTUM DETECTOR
+#   يرصد الحركة اللحظية — الدخول عند 3-5%
+# ═══════════════════════════════════════════════
+def detect_momentum(price_map, change_now, vol_now):
+    # type: (Dict[str, float], Dict[str, float], Dict[str, float]) -> None
+    """
+    يرصد الحركة اللحظية كل 12 ثانية.
+    يستخدم بيانات 24h Ticker المحدّثة كل دورة.
+
+    الهدف: اكتشاف الانفجار عند 2-5% قبل أن يصل 18%+
+
+    ┌─────────────────────────────────────────┐
+    │  كل 12 ثانية:                           │
+    │  1. مقارنة السعر الحالي بالسابق        │
+    │  2. إذا تحرك 2-8% → Deep Scan فوري     │
+    │  3. إذا القطاع ساخن → أولوية أعلى      │
+    └─────────────────────────────────────────┘
+    """
+    global price_prev, momentum_alerted
+
+    now = time.time()
+
+    for sym, price in price_map.items():
+        if sym in tracked: continue
+        if not sym.endswith("USDT"): continue
+
+        # تحقق من الحجم أولاً (بدون API إضافي)
+        vol = vol_now.get(sym, 0)
+        if vol < MOMENTUM_MIN_VOL: continue
+
+        # تجاهل Stablecoins
+        base = sym.replace("USDT","")
+        if base in STABLECOINS: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+
+        prev = price_prev.get(sym, 0)
+        price_prev[sym] = price
+
+        if prev <= 0 or price <= 0:
+            continue
+
+        # التحرك اللحظي (آخر 12 ثانية)
+        move = (price - prev) / prev * 100
+
+        # التحرك 24h (من الـ ticker المحدّث)
+        change_24h = change_now.get(sym, 0)
+
+        # شروط الاكتشاف المبكر:
+        # 1. تحرك لحظي 2-8%
+        # 2. تغيير 24h لا يزال معقولاً (لم يرتفع كثيراً بعد)
+        if move < MOMENTUM_MOVE_MIN: continue
+        if move > MOMENTUM_MOVE_MAX: continue
+        if change_24h > 20: continue   # متأخر جداً — تجاوز 20%
+        if change_24h < -10: continue  # نازل بقوة
+
+        # cooldown
+        if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN:
+            continue
+
+        # هل في قطاع ساخن؟ (أولوية أعلى)
+        in_hot = sym in hot_symbols
+        sector = next((s for s, syms in SECTORS.items()
+                      if sym in syms and s in hot_sectors), "")
+
+        momentum_alerted[sym] = now
+
+        log.info("⚡ MOMENTUM%s: %s | +%.2f%% لحظي | 24h:%.1f%% | vol:%.0f",
+                 " 🔥" if in_hot else "", sym, move, change_24h, vol)
+
+        # Deep Scan فوري
+        deep_scan(sym, price, change_24h)
 
 
 def refresh_tickers():
@@ -1338,26 +1425,41 @@ def run():
             now = time.time()
 
             # ── تحديثات دورية ────────────────────────
-            if now - last_btc     >= BTC_EVERY:       analyze_btc()
-            if now - last_tickers >= TICKERS_EVERY:   refresh_tickers()
-            if now - last_sectors >= SECTORS_EVERY:   analyze_sectors()
+            if now - last_btc         >= BTC_EVERY:         analyze_btc()
+            if now - last_sectors     >= SECTORS_EVERY:     analyze_sectors()
             if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
-            if now - last_stale   >= STALE_EVERY:
+            if now - last_stale       >= STALE_EVERY:
                 cleanup()
                 last_stale = now
 
-            # ── جلب الأسعار (كل 12 ثانية — طلب واحد) ──
-            prices = safe_get(MEXC_PRICE)
-            if not prices:
+            # ── جلب 24h Ticker (كل دورة = طلب واحد) ──
+            # يحتوي على السعر + الحجم + التغيير = كل ما نحتاج
+            tickers_now = safe_get(MEXC_24H)
+            if not tickers_now:
                 time.sleep(CHECK_INTERVAL)
                 continue
 
-            price_map = {}
-            for p in prices:
+            # بناء الخرائط من الـ ticker
+            price_map  = {}
+            change_now = {}
+            vol_now    = {}
+            for t in tickers_now:
+                sym = t.get("symbol","")
                 try:
-                    price_map[p["symbol"]] = float(p["price"])
+                    price_map[sym]  = float(t["lastPrice"])
+                    change_now[sym] = float(t["priceChangePercent"])
+                    vol_now[sym]    = float(t["quoteVolume"])
                 except (KeyError, ValueError):
                     pass
+
+            # تحديث all_tickers و changes_map للقطاعات
+            all_tickers = tickers_now
+            changes_map.update(change_now)
+
+            # تحديث candidates كل 15 دقيقة فقط
+            if now - last_tickers >= TICKERS_EVERY:
+                refresh_tickers()
+                analyze_sectors()  # تحديث القطاعات بعد كل refresh
 
             # ── Trailing Stop + Signal Progression ──────
             for sym in list(tracked.keys()):
@@ -1365,9 +1467,13 @@ def run():
                     if not check_trailing(sym, price_map[sym]):
                         check_progression(sym, price_map[sym])
 
-            # ── Deep Scan كل 4 ساعات ──────────────────
+            # ── 🆕 Momentum Detector (كل 12 ثانية) ──────
+            # يرصد تحرك السعر اللحظي ويطلق Deep Scan فوراً
+            detect_momentum(price_map, change_now, vol_now)
+
+            # ── Deep Scan كل 15 دقيقة ────────────────────
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
-                log.info("🔍 Deep Scan كل ساعة — %d عملة...", len(candidates))
+                log.info("🔍 Deep Scan — %d عملة...", len(candidates))
                 scanned = 0
                 for sym in candidates:
                     if sym in tracked: continue
@@ -1376,12 +1482,10 @@ def run():
                     if price <= 0: continue
                     deep_scan(sym, price, change)
                     scanned += 1
-                    # استراحة قصيرة بين كل عملة لتفادي الحظر
                     if scanned % 10 == 0:
-                        time.sleep(1)
-
+                        time.sleep(0.5)
                 last_deep_scan = now
-                log.info("✅ Deep Scan انتهى | فحص %d عملة", scanned)
+                log.info("✅ Deep Scan انتهى | %d عملة", scanned)
 
             cycle += 1
             send_report()
