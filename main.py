@@ -36,7 +36,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
 CHAT_ID        = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
 
 # ── إشارات ──────────────────────────────────────
-SCORE_MIN          = 65
+SCORE_MIN          = 55        # 🧪 TEST (كان 65)
 GOLD_MIN           = 88
 SIGNAL2_GAIN       = 2.0
 SIGNAL3_GAIN       = 4.0
@@ -64,8 +64,8 @@ PD_MIN_DROP        = 5.0
 PD_LOOKBACK        = 12
 
 # ── Sector Rotation ──────────────────────────────
-SECTOR_HOT_CHANGE  = 3.0
-SECTOR_MIN_RISING  = 60.0
+SECTOR_HOT_CHANGE  = 2.0       # 🧪 TEST (كان 3.0)
+SECTOR_MIN_RISING  = 50.0      # 🧪 TEST (كان 60.0)
 SECTOR_BONUS       = 15
 
 # ── Volume & Order Book ──────────────────────────
@@ -114,10 +114,10 @@ MOMENTUM_COOLDOWN  = 14400
 # ── 🆕 Sector Flow Tracker ───────────────────────
 # يرصد تدفق السيولة بين القطاعات
 FLOW_WINDOW        = 5         # عدد القراءات للمقارنة (~60 ثانية)
-FLOW_VOL_SURGE     = 1.5       # نسبة ارتفاع حجم القطاع = تدفق سيولة
-FLOW_CHANGE_MIN    = 2.0       # متوسط تغيير القطاع % للتأكيد
+FLOW_VOL_SURGE     = 1.3       # 🧪 TEST (كان 1.5) — نسبة ارتفاع حجم القطاع
+FLOW_CHANGE_MIN    = 1.0       # 🧪 TEST (كان 2.0) — متوسط تغيير القطاع %
 FLOW_EXIT_DROP     = -1.5      # نسبة انخفاض = خروج سيولة من القطاع
-FLOW_ALERT_COOL    = 900       # 15 دقيقة cooldown لنفس القطاع
+FLOW_ALERT_COOL    = 600       # 🧪 TEST (كان 900) — 10 دقائق cooldown
 FLOW_HISTORY_MAX   = 20        # أقصى تاريخ محفوظ للقطاع
 
 # ── 🆕 Auto Expand ───────────────────────────────
@@ -125,8 +125,8 @@ EXPAND_EVERY       = 86400     # إعادة توسيع القوائم كل 24 س
 
 # ── 🆕 Smart Top10 — اصطياد قبل الانفجار ────────
 TOP10_CHANGE_MIN   = 0.0      # تغيير 24h أدنى — لم تنزل
-TOP10_CHANGE_MAX   = 5.0      # تغيير 24h أقصى — لم تنطلق بعد!
-TOP10_VOL_RATIO    = 1.5      # الحجم ارتفع 1.5x على الأقل
+TOP10_CHANGE_MAX   = 8.0      # 🧪 TEST (كان 5.0) — توسيع النطاق
+TOP10_VOL_RATIO    = 1.2      # 🧪 TEST (كان 1.5) — تخفيف شرط الحجم
 TOP10_REBOUND_MAX  = 15.0     # ارتداد من القاع أقل من 15% = لا يزال قريباً
 TOP10_MIN_VOL      = 150_000  # حجم 24h أدنى للقبول
 TOP10_COOLDOWN     = 1800     # 30 دقيقة cooldown لنفس القطاع
