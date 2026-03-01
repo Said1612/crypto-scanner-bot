@@ -103,7 +103,7 @@ CACHE_4H           = 900       # شموع 4h صالحة 15 دقيقة
 # الهدف: الدخول عند 3-5% قبل الانفجار
 MOMENTUM_MOVE_MIN  = 2.0    # السعر تحرك 2%+ عن آخر قراءة
 MOMENTUM_MOVE_MAX  = 8.0    # لم يتجاوز 8% بعد (مبكر)
-MOMENTUM_MIN_VOL   = 300_000 # حجم 24h أدنى
+MOMENTUM_MIN_VOL   = 500_000 # حجم 24h أدنى (~Market Cap 5M$)
 MOMENTUM_COOLDOWN  = 600     # 10 دقائق بين كل تنبيه لنفس العملة
 
 # ── MEXC Endpoints ──────────────────────────────
@@ -233,6 +233,10 @@ smart_money_alert  = False
 # 🆕 Momentum Detector — تتبع الأسعار اللحظية
 price_prev         = {}   # type: Dict[str, float]  السعر السابق
 momentum_alerted   = {}   # type: Dict[str, float]  آخر تنبيه {sym: time}
+
+# 🆕 نظام الإشعارات الثلاثي
+# {sym: {stage, entry_price, entry_vol, entry_time, alerted_2, alerted_3}}
+momentum_stage     = {}   # type: Dict[str, Dict]
 
 # إحصائيات API (لمراقبة الاستخدام)
 api_calls_total    = 0
@@ -798,33 +802,83 @@ def analyze_smart_money(force_report=False):
 #   يرصد الحركة اللحظية — الدخول عند 3-5%
 # ═══════════════════════════════════════════════
 def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
-    # type: (Dict[str, float], Dict[str, float], Dict[str, float]) -> None
+    # type: (Dict[str, float], Dict[str, float], Dict[str, float], Dict, Dict) -> None
     """
-    يرصد الحركة اللحظية كل 12 ثانية.
-    يستخدم بيانات 24h Ticker المحدّثة كل دورة.
-
-    الهدف: اكتشاف الانفجار عند 2-5% قبل أن يصل 18%+
-
-    ┌─────────────────────────────────────────┐
-    │  كل 12 ثانية:                           │
-    │  1. مقارنة السعر الحالي بالسابق        │
-    │  2. إذا تحرك 2-8% → Deep Scan فوري     │
-    │  3. إذا القطاع ساخن → أولوية أعلى      │
-    └─────────────────────────────────────────┘
+    نظام الإشعارات الثلاثي — اصطياد القاع مع السيولة:
+    🔵 المرحلة 1: Momentum Detected  — أول رصد للسيولة
+    🟡 المرحلة 2: السيولة ترتفع      — سعر +2% + حجم متصاعد
+    🟢 المرحلة 3: تأكيد الدخول       — كل الشروط معاً (Score 65+)
     """
-    global price_prev, momentum_alerted
+    global price_prev, momentum_alerted, momentum_stage
 
     now = time.time()
 
+    # ── المرحلة 2 و 3: متابعة العملات المرصودة ──────────
+    for sym, stage_data in list(momentum_stage.items()):
+        if sym not in price_map: continue
+        price      = price_map[sym]
+        vol        = vol_now.get(sym, 0)
+        change_24h = change_now.get(sym, 0)
+        entry_price = stage_data["entry_price"]
+        entry_vol   = stage_data["entry_vol"]
+        gain        = (price - entry_price) / entry_price * 100 if entry_price > 0 else 0
+
+        # تنظيف: إذا مضى أكثر من 2 ساعة بدون تأكيد = احذف
+        if now - stage_data["entry_time"] > 7200:
+            del momentum_stage[sym]
+            continue
+
+        # إذا السعر نزل -5% من نقطة الرصد = احذف
+        if gain < -5:
+            del momentum_stage[sym]
+            continue
+
+        # ── المرحلة 2: السيولة ترتفع ──────────────────
+        if stage_data["stage"] == 1 and not stage_data.get("alerted_2"):
+            vol_ratio = vol / entry_vol if entry_vol > 0 else 1
+            if gain >= 2.0 and vol_ratio >= 1.3:
+                stage_data["alerted_2"] = True
+                in_hot = sym in hot_symbols
+                hot_tag = " 🔥" if in_hot else ""
+                send(
+                    "🟡 *السيولة ترتفع*{hot}\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "💰 *{sym}*\n"
+                    "📈 ارتفع: `+{gain:.2f}%` من نقطة الرصد\n"
+                    "💧 الحجم: `{ratio:.1f}x` المعدل\n"
+                    "💵 السعر: `{price}`\n"
+                    "🕐 `{time}`\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "⚡ _قريب من التأكيد..._".format(
+                        hot=hot_tag, sym=sym,
+                        gain=gain, ratio=vol_ratio,
+                        price=format_price(price),
+                        time=datetime.now().strftime("%H:%M:%S"),
+                    )
+                )
+                stage_data["stage"] = 2
+                log.info("🟡 Stage2 | %s | +%.2f%% | vol_ratio=%.1f", sym, gain, vol_ratio)
+
+        # ── المرحلة 3: تأكيد الدخول ───────────────────
+        if stage_data["stage"] == 2 and not stage_data.get("alerted_3"):
+            vol_ratio = vol / entry_vol if entry_vol > 0 else 1
+            if gain >= 3.0 and vol_ratio >= 2.0 and change_24h > 0:
+                # Deep Scan للتحقق من Score
+                deep_scan(sym, price, change_24h)
+                # الإشعار يُرسل من داخل deep_scan إذا Score >= 65
+                stage_data["alerted_3"] = True
+                stage_data["stage"] = 3
+                log.info("🟢 Stage3 | %s | +%.2f%% | deep_scan triggered", sym, gain)
+
+    # ── المرحلة 1: رصد جديد ──────────────────────────
     for sym, price in price_map.items():
         if sym in tracked: continue
+        if sym in momentum_stage: continue
         if not sym.endswith("USDT"): continue
 
-        # تحقق من الحجم أولاً (بدون API إضافي)
         vol = vol_now.get(sym, 0)
         if vol < MOMENTUM_MIN_VOL: continue
 
-        # تجاهل Stablecoins والرافعة
         base = sym.replace("USDT","")
         if base in STABLECOINS: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
@@ -832,73 +886,72 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
 
         prev = price_prev.get(sym, 0)
         price_prev[sym] = price
+        if prev <= 0 or price <= 0: continue
 
-        if prev <= 0 or price <= 0:
-            continue
-
-        # التحرك اللحظي (آخر 12 ثانية)
-        move = (price - prev) / prev * 100
-
-        # التحرك 24h (من الـ ticker المحدّث)
+        move       = (price - prev) / prev * 100
         change_24h = change_now.get(sym, 0)
+        high_24h   = high_map.get(sym, price)
+        low_24h    = low_map.get(sym, price)
 
-        # شروط الاكتشاف المبكر:
-        # 1. تحرك لحظي 2-8%
-        # 2. تغيير 24h لا يزال معقولاً (لم يرتفع كثيراً بعد)
+        # ── فلاتر اصطياد القاع ──────────────────────
         if move < MOMENTUM_MOVE_MIN: continue
         if move > MOMENTUM_MOVE_MAX: continue
-        if change_24h > 15: continue   # متأخر جداً — تجاوز 15%
-        if change_24h < 0: continue    # 24h سالب = في هبوط — تجاهل
+        if change_24h <= 0: continue
+        if change_24h > 50: continue
 
-        # ── فلتر القمة: السعر يجب أن يكون قريباً من أعلى سعر 24h ──
-        high_24h = high_map.get(sym, price)
-        if high_24h > 0 and price < high_24h * 0.70:
-            continue  # نزل أكثر من 30% من القمة = في هبوط
+        if low_24h > 0 and price > low_24h * 2.5: continue
+        if high_24h > 0 and price > high_24h * 0.90: continue
 
-        # ── فلتر القاع: السعر لم يرتفع أكثر من 3x من أدنى سعر 24h ──
-        low_24h = low_map.get(sym, price)
-        if low_24h > 0 and price > low_24h * 3.0:
-            continue  # ارتفع 3x من القاع = متأخر جداً
+        if low_24h > 0:
+            rebound = (price - low_24h) / low_24h * 100
+            if rebound < 5: continue
 
-        # cooldown
+        # cooldown للمرحلة 1
         if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN:
             continue
 
-        # هل في قطاع ساخن؟ (أولوية أعلى)
-        in_hot = sym in hot_symbols
-        sector = next((s for s, syms in SECTORS.items()
-                      if sym in syms and s in hot_sectors), "")
-
         momentum_alerted[sym] = now
+        in_hot  = sym in hot_symbols
+        sector  = next((s for s, syms in SECTORS.items()
+                       if sym in syms and s in hot_sectors), "")
+        hot_tag = " 🔥 *{}*".format(sector) if in_hot else ""
 
-        log.info("⚡ MOMENTUM%s: %s | +%.2f%% لحظي | 24h:%.1f%% | vol:%.0f",
-                 " 🔥" if in_hot else "", sym, move, change_24h, vol)
+        rebound        = (price - low_24h) / low_24h * 100 if low_24h > 0 else 0
+        drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
-        # ── إشعار تلغرام فوري ──────────────────
-        hot_tag = " 🔥 *قطاع ساخن: {}*".format(sector) if in_hot else ""
+        # حفظ بيانات المرحلة 1
+        momentum_stage[sym] = {
+            "stage":       1,
+            "entry_price": price,
+            "entry_vol":   vol,
+            "entry_time":  now,
+            "alerted_2":   False,
+            "alerted_3":   False,
+        }
+
+        log.info("🔵 Stage1 | %s | +%.2f%% لحظي | 24h:%.1f%% | vol:%.0f",
+                 sym, move, change_24h, vol)
+
+        # ── إشعار المرحلة 1 ─────────────────────────
         send(
-            "⚡ *MOMENTUM ALERT*{hot}\n"
+            "🔵 *Momentum Detected*{hot}\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💰 *{sym}*\n"
             "📈 تحرك لحظي: `+{move:.2f}%`\n"
-            "📊 تغيير 24h: `{ch:+.1f}%`\n"
+            "📊 تغيير 24h: `+{ch:.1f}%`\n"
             "💧 حجم: `{vol:,.0f}`\n"
             "💵 السعر: `{price}`\n"
+            "📉 من القمة: `-{drop:.1f}%` | ارتداد: `+{reb:.1f}%`\n"
             "🕐 `{time}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ _راقب — جاري التحقق..._".format(
-                hot=hot_tag,
-                sym=sym,
-                move=move,
-                ch=change_24h,
-                vol=vol,
-                price=format_price(price),
+            "👀 _مراقبة — انتظر التأكيد_".format(
+                hot=hot_tag, sym=sym,
+                move=move, ch=change_24h,
+                vol=vol, price=format_price(price),
+                drop=drop_from_high, reb=rebound,
                 time=datetime.now().strftime("%H:%M:%S"),
             )
         )
-
-        # Deep Scan فوري
-        deep_scan(sym, price, change_24h)
 
 
 def refresh_tickers():
