@@ -824,10 +824,11 @@ def detect_momentum(price_map, change_now, vol_now):
         vol = vol_now.get(sym, 0)
         if vol < MOMENTUM_MIN_VOL: continue
 
-        # تجاهل Stablecoins
+        # تجاهل Stablecoins والرافعة
         base = sym.replace("USDT","")
         if base in STABLECOINS: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        if sym in EXCLUDED: continue
 
         prev = price_prev.get(sym, 0)
         price_prev[sym] = price
@@ -875,7 +876,7 @@ def refresh_tickers():
     """
     global all_tickers, changes_map, candidates, last_tickers
 
-    data = safe_get(MEXC_24H)   # طلب واحد فقط
+    data = safe_get(MEXC_24H)
     if not data:
         return
 
@@ -892,17 +893,25 @@ def refresh_tickers():
         except (KeyError, ValueError):
             continue
 
-        if sym == "BTCUSDT":
-            pass
-
         changes_map[sym] = ch
 
-        # الفلتر المسبق مع السعر
-        if pre_filter(sym, ch, vol, price):
-            result.append((sym, vol))
+        # فلتر بسيط فقط — نريد أكبر قائمة ممكنة
+        if not sym.endswith("USDT"): continue
+        if sym in EXCLUDED: continue
+        base = sym.replace("USDT","")
+        if base in STABLECOINS: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        if vol < MIN_VOL_USDT: continue       # حجم أدنى فقط
+        if vol > MAX_VOL_USDT: continue       # حجم أقصى فقط
+        if ch < -15: continue                 # نازل بقوة جداً
+        if 0.95 <= price <= 1.05 and price > 0: continue  # Stablecoin بالسعر
+
+        result.append((sym, vol))
 
     result.sort(key=lambda x: -x[1])
-    base_candidates = [s for s, _ in result[:80]]
+
+    # نأخذ 200 عملة بدل 80 لتغطية أكبر
+    base_candidates = [s for s, _ in result[:200]]
 
     # أضف عملات القطاعات الساخنة دائماً
     extra = [s for s in hot_symbols
@@ -1393,11 +1402,20 @@ def run():
 
     log.info("🚀 MAFIO BOT V10 يبدأ...")
 
-    # تهيئة أولية
+    # ── تهيئة كاملة قبل البدء ──────────────────
+    log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
+
+    # نكرر refresh_tickers مرتين للتأكد من البيانات
     refresh_tickers()
+    time.sleep(2)
+    refresh_tickers()   # مرة ثانية للتأكد
+
     analyze_sectors()
-    last_deep_scan = 0  # نبدأ Scan فوراً
+    log.info("✅ جاهز | Candidates: %d | Hot: %s",
+             len(candidates), ", ".join(hot_sectors) or "لا يوجد")
+
+    last_deep_scan = 0  # نبدأ Deep Scan فوراً
 
     send(
         "🤖 *MAFIO BOT SIGNAL V10*\n"
