@@ -864,6 +864,29 @@ def detect_momentum(price_map, change_now, vol_now):
         log.info("⚡ MOMENTUM%s: %s | +%.2f%% لحظي | 24h:%.1f%% | vol:%.0f",
                  " 🔥" if in_hot else "", sym, move, change_24h, vol)
 
+        # ── إشعار تلغرام فوري ──────────────────
+        hot_tag = " 🔥 *قطاع ساخن: {}*".format(sector) if in_hot else ""
+        send(
+            "⚡ *MOMENTUM ALERT*{hot}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💰 *{sym}*\n"
+            "📈 تحرك لحظي: `+{move:.2f}%`\n"
+            "📊 تغيير 24h: `{ch:+.1f}%`\n"
+            "💧 حجم: `{vol:,.0f}`\n"
+            "💵 السعر: `{price}`\n"
+            "🕐 `{time}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ _راقب — جاري التحقق..._".format(
+                hot=hot_tag,
+                sym=sym,
+                move=move,
+                ch=change_24h,
+                vol=vol,
+                price=format_price(price),
+                time=datetime.now().strftime("%H:%M:%S"),
+            )
+        )
+
         # Deep Scan فوري
         deep_scan(sym, price, change_24h)
 
