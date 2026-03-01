@@ -518,6 +518,11 @@ last_stale        = 0.0
 last_report       = 0.0
 last_smart_money  = 0.0
 last_expand       = 0.0    # 🆕 آخر توسيع تلقائي للقوائم
+last_daily_report = 0.0    # 🆕 V15: آخر تقرير يومي عند 00:00 UTC
+
+# 🆕 V15: تاريخ حجم السوق اليومي للمقارنة
+daily_market_vol_history = []  # type: List[float]   [أمس, اليوم]
+daily_report_sent_date   = ""  # type: str            تاريخ آخر تقرير أُرسل
 
 stable_vol_history = {}   # type: Dict[str, List[float]]
 smart_money_alert  = False
@@ -2507,6 +2512,259 @@ def cleanup():
     clear_expired_cache()
 
 
+
+
+# ═══════════════════════════════════════════════
+#   🆕 V15: DAILY MARKET REPORT — 00:00 UTC
+#   تقرير يومي شامل عند إغلاق الشمعة اليومية
+#   يكشف: هل الحيتان داخل السوق أم خارجه؟
+# ═══════════════════════════════════════════════
+def send_daily_report():
+    # type: () -> None
+    global daily_report_sent_date, daily_market_vol_history
+
+    # ── التحقق من الوقت: هل نحن عند 00:00 UTC؟ ──
+    now_utc  = datetime.utcnow()
+    today    = now_utc.strftime("%Y-%m-%d")
+
+    # أرسل فقط مرة واحدة في اليوم عند 00:00→00:05 UTC
+    if daily_report_sent_date == today:
+        return
+    if now_utc.hour != 0 or now_utc.minute > 5:
+        return
+
+    daily_report_sent_date = today
+    log.info("📅 Daily Report — إرسال تقرير إغلاق اليوم...")
+
+    if not all_tickers:
+        return
+
+    # ══════════════════════════════════════════
+    # 1. تحليل Stablecoins — مؤشر الحيتان 🐋
+    # ══════════════════════════════════════════
+    ticker_map     = {t["symbol"]: t for t in all_tickers}
+    stable_total   = 0.0
+    stable_details = []
+
+    for sym in SMART_MONEY_STABLES:
+        if sym not in ticker_map: continue
+        try:
+            vol = float(ticker_map[sym]["quoteVolume"])
+            stable_total += vol
+            stable_details.append((sym.replace("USDT",""), vol))
+        except (KeyError, ValueError):
+            pass
+
+    # مقارنة Stablecoin بالتاريخ
+    stable_hist = stable_vol_history
+    stable_avg  = {}
+    whale_signals = []
+
+    for sym in SMART_MONEY_STABLES:
+        hist = stable_hist.get(sym, [])
+        if len(hist) < 4: continue
+        avg = sum(hist) / len(hist)
+        try:
+            current = float(ticker_map[sym]["quoteVolume"])
+        except (KeyError, ValueError):
+            continue
+        ratio = current / avg if avg > 0 else 1.0
+        if ratio >= 2.0:
+            whale_signals.append((sym.replace("USDT",""), ratio))
+
+    # ══════════════════════════════════════════
+    # 2. نسبة الشراء/البيع في السوق كله 📊
+    # ══════════════════════════════════════════
+    rising   = 0
+    falling  = 0
+    total_market_vol  = 0.0
+    top_gainers  = []
+    top_losers   = []
+
+    for t in all_tickers:
+        sym = t.get("symbol","")
+        if not sym.endswith("USDT"): continue
+        base = sym.replace("USDT","")
+        if base in STABLECOINS: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        try:
+            ch  = float(t["priceChangePercent"])
+            vol = float(t["quoteVolume"])
+            if vol < 100_000: continue   # تجاهل العملات الميتة
+            total_market_vol += vol
+            if ch > 0:
+                rising += 1
+                if vol > 1_000_000:
+                    top_gainers.append((base, ch, vol))
+            else:
+                falling += 1
+                if vol > 1_000_000:
+                    top_losers.append((base, ch, vol))
+        except (KeyError, ValueError):
+            pass
+
+    total_coins  = rising + falling
+    rising_pct   = rising / total_coins * 100 if total_coins > 0 else 0
+    falling_pct  = 100 - rising_pct
+
+    top_gainers.sort(key=lambda x: -x[1])
+    top_losers.sort(key=lambda x: x[1])
+
+    # ══════════════════════════════════════════
+    # 3. تدفق رأس المال — اليوم vs أمس 💰
+    # ══════════════════════════════════════════
+    daily_market_vol_history.append(total_market_vol)
+    if len(daily_market_vol_history) > 7:
+        daily_market_vol_history.pop(0)
+
+    vol_change_pct = 0.0
+    vol_arrow      = "➡️"
+    if len(daily_market_vol_history) >= 2:
+        prev_vol = daily_market_vol_history[-2]
+        if prev_vol > 0:
+            vol_change_pct = (total_market_vol - prev_vol) / prev_vol * 100
+            vol_arrow = "📈" if vol_change_pct > 5 else "📉" if vol_change_pct < -5 else "➡️"
+
+    # ══════════════════════════════════════════
+    # 4. تحليل BTC الإضافي 📈
+    # ══════════════════════════════════════════
+    btc_data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
+    btc_ch   = btc_change_24h
+    btc_vol  = 0.0
+    if btc_data:
+        try:
+            btc_vol = float(btc_data.get("quoteVolume", 0))
+            lp = float(btc_data.get("lastPrice", 0))
+            op = float(btc_data.get("openPrice", lp))
+            if op > 0:
+                btc_ch = (lp - op) / op * 100
+        except (KeyError, ValueError):
+            pass
+
+    # ══════════════════════════════════════════
+    # 5. حكم الحيتان 🐋
+    # ══════════════════════════════════════════
+    # منطق الحكم:
+    # Stablecoins مرتفعة + سوق هابط = الحيتان يجمعون كاش (بيع أو انتظار)
+    # Stablecoins منخفضة + سوق صاعد = الحيتان دخلوا السوق (شراء)
+    # Stablecoins منخفضة + سوق هابط = بيع عشوائي (ليس حيتان)
+
+    if len(whale_signals) >= 2 and falling_pct >= 55:
+        whale_verdict  = "🔴 *الحيتان خارج السوق*"
+        whale_desc     = "يجمعون Stablecoins — ينتظرون أسعاراً أفضل"
+        whale_action   = "⛔ _لا تشتري الآن — انتظر انتهاء التجميع_"
+        whale_icon     = "🐋🔴"
+    elif len(whale_signals) >= 2 and rising_pct >= 55:
+        whale_verdict  = "🟢 *الحيتان داخل السوق*"
+        whale_desc     = "Stablecoins مرتفعة مع صعود = ضخ قوي"
+        whale_action   = "✅ _فرصة — السيولة تدخل_"
+        whale_icon     = "🐋🟢"
+    elif rising_pct >= 60 and not whale_signals:
+        whale_verdict  = "🟢 *السوق في حالة شراء*"
+        whale_desc     = "أغلب العملات ترتفع — زخم إيجابي"
+        whale_action   = "✅ _يمكن الدخول بحذر_"
+        whale_icon     = "📈🟢"
+    elif falling_pct >= 65:
+        whale_verdict  = "🔴 *السوق في حالة بيع قوية*"
+        whale_desc     = "ضغط بيع واسع — ابتعد"
+        whale_action   = "⛔ _ابتعد تماماً — خطر_"
+        whale_icon     = "📉🔴"
+    else:
+        whale_verdict  = "🟡 *السوق محايد — غير محدد*"
+        whale_desc     = "لا اتجاه واضح"
+        whale_action   = "⏳ _انتظر إشارة أوضح_"
+        whale_icon     = "🟡"
+
+    # ══════════════════════════════════════════
+    # 6. بناء الرسالة
+    # ══════════════════════════════════════════
+    # قائمة Stablecoins
+    stable_txt = ""
+    for name, vol in sorted(stable_details, key=lambda x: -x[1])[:4]:
+        stable_txt += "  • *{}*: `{:,.0f}` USDT\n".format(name, vol)
+
+    # قائمة الحيتان
+    whale_txt = ""
+    if whale_signals:
+        for name, ratio in whale_signals[:3]:
+            whale_txt += "  🐋 *{}*: `{:.1f}×` المعدل\n".format(name, ratio)
+    else:
+        whale_txt = "  ✅ لا نشاط غير عادي\n"
+
+    # أفضل/أسوأ العملات
+    gainers_txt = ""
+    for base, ch, vol in top_gainers[:3]:
+        gainers_txt += "  🟢 *{}* `+{:.1f}%`\n".format(base, ch)
+
+    losers_txt = ""
+    for base, ch, vol in top_losers[:3]:
+        losers_txt += "  🔴 *{}* `{:.1f}%`\n".format(base, ch)
+
+    # مؤشر السوق
+    mkt_bar_green = int(rising_pct / 10)
+    mkt_bar_red   = 10 - mkt_bar_green
+    mkt_bar = "🟩" * mkt_bar_green + "🟥" * mkt_bar_red
+
+    # حالة تدفق السيولة
+    flow_sum = get_flow_summary()
+
+    msg = (
+        "📅 *DAILY MARKET REPORT*\n"
+        "🗓️ `{date}` — إغلاق اليوم\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{whale_icon} {verdict}\n"
+        "_{desc}_\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "₿ *BTC اليوم:* `{btc:+.2f}%`\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 *حالة السوق:*\n"
+        "{bar}\n"
+        "  🟢 صاعد: `{rp:.0f}%` ({rising} عملة)\n"
+        "  🔴 هابط: `{fp:.0f}%` ({falling} عملة)\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💰 *تدفق رأس المال:*\n"
+        "  {arrow} حجم السوق: `{vol_ch:+.1f}%` عن أمس\n"
+        "  📦 إجمالي: `{total_vol:,.0f}M` USDT\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🐋 *نشاط الحيتان (Stablecoins):*\n"
+        "{whale}"
+        "💵 *أكبر Stablecoins اليوم:*\n"
+        "{stables}"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🏆 *أفضل 3 عملات:*\n"
+        "{gainers}"
+        "📉 *أسوأ 3 عملات:*\n"
+        "{losers}"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💸 *تدفق السيولة بين القطاعات:*\n"
+        "{flow}"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{action}"
+    ).format(
+        date=today,
+        whale_icon=whale_icon,
+        verdict=whale_verdict,
+        desc=whale_desc,
+        btc=btc_ch,
+        bar=mkt_bar,
+        rp=rising_pct,  fp=falling_pct,
+        rising=rising,  falling=falling,
+        arrow=vol_arrow,
+        vol_ch=vol_change_pct,
+        total_vol=total_market_vol / 1_000_000,
+        whale=whale_txt,
+        stables=stable_txt,
+        gainers=gainers_txt if gainers_txt else "  لا بيانات\n",
+        losers=losers_txt if losers_txt else "  لا بيانات\n",
+        flow=flow_sum,
+        action=whale_action,
+    )
+
+    send(msg)
+    log.info("📅 Daily Report أُرسل | rising=%.0f%% | whale_signals=%d | vol_ch=%.1f%%",
+             rising_pct, len(whale_signals), vol_change_pct)
+
+
 def send_report():
     # type: () -> None
     global last_report
@@ -2548,6 +2806,7 @@ def run():
     global all_tickers   # ✅ إصلاح V11: تأكيد أن all_tickers global
     global last_tickers, last_btc, last_sectors
     global last_deep_scan, last_stale, last_smart_money, last_expand
+    global last_daily_report, daily_report_sent_date
 
     log.info("🚀 MAFIO BOT V15 يبدأ...")
 
@@ -2606,6 +2865,9 @@ def run():
             if now - last_btc         >= BTC_EVERY:         analyze_btc()
             if now - last_sectors     >= SECTORS_EVERY:     analyze_sectors()
             if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
+
+            # 🆕 V15: تقرير يومي عند 00:00 UTC
+            send_daily_report()
             if now - last_expand      >= EXPAND_EVERY:
                 # 🆕 V12: توسيع يومي تلقائي للقوائم
                 log.info("🔄 تحديث يومي — Auto Expand Sectors")
