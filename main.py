@@ -54,6 +54,13 @@ TRAIL_DROP_TRIGGER = 1.5       # يخرج إذا نزل 1.5% من القمة
 BTC_DANGER_ZONE    = -3.0
 BTC_CAUTION_ZONE   = -1.5
 
+# 🆕 V15: Buffer zones — منع التذبذب بين الحالات
+# منطقة أمان: لا تغيير إلا إذا تجاوز الحد بـ 0.3%
+BTC_DANGER_BUFFER  = 0.3   # يدخل DANGER عند -3.3% | يخرج عند -2.7%
+BTC_CAUTION_BUFFER = 0.3   # يدخل CAUTION عند -1.8% | يخرج عند -1.2%
+# عدد المرات المتتالية للتأكيد قبل تغيير الحالة
+BTC_CONFIRM_COUNT  = 3     # 3 × 30 دقيقة = 90 دقيقة تأكيد
+
 # ── Supertrend ───────────────────────────────────
 ST_ATR_PERIOD      = 10
 ST_MULTIPLIER      = 3.0
@@ -500,6 +507,11 @@ discovered     = {}   # {sym: {price, time, score}}
 btc_change_24h = 0.0
 btc_trend_1h   = 0.0
 market_state   = "SAFE"
+
+# 🆕 V15: Buffer counters — عداد التأكيد قبل تغيير الحالة
+_btc_danger_count  = 0   # عدد المرات المتتالية تحت DANGER
+_btc_caution_count = 0   # عدد المرات المتتالية تحت CAUTION
+_btc_safe_count    = 0   # عدد المرات المتتالية فوق SAFE
 hot_sectors    = []        # type: List[str]
 hot_symbols    = set()     # type: Set[str]
 sector_vol_history = {}    # type: Dict[str, float]
@@ -773,13 +785,62 @@ def analyze_btc():
         c = kd1["closes"]
         btc_trend_1h = (c[-1] - c[0]) / c[0] * 100
 
-    old = market_state
-    if btc_change_24h <= BTC_DANGER_ZONE or btc_trend_1h <= -2.0:
-        market_state = "DANGER"
-    elif btc_change_24h <= BTC_CAUTION_ZONE:
-        market_state = "CAUTION"
+    # ══════════════════════════════════════════════
+    # 🆕 V15: Buffer System — منع التذبذب
+    # الحدود مع Buffer:
+    #   DANGER:  يدخل عند < -3.3% | يخرج عند > -2.7%
+    #   CAUTION: يدخل عند < -1.8% | يخرج عند > -1.2%
+    #   SAFE:    يدخل عند > -1.2%
+    # ══════════════════════════════════════════════
+    global _btc_danger_count, _btc_caution_count, _btc_safe_count
+
+    # حدود الدخول (أصعب)
+    danger_enter  = BTC_DANGER_ZONE  - BTC_DANGER_BUFFER   # -3.3%
+    caution_enter = BTC_CAUTION_ZONE - BTC_CAUTION_BUFFER  # -1.8%
+
+    # حدود الخروج (أسهل — منطقة Buffer)
+    danger_exit   = BTC_DANGER_ZONE  + BTC_DANGER_BUFFER   # -2.7%
+    caution_exit  = BTC_CAUTION_ZONE + BTC_CAUTION_BUFFER  # -1.2%
+
+    btc_signal = btc_change_24h
+
+    # حدد الحالة المقترحة
+    if btc_signal <= danger_enter or btc_trend_1h <= -2.0:
+        suggested = "DANGER"
+    elif btc_signal <= caution_enter:
+        suggested = "CAUTION"
+    elif btc_signal >= caution_exit:
+        suggested = "SAFE"
     else:
+        # في منطقة Buffer — ابقَ على الحالة الحالية
+        suggested = market_state
+
+    # عداد التأكيد — يحتاج BTC_CONFIRM_COUNT مرات متتالية
+    if suggested == "DANGER":
+        _btc_danger_count  += 1
+        _btc_caution_count  = 0
+        _btc_safe_count     = 0
+    elif suggested == "CAUTION":
+        _btc_caution_count += 1
+        _btc_danger_count   = 0
+        _btc_safe_count     = 0
+    elif suggested == "SAFE":
+        _btc_safe_count    += 1
+        _btc_danger_count   = 0
+        _btc_caution_count  = 0
+    else:
+        # Buffer zone — لا تغيير في العدادات
+        pass
+
+    # تطبيق التغيير فقط بعد BTC_CONFIRM_COUNT مرات
+    old = market_state
+    if _btc_danger_count  >= BTC_CONFIRM_COUNT:
+        market_state = "DANGER"
+    elif _btc_caution_count >= BTC_CONFIRM_COUNT:
+        market_state = "CAUTION"
+    elif _btc_safe_count    >= BTC_CONFIRM_COUNT:
         market_state = "SAFE"
+    # else: ابقَ على الحالة الحالية
 
     last_btc = time.time()
 
@@ -797,13 +858,16 @@ def analyze_btc():
             "₿ BTC 24h: `{ch:+.2f}%`\n"
             "₿ BTC 1h:  `{h:+.2f}%`\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "_{note}_".format(
+            "_{note}_\n"
+            "🔄 _تأكيد بعد {confirm} قراءات متتالية_".format(
                 icon=icons[market_state], state=market_state,
                 ch=btc_change_24h, h=btc_trend_1h,
                 note=notes[market_state],
+                confirm=BTC_CONFIRM_COUNT,
             )
         )
-        log.info("📊 Market: %s→%s | BTC %.2f%%", old, market_state, btc_change_24h)
+        log.info("📊 Market: %s→%s | BTC %.2f%% | confirm=%d",
+                 old, market_state, btc_change_24h, BTC_CONFIRM_COUNT)
 
 
 # ═══════════════════════════════════════════════
