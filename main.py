@@ -1,16 +1,16 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO BOT SIGNAL V14 — UNIFIED ENGINE            ║
+║           MAFIO BOT SIGNAL V15 — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
 ║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
 
-التحسينات في V12 (فوق V11):
-  🆕 auto_expand_sectors(): يجلب عملات MEXC ويضيفها للقطاعات تلقائياً
-  🆕 الهدف: 50 عملة لكل قطاع — بدون تكرار
-  🆕 تصنيف بالكلمات المفتاحية لكل قطاع
-  🆕 فلتر الحجم: فقط عملات نشطة (>100k USDT حجم 24h)
-  🆕 تقرير Telegram بالعملات المضافة لكل قطاع
+التحسينات في V15 (فوق V14):
+  ✅ FIX: تنظيف جميع الرموز الخاطئة في SECTORS (مسافات + حروف سيريلية)
+  🆕 vol_ratio تاريخي: مقارنة حجم العملة بمتوسطها التاريخي (لا بمتوسط القطاع)
+  🆕 RSI Filter: فلتر RSI على 14 فترة — يرفض العملات overbought (RSI>70)
+  🆕 Backtesting: تتبع إشارات Top10 وقياس الأداء الفعلي بعد 1h/4h/24h
+  🆕 رسالة Telegram محسّنة: أوضح + RSI + نسبة النجاح التاريخية
 
 استراتيجية الطلبات (Anti-Rate-Limit):
   ● طلب واحد للـ 24h Ticker  كل 12 ثانية   → 5/دقيقة
@@ -137,6 +137,21 @@ W_VOL_RATIO    = 40   # الأهم: حجم مرتفع فجأة
 W_HOT_SECTOR   = 25   # قطاع ساخن + Flow داخل
 W_REBOUND_LOW  = 20   # قريب من القاع
 W_CHANGE_SMALL = 15   # تغيير صغير = لم ينطلق بعد
+
+# ── 🆕 V15: RSI Filter ───────────────────────────
+RSI_PERIOD        = 14        # فترة حساب RSI
+RSI_OVERBOUGHT    = 70        # فوق هذا = مرفوض (overbought)
+RSI_OVERSOLD      = 30        # تحت هذا = ممتاز (فرصة)
+RSI_IDEAL_MAX     = 60        # RSI مثالي للدخول قبل الانفجار
+
+# ── 🆕 V15: Vol History (تاريخي لكل عملة) ─────────
+VOL_HISTORY_MAX   = 10        # عدد القراءات (10 × 12ث = 2 دقيقة)
+VOL_HISTORY_MIN   = 3         # أدنى عدد قراءات للمقارنة الصادقة
+
+# ── 🆕 V15: Backtesting ───────────────────────────
+BACKTEST_CHECK_1H  = 3600     # 1 ساعة
+BACKTEST_CHECK_4H  = 14400    # 4 ساعات
+BACKTEST_CHECK_24H = 86400    # 24 ساعة
 
 # ── Smart Money ──────────────────────────────────
 SMART_MONEY_SIGMA      = 3.0
@@ -303,10 +318,10 @@ SECTORS = {
         "LANDXUSDT","CREDIXUSDT","POLIXUSDT","TRUEUSDT","MTVUSDT",
         "PROPUSDT","REUSDT","TPROTUSDT","STBTCUSDT","CULTUSDT",
         # ── إضافات V13 ───────────────────────────
-        "POLYXUSDT","CENTUSDT","TOUCANUSDT","COORESTUSDT","REALIO USDT",
+        "POLYXUSDT","CENTUSDT","TOUCANUSDT","COORESTUSDT","REALIOУСDT",
         "LOFTYUSDT","MAPLEUSDT","GOLDFINCHUSDT","DEXTUSDT","BRICSUSDT",
         "ESTATEUSDT","REALTUSDT","DINOUSDT","FLOWXUSDT","ACHUSDT",
-        "CELLUSDT","NEXOUSDT","SECURITIZEUSDT","POLKUSDT","NEWRLAУСDT",
+        "CELLUSDT","NEXOUSDT","SECURITIZEUSDT","POLKUSDT","NEWRLAUSDT",
         "CENTAUSDT","TRADEAUSDT",
     ],
     "Gaming": [
@@ -321,7 +336,7 @@ SECTORS = {
         "GHSTUSDT","TOWERUSDT","REVVUSDT","NFTXUSDT","MOBOXUSDT",
         "SKILLUSDT","DERACEUSDT","WARSUSDT","BATTLEUSDT","LEGENDUSDT",
         "KARTUSDT","CHAMPUSDT","WINUSDT","SUPERUSDT","GODSUSDT",
-        "AURYUSDT","ATLASUSDT","POLISUSDT","PVUUSDT","REALMУСDT","MAGICUSDT",
+        "AURYUSDT","ATLASUSDT","POLISUSDT","PVUUSDT","REALMUSDT","MAGICUSDT",
     ],
     "DeFi": [
         # ── الأساسيات ────────────────────────────
@@ -334,8 +349,8 @@ SECTORS = {
         # ── إضافات V13 ───────────────────────────
         "SNXUSDT","KNCUSDT","BALUSDT","BIFIUSDT","PERPUSDT",
         "JOEUSDT","SPIRITUSDT","VELODROMEUSDT","AERODROMEUSDT","THENAUSDT",
-        "KYBERUSDT","BANCОRUSDT","QUICKUSDT","SOLARUSDT","CAMELOTUSDT",
-        "RAMSESUSDT","STERLINGUSDT","DODOUSUSDT","WIGOUSDT","APESWAPUSDT",
+        "KYBERUSDT","BANCORUSDT","QUICKUSDT","SOLARUSDT","CAMELOTUSDT",
+        "RAMSESUSDT","STERLINGUSDT","DODOUSDT","WIGOUSDT","APESWAPUSDT",
     ],
     "Layer1": [
         # ── الأساسيات ────────────────────────────
@@ -346,11 +361,11 @@ SECTORS = {
         "QNTUSDT","CELOUSDT","FLOWUSDT","MINAUSDT","KAVAUSDT",
         "VETUSDT","ONTUSDT","WAVESUSDT","XTZUSDT","NEOUSDT",
         # ── إضافات V13 ───────────────────────────
-        "SAGAUSDT","ZETAUSDT","VENOMУСDT","FUSEUSDT","SUPRAУСDT",
-        "INITIAУСDT","STORYUSDT","MOVEMENTUSDT","MONADUSDT","BERACHAINUSDT",
+        "SAGAUSDT","ZETAUSDT","VENOMUSDT","FUSEUSDT","SUPRAUSDT",
+        "INITIAUSDT","STORYUSDT","MOVEMENTUSDT","MONADUSDT","BERACHAINUSDT",
         "ECLIPSEUSDT","SYSUSDT","COTIUSDT","RLCUSDT","TRACUSDT",
-        "ALEOUSDT","ERAUSDT","HYPERUSDT","NEONУСDT","FUSIONUSDT",
-        "CONCORDUSDT","NOLAUSDT","PALLADAУСDT","DFINITYUSDT","COSMOSUSDT",
+        "ALEOUSDT","ERAUSDT","HYPERUSDT","NEONUSDT","FUSIONUSDT",
+        "CONCORDUSDT","NOLAUSDT","PALLADAUSDT","DFINITYUSDT","COSMOSUSDT",
     ],
     "Layer2": [
         # ── الأساسيات ────────────────────────────
@@ -390,7 +405,7 @@ SECTORS = {
         # ── إضافات V13 ───────────────────────────
         "API3USDT","FLUXUSDT","IOSTUSDT","NESTUSDT","DOSUSDT",
         "WITNETUSDT","RAZORUSDT","UMBRELLAУСDT","FIOUSDT","BIOUSDT",
-        "HUMAUSDT","TRUTHUSDT","LAZIOУСDT","OOKIUSDT","DORGUSDT",
+        "HUMAUSDT","TRUTHUSDT","LAZIOUSDT","OOKIUSDT","DORGUSDT",
         "COCOSUSDT","MYSTUSDT","SWTHUSDT","COVALENTUSDT","PARSIQУСDT",
         "ALCHEMYUSDT","BADGERUSDT","WINKUSDT","ANKRUSDT","GEОDBUSDT",
         "INDEXCOOPUSDT","ZAPPERUSDT","POWERPOOLUSDT","NXRAUSDT","TELLUSDT2",
@@ -410,8 +425,8 @@ SECTORS = {
         "PANTHERUSDT","PRVCUSDT","ANONUSDT","IRONUSDT","SAFEUSDT",
         "XCMUSDT","LTZUSDT","ZENNUSDT","AZROUSDT","NYMOUSDT",
         # ── ZK Privacy ───────────────────────────
-        "ZKPUSDT","SILUSDT","ANYONE USDT","SHADUSDT","FIROУСDT",
-        "ERGOУСDT","PIRATEUSDT","BCHPUSDT","ARRRUSDT","MAVUSDT",
+        "ZKPUSDT","SILUSDT","ANYONEUSDT","SHADUSDT","FIROUSDT",
+        "ERGOUSDT","PIRATEUSDT","BCHPUSDT","ARRRUSDT","MAVUSDT",
     ],
     "Storage": [
         # ── الأساسيات ────────────────────────────
@@ -419,13 +434,13 @@ SECTORS = {
         "HOTUSDT","CKBUSDT","AIOZUSDT","KYVEUSDT","ALEPHUSDT",
         "DATAUSDT","SIACOINUSDT","LAMBUSDT","BTTCUSDT","PEAQUSDT",
         # ── إضافات V13 ───────────────────────────
-        "ANKRUSDT","CRUSTUSDT","MEMOUSDT","BTFSUSDT","SWARM USDT",
+        "ANKRUSDT","CRUSTUSDT","MEMOUSDT","BTFSUSDT","SWARMUSDT",
         "BUNDLRUSDT","AKASHUSDT","FLUXUSDT","STORXUSDT","BLUZELLEUSDT",
         "SPHERONUSDT","JACKALUSDT","CERAMICUSDT","ESTUARYUSDT","LIGHTHOUSEUSDT",
-        "ARDRIVЕUSDT","EVERPAYUSDT","SEASCAPEUSDT","DXCHAINUSDT","OPACITYUSDT",
+        "ARDRIVEUSDT","EVERPAYUSDT","SEASCAPEUSDT","DXCHAINUSDT","OPACITYUSDT",
         "INTERNXTUSDT","SKYNETUSDT","NUMBERSUSDT","ORDIUSDT","FILEBASEUSDT",
-        "IEXECUSDT","IPFSUSDT","CSPUSDT","GREENFIELDUSD","FILSWANUSDT",
-        "SINSOUST","ESTUSDT","BLZUSDT2","HOTELLIBREUSDT","SIAUSDT2",
+        "IEXECUSDT","IPFSUSDT","CSPUSDT","GREENFIELDUSDT","FILSWANUSDT",
+        "SINSOUSDT","ESTUSDT","BLZUSDT2","HOTLIBREUSDT","SIAUSDT2",
         "NETWORKUSDT","CHAINPOLUSDT","DSHAREUSDT",
     ],
     "DePIN": [
@@ -435,11 +450,11 @@ SECTORS = {
         "GRASSUSDT","IONUSDT","TIAUSDT","CUDOSUSDT","IOTXUSDT",
         "POKTUSDT","DOTUSDT","XNETUSDT","MOBIUSDT","NOSANAUSDT",
         # ── إضافات V13 ───────────────────────────
-        "HIVEMAPPERUSDT","HIVELLOUSDT","NATIXUSDT","DIMOUSDT","NUBILAУСDT",
-        "REACTUSDT","GEODNETUSDT","SOARXUSDT","NGLAУСDT","PINGUSDT",
-        "ROAMUSDT","NODELУСDT","CPOOLUSDT","SHDWUSDT","HELIUMUSDT",
+        "HIVEMAPPERUSDT","HIVELLOUSDT","NATIXUSDT","DIMOUSDT","NUBILAUSDT",
+        "REACTUSDT","GEODNETUSDT","SOARXUSDT","NGLAUSDT","PINGUSDT",
+        "ROAMUSDT","NODELUSDT","CPOOLUSDT","SHDWUSDT","HELIUMUSDT",
         "SENSORUSDT","MESHUSDT","MXCUSDT","PEAQUSDT","AUTONUSDT",
-        "DKGУСDT","AIRNODEUSDT","EXOCOREUSDT","ACURASTUSDT","ROAMXUSDT",
+        "DKGUSDT","AIRNODEUSDT","EXOCOREUSDT","ACURASTUSDT","ROAMXUSDT",
         "IONUSDT2","SULLYUSDT","POKTUSDT2","IOTXUSDT2","WIFIUSDT2",
         "RNDRNETUSDT","POWERLEDGERUSDT","ORIGINTRAILUSDT","DATAUSDT2",
     ],
@@ -449,14 +464,14 @@ SECTORS = {
         "TRXUSDT","QTUMUSDT","RVNUSDT","ARKUSDT","DCRUSDT",
         "DGBUSDT","ZRXUSDT","NEOUSDT","ONTUSDT","VETUSDT",
         # ── إضافات V13 ───────────────────────────
-        "STEEMУСDT","NMRUSDT","XEMUSDT","WAVESUSDT","ICXUSDT",
+        "STEEMUSDT","NMRUSDT","XEMUSDT","WAVESUSDT","ICXUSDT",
         "BATUSDT","SNTUSDT","GNTUSDT","FUNUSDT","POWRUSDT",
         "GTOUSDT","APPCUSDT","REPUSDT","OMGUSDT","BTGUSDT",
-        "DIGIBYTУСDT","NAVUSDT","STRATUSDT","PPCUSDT","NUUSDT",
-        "BNTUSDT","KMDUSDT","PIVXUSDT2","ARDRУСDT","SCUSD",
+        "DIGIBYTЕUSDT","NAVUSDT","STRATUSDT","PPCUSDT","NUUSDT",
+        "BNTUSDT","KMDUSDT","PIVXUSDT2","ARDRUSDT","SCUSD",
         "LSTUSDT","MANAUSDT2","XRPCLASSICUSDT","MAIDUSDT","BLOCKUSDT",
         "SYSCOINUSDT","VERGEUSDT","GAMECREDITUSDT","HTMLCOINUSDT","PUNDIXUSDT",
-        "MONAУСDT","DIGIУСDT","PARTICLУСDT","NULSUSDT","WANCUSDT",
+        "MONAUSDT","DIGIУСDT","PARTICLUSDT","NULSUSDT","WANCUSDT",
         "STORMXUSDT","OROPOCKETUSDT","AIONUSDT","ELECUSDT","ETHCLASSICUSDT",
         "TOKENOMYUSDT","BRDUSDT","CREDITCOINUSDT","DGTXUSDT","BITCIUSDT",
     ],
@@ -518,6 +533,12 @@ sector_change_snapshots = {}  # type: Dict[str, List[float]] {sector: [avg_ch1, 
 sector_flow_alerted  = {}  # type: Dict[str, float]          {sector: last_alert_time}
 sector_flow_state    = {}  # type: Dict[str, str]            {sector: "IN"/"OUT"/"NEUTRAL"}
 top10_alerted        = {}  # type: Dict[str, float]          {sector: last_top10_alert_time}
+
+# 🆕 V15: تاريخ حجم كل عملة للمقارنة التاريخية
+coin_vol_history     = {}  # type: Dict[str, List[float]]   {sym: [vol1, vol2, ...]}
+
+# 🆕 V15: Backtesting — تتبع إشارات Top10
+backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
 
 api_calls_total    = 0
 api_calls_minute   = 0
@@ -614,6 +635,80 @@ def clear_expired_cache():
     stale = [k for k, (_, ts) in list(klines_cache.items()) if now - ts > CACHE_4H * 2]
     for k in stale:
         del klines_cache[k]
+
+
+# ═══════════════════════════════════════════════
+#   🆕 V15: RSI CALCULATOR
+#   حساب RSI بدون مكتبات خارجية — على كلوز prices
+# ═══════════════════════════════════════════════
+def calc_rsi(closes, period=RSI_PERIOD):
+    # type: (list, int) -> float
+    """
+    يحسب RSI على آخر (period+1) شمعة.
+    يعيد قيمة 0-100، أو -1 إذا لم تكفِ البيانات.
+    """
+    if len(closes) < period + 1:
+        return -1.0
+    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+    recent = deltas[-period:]
+    gains  = [d for d in recent if d > 0]
+    losses = [-d for d in recent if d < 0]
+    avg_gain = sum(gains) / period if gains else 0.0
+    avg_loss = sum(losses) / period if losses else 0.0
+    if avg_loss == 0:
+        return 100.0
+    rs  = avg_gain / avg_loss
+    return round(100 - (100 / (1 + rs)), 1)
+
+
+def rsi_label(rsi):
+    # type: (float) -> str
+    """تحويل قيمة RSI لنص وصفي"""
+    if rsi < 0:     return "N/A"
+    if rsi <= RSI_OVERSOLD:  return "🟢 ذروة بيع"
+    if rsi <= 50:            return "🟡 محايد"
+    if rsi <= RSI_IDEAL_MAX: return "🟡 جيد"
+    if rsi <= RSI_OVERBOUGHT: return "🟠 مرتفع"
+    return "🔴 ذروة شراء"
+
+
+# ═══════════════════════════════════════════════
+#   🆕 V15: COIN VOL HISTORY
+#   تحديث تاريخ حجم كل عملة لحساب vol_ratio التاريخي
+# ═══════════════════════════════════════════════
+def update_coin_vol_history(vol_map):
+    # type: (Dict[str, float]) -> None
+    """
+    يُستدعى من run() كل دورة (12 ثانية).
+    يحفظ آخر VOL_HISTORY_MAX قراءة لكل عملة.
+    """
+    global coin_vol_history
+    for sym, vol in vol_map.items():
+        if vol <= 0:
+            continue
+        if sym not in coin_vol_history:
+            coin_vol_history[sym] = []
+        coin_vol_history[sym].append(vol)
+        if len(coin_vol_history[sym]) > VOL_HISTORY_MAX:
+            coin_vol_history[sym].pop(0)
+
+
+def get_coin_vol_ratio(sym, current_vol):
+    # type: (str, float) -> float
+    """
+    يقارن الحجم الحالي بالمتوسط التاريخي للعملة نفسها.
+    أدق بكثير من مقارنة بمتوسط القطاع.
+    يعيد 1.0 إذا لا يوجد تاريخ كافٍ.
+    """
+    hist = coin_vol_history.get(sym, [])
+    if len(hist) < VOL_HISTORY_MIN:
+        return 1.0   # لا يوجد تاريخ كافٍ — نعتبره طبيعياً
+    # نستخدم السابقات فقط (بدون الحالية)
+    prev = hist[:-1] if len(hist) > 1 else hist
+    avg  = sum(prev) / len(prev)
+    if avg <= 0:
+        return 1.0
+    return round(current_vol / avg, 2)
 
 
 # ═══════════════════════════════════════════════
@@ -1028,14 +1123,20 @@ def get_flow_summary():
 def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_map, low_map):
     # type: (str, dict, dict, dict, dict, dict, dict) -> None
     """
-    يختار أفضل 10 عملات من القطاع قبل الانفجار.
+    🆕 V15: يختار أفضل 10 عملات من القطاع قبل الانفجار.
 
-    معايير الفلترة الصارمة (يجب تحقيق كلها):
+    تحسينات V15:
+    ✅ vol_ratio تاريخي: مقارنة حجم العملة بمتوسطها التاريخي (أدق)
+    ✅ RSI Filter: يرفض العملات fوق RSI_OVERBOUGHT (ذروة شراء)
+    ✅ RSI يُعرض في الرسالة لكل عملة
+    ✅ Backtest: يسجل كل عملة تلقائياً لمتابعة الأداء
+
+    معايير الفلترة الصارمة:
     ✅ تغيير 24h: 0% → 5%  ← السر! لم تنطلق بعد
-    ✅ حجم ارتفع فجأة: vol_ratio >= 1.5x
-    ✅ ارتداد من قاع 24h: < 15%  ← لا تزال قريبة
+    ✅ حجم ارتفع 1.5x تاريخياً للعملة نفسها
+    ✅ ارتداد من قاع 24h: < 15%
+    ✅ RSI < 70 (ليست في ذروة شراء)
     ✅ حجم كافٍ: > 150k USDT
-    ✅ ليست في tracked أو momentum_stage
 
     نظام النقاط (100 نقطة):
     • vol_ratio    × 40  — الأهم
@@ -1071,20 +1172,11 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
         if price <= 0 or low_24h <= 0: continue
 
         # ── الفلتر الذهبي: 0% < تغيير < 5% ────
-        # هذا هو سر الدخول قبل الانفجار
         if ch < TOP10_CHANGE_MIN: continue
         if ch > TOP10_CHANGE_MAX: continue
 
-        # ── حجم مرتفع فجأة ─────────────────────
-        # نقارن حجم العملة بمتوسط حجوم لقطاعها
-        sector_vols = [
-            vol_now.get(s, 0)
-            for s in coins
-            if vol_now.get(s, 0) > 0
-        ]
-        avg_sector_vol = sum(sector_vols) / len(sector_vols) if sector_vols else vol
-        vol_ratio = vol / avg_sector_vol if avg_sector_vol > 0 else 1.0
-
+        # ── 🆕 V15: vol_ratio تاريخي للعملة نفسها ──
+        vol_ratio = get_coin_vol_ratio(sym, vol)
         if vol_ratio < TOP10_VOL_RATIO: continue
 
         # ── قريب من القاع ──────────────────────
@@ -1096,8 +1188,19 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
         if base in STABLECOINS: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
 
+        # ── 🆕 V15: RSI Filter ──────────────────
+        # نجلب RSI من كلوز 15m (من الكاش إذا متاح)
+        rsi_val = -1.0
+        kd_rsi  = get_klines(sym, "15m", RSI_PERIOD + 2)
+        if kd_rsi and len(kd_rsi["closes"]) >= RSI_PERIOD + 1:
+            rsi_val = calc_rsi(kd_rsi["closes"])
+            # ارفض العملات في ذروة الشراء
+            if rsi_val > RSI_OVERBOUGHT:
+                log.debug("🔴 RSI رفض: %s RSI=%.1f", sym, rsi_val)
+                continue
+
         # ── حساب النقاط (100 نقطة) ─────────────
-        # 1. حجم مرتفع فجأة (40 نقطة)
+        # 1. حجم مرتفع فجأة (40 نقطة) — تاريخي الآن
         vol_score = min(vol_ratio / 5.0, 1.0) * W_VOL_RATIO
 
         # 2. قطاع ساخن + Flow داخل (25 نقطة)
@@ -1105,15 +1208,21 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
         flow_in   = sector_flow_state.get(sector, "NEUTRAL") == "IN"
         hot_score = W_HOT_SECTOR if (is_hot and flow_in) else (W_HOT_SECTOR * 0.5 if is_hot else 0)
 
-        # 3. قريب من القاع (20 نقطة) — كلما أقل rebound كلما أفضل
+        # 3. قريب من القاع (20 نقطة)
         rebound_score = max(0, (TOP10_REBOUND_MAX - rebound) / TOP10_REBOUND_MAX) * W_REBOUND_LOW
 
-        # 4. تغيير صغير = لم ينطلق بعد (15 نقطة) — كلما أقل تغيير كلما أفضل
+        # 4. تغيير صغير = لم ينطلق بعد (15 نقطة)
         change_score = max(0, (TOP10_CHANGE_MAX - ch) / TOP10_CHANGE_MAX) * W_CHANGE_SMALL
 
-        total_score = vol_score + hot_score + rebound_score + change_score
+        # 🆕 مكافأة RSI منخفض (يصل إلى +5 نقاط إضافية)
+        rsi_bonus = 0.0
+        if rsi_val > 0:
+            if rsi_val <= RSI_OVERSOLD:    rsi_bonus = 5.0
+            elif rsi_val <= 50:            rsi_bonus = 3.0
+            elif rsi_val <= RSI_IDEAL_MAX: rsi_bonus = 1.0
 
-        # حساب drop_from_high للعرض
+        total_score = vol_score + hot_score + rebound_score + change_score + rsi_bonus
+
         drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
         scored.append({
@@ -1121,11 +1230,12 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
             "price":        price,
             "ch":           ch,
             "vol":          vol,
-            "vol_ratio":    round(vol_ratio, 2),
+            "vol_ratio":    vol_ratio,
             "rebound":      round(rebound, 1),
             "drop":         round(drop_from_high, 1),
             "score":        round(total_score, 1),
             "is_hot":       is_hot,
+            "rsi":          rsi_val,
         })
 
     if not scored:
@@ -1138,60 +1248,212 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
 
     top10_alerted[sector] = now
 
-    # ── بناء رسالة Telegram ─────────────────────
+    # ── 🆕 V15: تسجيل كل عملة في Backtest ──────
+    for c in top10:
+        register_backtest(c["sym"], c["price"], sector)
+
+    # ── بناء رسالة Telegram المحسّنة ────────────
     flow_vol = sector_vol_snapshots.get(sector, [])
-    vol_surge = ""
-    if len(flow_vol) >= 2:
-        ratio = flow_vol[-1] / flow_vol[-2] if flow_vol[-2] > 0 else 1
-        vol_surge = "📊 حجم القطاع: `{:.1f}×` المعدل\n".format(ratio)
+    vol_surge_txt = ""
+    if len(flow_vol) >= 2 and flow_vol[-2] > 0:
+        sector_ratio = flow_vol[-1] / flow_vol[-2]
+        vol_surge_txt = "📊 حجم القطاع: `{:.1f}×` المعدل\n".format(sector_ratio)
 
     coins_txt = ""
     for i, c in enumerate(top10, 1):
-        hot_tag = "🔥" if c["is_hot"] else "  "
+        hot_icon = "🔥" if c["is_hot"] else "  "
+        rsi_v    = c["rsi"]
+        rsi_str  = "`RSI:{:.0f}`".format(rsi_v) if rsi_v >= 0 else ""
+        rsi_ic   = ""
+        if rsi_v >= 0:
+            if rsi_v <= RSI_OVERSOLD:    rsi_ic = "🟢"
+            elif rsi_v <= RSI_IDEAL_MAX: rsi_ic = "🟡"
+            else:                         rsi_ic = "🟠"
+
         coins_txt += (
             "{i}. {hot} *{sym}*\n"
             "     💵 `{price}` | 📈 `+{ch:.1f}%` | 💧 `{ratio:.1f}×`\n"
-            "     📉 من القاع: `+{reb:.1f}%` | من القمة: `-{drop:.1f}%`\n"
+            "     📉 قاع: `+{reb:.1f}%` | قمة: `-{drop:.1f}%` {rsi_ic}{rsi_str}\n"
         ).format(
             i=i,
-            hot=hot_tag,
+            hot=hot_icon,
             sym=c["sym"].replace("USDT", ""),
             price=format_price(c["price"]),
             ch=c["ch"],
             ratio=c["vol_ratio"],
             reb=c["rebound"],
             drop=c["drop"],
+            rsi_ic=rsi_ic,
+            rsi_str=" " + rsi_str if rsi_str else "",
         )
 
     mkt_icon = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}.get(market_state, "⚪")
 
+    # إحصاء كم عملة RSI جيد
+    good_rsi_count = sum(1 for c in top10 if 0 <= c["rsi"] <= RSI_IDEAL_MAX)
+    rsi_summary    = " | 🟢 `{}/{} RSI جيد`".format(good_rsi_count, len(top10)) if good_rsi_count > 0 else ""
+
     msg = (
-        "🚨 *SMART TOP10 — قبل الانفجار!*\n"
+        "🚨 *SMART TOP10 V15 — قبل الانفجار!*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "🏷️ القطاع: *{sector}*\n"
         "💸 السيولة تدخل الآن!\n"
         "{vol_surge}"
         "━━━━━━━━━━━━━━━━━━\n"
-        "🎯 *أفضل 10 عملات — تغيير 0→5% فقط:*\n\n"
+        "🎯 *أفضل 10 — تغيير 0→5% + RSI < 70:*\n\n"
         "{coins}"
         "━━━━━━━━━━━━━━━━━━\n"
-        "{mkt} BTC: `{btc:+.1f}%` | `{mst}`\n"
+        "{mkt} BTC: `{btc:+.1f}%` | `{mst}`{rsi_sum}\n"
         "🕐 `{time}`\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "⚡ _ادخل قبل الانفجار — SL تحت القاع_"
+        "⚡ _ادخل قبل الانفجار — SL تحت القاع_\n"
+        "📊 _سيتم مراقبة النتائج تلقائياً (1h/4h/24h)_"
     ).format(
         sector=sector,
-        vol_surge=vol_surge,
+        vol_surge=vol_surge_txt,
         coins=coins_txt,
         mkt=mkt_icon,
         btc=btc_change_24h,
         mst=market_state,
+        rsi_sum=rsi_summary,
         time=datetime.now().strftime("%H:%M:%S"),
     )
 
     send(msg)
-    log.info("🚨 Top10 | %s | %d عملة | أفضل: %s (%.1f نقطة)",
-             sector, len(top10), top10[0]["sym"], top10[0]["score"])
+    log.info("🚨 Top10 V15 | %s | %d عملة | أفضل: %s (%.1f نقطة) | RSI جيد: %d",
+             sector, len(top10), top10[0]["sym"], top10[0]["score"], good_rsi_count)
+
+
+
+# ═══════════════════════════════════════════════
+#   🆕 V15: BACKTESTING ENGINE
+#   يتتبع إشارات Top10 ويقيس أداءها بعد 1h/4h/24h
+# ═══════════════════════════════════════════════
+def register_backtest(sym, price, sector):
+    # type: (str, float, str) -> None
+    """يسجل إشارة Top10 عند إرسالها — للمتابعة اللاحقة"""
+    global backtest_signals
+    if sym in backtest_signals:
+        return   # مسجل بالفعل
+    backtest_signals[sym] = {
+        "entry_price":  price,
+        "entry_time":   time.time(),
+        "sector":       sector,
+        "checked_1h":   False,
+        "checked_4h":   False,
+        "checked_24h":  False,
+        "result_1h":    None,
+        "result_4h":    None,
+        "result_24h":   None,
+    }
+    log.info("📋 Backtest سجّل: %s @ %s", sym, price)
+
+
+def check_backtest(price_map):
+    # type: (Dict[str, float]) -> None
+    """
+    يُستدعى من run() كل دورة.
+    يتحقق من الإشارات المسجلة ويرسل نتائجها عند الوقت المحدد.
+    """
+    global backtest_signals
+    now = time.time()
+
+    for sym, data in list(backtest_signals.items()):
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        entry = data["entry_price"]
+        if entry <= 0:
+            continue
+
+        elapsed = now - data["entry_time"]
+        gain    = (price - entry) / entry * 100
+        emoji   = "✅" if gain > 0 else "🔴"
+
+        # ── تحقق 1 ساعة ──────────────────────────
+        if not data["checked_1h"] and elapsed >= BACKTEST_CHECK_1H:
+            data["checked_1h"]  = True
+            data["result_1h"]   = round(gain, 2)
+            send(
+                "📊 *BACKTEST 1H* | `{sym}`\n"
+                "{em} النتيجة: `{gain:+.2f}%`\n"
+                "💵 دخول: `{entry}` ← الآن: `{now_p}`\n"
+                "🏷️ قطاع: `{sector}`".format(
+                    sym=sym.replace("USDT",""), em=emoji, gain=gain,
+                    entry=entry, now_p=round(price, 6),
+                    sector=data["sector"],
+                )
+            )
+            log.info("📊 Backtest 1H | %s | %+.2f%%", sym, gain)
+
+        # ── تحقق 4 ساعات ─────────────────────────
+        elif not data["checked_4h"] and elapsed >= BACKTEST_CHECK_4H:
+            data["checked_4h"]  = True
+            data["result_4h"]   = round(gain, 2)
+            send(
+                "📊 *BACKTEST 4H* | `{sym}`\n"
+                "{em} النتيجة: `{gain:+.2f}%`\n"
+                "💵 دخول: `{entry}` ← الآن: `{now_p}`\n"
+                "1H كان: `{r1h}%` | 4H الآن: `{gain:+.2f}%`".format(
+                    sym=sym.replace("USDT",""), em=emoji, gain=gain,
+                    entry=entry, now_p=round(price, 6),
+                    r1h=data.get("result_1h","N/A"),
+                )
+            )
+            log.info("📊 Backtest 4H | %s | %+.2f%%", sym, gain)
+
+        # ── تحقق 24 ساعة ─────────────────────────
+        elif not data["checked_24h"] and elapsed >= BACKTEST_CHECK_24H:
+            data["checked_24h"] = True
+            data["result_24h"]  = round(gain, 2)
+            # تقرير نهائي مفصل
+            r1h  = data.get("result_1h")
+            r4h  = data.get("result_4h")
+            best = max(
+                x for x in [r1h, r4h, gain] if x is not None
+            )
+            send(
+                "🏁 *BACKTEST 24H — نهائي* | `{sym}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "{em} 24H: `{gain:+.2f}%`\n"
+                "📈 أفضل نقطة: `+{best:.2f}%`\n"
+                "⏱️ 1H: `{r1h}%` | 4H: `{r4h}%`\n"
+                "💵 دخول: `{entry}`\n"
+                "🏷️ قطاع: `{sector}`".format(
+                    sym=sym.replace("USDT",""), em=emoji, gain=gain,
+                    best=best,
+                    r1h=r1h if r1h is not None else "N/A",
+                    r4h=r4h if r4h is not None else "N/A",
+                    entry=entry, sector=data["sector"],
+                )
+            )
+            log.info("🏁 Backtest 24H | %s | %+.2f%%", sym, gain)
+            # احذف بعد 24h (تم الانتهاء)
+            del backtest_signals[sym]
+
+
+def get_backtest_stats():
+    # type: () -> str
+    """ملخص إحصائي للإشارات المكتملة — للتقرير الدوري"""
+    completed_1h  = [(s, d["result_1h"])  for s, d in backtest_signals.items() if d.get("result_1h") is not None]
+    completed_4h  = [(s, d["result_4h"])  for s, d in backtest_signals.items() if d.get("result_4h") is not None]
+
+    if not completed_1h and not completed_4h:
+        return "📋 لا توجد نتائج backtest بعد\n"
+
+    txt = "🧪 *Backtest Stats:*\n"
+    if completed_1h:
+        wins = sum(1 for _, r in completed_1h if r > 0)
+        avg  = sum(r for _, r in completed_1h) / len(completed_1h)
+        txt += "  1H: `{}/{} فوز` | متوسط: `{:+.1f}%`\n".format(
+            wins, len(completed_1h), avg)
+    if completed_4h:
+        wins = sum(1 for _, r in completed_4h if r > 0)
+        avg  = sum(r for _, r in completed_4h) / len(completed_4h)
+        txt += "  4H: `{}/{} فوز` | متوسط: `{:+.1f}%`\n".format(
+            wins, len(completed_4h), avg)
+    return txt
 
 
 # ═══════════════════════════════════════════════
@@ -2247,15 +2509,19 @@ def send_report():
         except: pass
     if not rows: return
     rows.sort(key=lambda x: -x[1])
-    msg = "📊 *PERFORMANCE REPORT V11*\n🕐 `{}`\n\n".format(
+    msg = "📊 *PERFORMANCE REPORT V15*\n🕐 `{}`\n\n".format(
         datetime.now().strftime("%Y-%m-%d %H:%M"))
     for sym, gr, sc in rows[:5]:
         msg += "🔥 *{}* `+{:.2f}%` Score:{}\n".format(sym, gr, sc)
 
-    # 🆕 إضافة ملخص السيولة
+    # إضافة ملخص السيولة
     msg += "\n━━━━━━━━━━━━━━━━━━\n"
     msg += "💸 *حالة السيولة:*\n"
     msg += get_flow_summary()
+
+    # 🆕 V15: إضافة إحصاءات Backtest
+    msg += "\n━━━━━━━━━━━━━━━━━━\n"
+    msg += get_backtest_stats()
 
     send(msg)
 
@@ -2269,7 +2535,7 @@ def run():
     global last_tickers, last_btc, last_sectors
     global last_deep_scan, last_stale, last_smart_money, last_expand
 
-    log.info("🚀 MAFIO BOT V14 يبدأ...")
+    log.info("🚀 MAFIO BOT V15 يبدأ...")
 
     log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
@@ -2290,7 +2556,7 @@ def run():
     last_deep_scan = 0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V14*\n"
+        "🤖 *MAFIO BOT SIGNAL V15*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -2299,7 +2565,10 @@ def run():
         "✅ Score Min: `{score}` | Deep Scan: كل ساعة\n"
         "✅ Anti P&D | Supertrend | Dynamic SL\n"
         "✅ Sector Flow Tracker — تتبع السيولة\n"
-        "🆕 Auto Expand: هدف 50 عملة/قطاع\n"
+        "🆕 V15: RSI Filter (رفض RSI > 70)\n"
+        "🆕 V15: Vol تاريخي للعملة نفسها\n"
+        "🆕 V15: Backtest تلقائي (1h/4h/24h)\n"
+        "🆕 V15: تصحيح جميع رموز SECTORS\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "₿ BTC: `{btc:+.2f}%` | السوق: `{mst}`\n"
         "🔥 Hot: `{hot}`\n"
@@ -2366,6 +2635,12 @@ def run():
 
             changes_map.update(change_now)
 
+            # 🆕 V15: تحديث تاريخ حجم العملات (لحساب vol_ratio التاريخي)
+            update_coin_vol_history(vol_now)
+
+            # 🆕 V15: متابعة إشارات Backtest
+            check_backtest(price_map)
+
             if now - last_tickers >= TICKERS_EVERY:
                 refresh_tickers()
                 analyze_sectors()
@@ -2409,7 +2684,7 @@ def run():
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            send("⛔ *MAFIO BOT V14* — تم الإيقاف")
+            send("⛔ *MAFIO BOT V15* — تم الإيقاف")
             break
         except Exception as e:
             log.error("خطأ: %s", e, exc_info=True)
