@@ -30,7 +30,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
 CHAT_ID        = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
 
 # ── إشارات ──────────────────────────────────────
-SCORE_MIN          = 75
+SCORE_MIN          = 65
 GOLD_MIN           = 88
 SIGNAL2_GAIN       = 2.0
 SIGNAL3_GAIN       = 4.0
