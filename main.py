@@ -481,7 +481,7 @@ SECTORS = {
 #   LOGGING
 # ═══════════════════════════════════════════════
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,   # 🧪 TEST (كان INFO) — لرؤية أسباب الرفض
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
@@ -2334,28 +2334,42 @@ def deep_scan(symbol, price, change):
     if symbol in tracked: return
 
     if market_state == "DANGER" and symbol not in hot_symbols:
+        log.debug("⛔ %s رُفض: DANGER + ليس hot", symbol)
         return
 
     kd = get_klines(symbol, "15m", 50)
-    if not kd: return
+    if not kd:
+        log.debug("⛔ %s رُفض: لا klines", symbol)
+        return
 
     is_pd, pd_r = detect_pump_dump(kd)
     if is_pd:
         log.debug("🚫 P&D: %s | %s", symbol, pd_r)
         return
 
-    if kd["vols"][-1] < kd["avg_vol"] * 1.2: return
+    vol_ratio_kd = kd["vols"][-1] / kd["avg_vol"] if kd["avg_vol"] > 0 else 0
+    if vol_ratio_kd < 1.2:
+        log.debug("⛔ %s رُفض: حجم منخفض %.2fx", symbol, vol_ratio_kd)
+        return
 
     st = get_supertrend(kd)
-    if st == "DOWN" and symbol not in hot_symbols: return
+    if st == "DOWN" and symbol not in hot_symbols:
+        log.debug("⛔ %s رُفض: Supertrend DOWN", symbol)
+        return
 
     ig, gp = detect_green_candles(kd)
-    if not ig: return
+    if not ig:
+        log.debug("⛔ %s رُفض: شموع خضراء %.0f%%", symbol, gp)
+        return
 
     ob = get_order_book(symbol)
     if ob:
-        if ob["imb"] < MIN_IMBALANCE or ob["imb"] > MAX_IMBALANCE: return
-        if ob["bid"] < MIN_BID_DEPTH: return
+        if ob["imb"] < MIN_IMBALANCE or ob["imb"] > MAX_IMBALANCE:
+            log.debug("⛔ %s رُفض: OB Imbalance %.2f", symbol, ob["imb"])
+            return
+        if ob["bid"] < MIN_BID_DEPTH:
+            log.debug("⛔ %s رُفض: Bid صغير %.0f", symbol, ob["bid"])
+            return
 
     vol_spike   = detect_volume_spike(kd)
     vol_accum   = detect_volume_accum(kd)
@@ -2367,13 +2381,13 @@ def deep_scan(symbol, price, change):
     sector = next((s for s,syms in SECTORS.items()
                    if symbol in syms and s in hot_sectors), "")
 
-    # ✅ V11: نمرر symbol للـ score لحساب Flow Bonus
     score = calculate_score(kd, ob, vol_accum, vol_spike, consol,
                             higher_lows, (ig,gp), bo_str, in_hot, st, symbol)
 
     min_s = GOLD_MIN if market_state == "CAUTION" else SCORE_MIN
     label = score_label(score)
     if not label or score < min_s:
+        log.debug("⛔ %s رُفض: Score=%d (min=%d) ST=%s hot=%s", symbol, score, min_s, st, in_hot)
         return
 
     sl_pct = calc_sl(kd, score, ob, is_bo)
