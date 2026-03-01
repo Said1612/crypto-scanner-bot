@@ -104,7 +104,7 @@ CACHE_4H           = 900       # شموع 4h صالحة 15 دقيقة
 MOMENTUM_MOVE_MIN  = 2.0    # السعر تحرك 2%+ عن آخر قراءة
 MOMENTUM_MOVE_MAX  = 8.0    # لم يتجاوز 8% بعد (مبكر)
 MOMENTUM_MIN_VOL   = 500_000 # حجم 24h أدنى (~Market Cap 5M$)
-MOMENTUM_COOLDOWN  = 600     # 10 دقائق بين كل تنبيه لنفس العملة
+MOMENTUM_COOLDOWN  = 14400  # 4 ساعات — عملة واحدة 3 إشعارات فقط
 
 # ── MEXC Endpoints ──────────────────────────────
 MEXC_24H    = "https://api.mexc.com/api/v3/ticker/24hr"
@@ -143,25 +143,102 @@ STABLE_KEYWORDS   = ["USD","EUR","GBP","JPY","CNY","AUD","CHF",
 #   SECTORS — 12 قطاع
 # ═══════════════════════════════════════════════
 SECTORS = {
-    "AI":      ["FETUSDT","AGIXUSDT","OCEANUSDT","AIXBTUSDT","RENDUSDT",
-                "NEWTUSDT","TAOAUSDT","ARKMUSDT","GRTUSDT","PHAUSDT"],
-    "RWA":     ["SAHARAUSDT","ONDOUSDT","CFGUSDT","RSRUSDT","GOLDUSDT",
-                "POLIXUSDT","MPLXUSDT","REALUSDT","TRSTUSDT","ONDO2USDT"],
-    "Gaming":  ["AXSUSDT","SANDUSDT","MANAUSDT","ILVUSDT","GMTUSDT",
-                "YGGUSDT","SLPUSDT","PGXUSDT","BEXUSDT","GALAAUSDT"],
-    "DeFi":    ["UNIUSDT","AAVEUSDT","CAKEUSDT","C98USDT","SUSHIUSDT",
-                "COMPUSDT","MKRUSDT","CRVUSDT","LDOUSDT","1INCHUSDT"],
-    "Layer1":  ["AVAXUSDT","ADAUSDT","ATOMUSDT","NEARUSDT","FTMUSDT",
-                "ALGOUSDT","ICPUSDT","APTUSDT","SUIUSDT","SEIUSDT"],
-    "Layer2":  ["MATICUSDT","OPUSDT","ARBUSDT","ZKUSDT","STRKUSDT",
-                "LRCUSDT","IMXUSDT","METISUSDT","MANTAUSDT","SCROLLUSDT"],
-    "Meme":    ["DOGEUSDT","SHIBUSDT","PEPEUSDT","FLOKIUSDT","WIFUSDT",
-                "BOMUSDT","MEMEUSDT","NEIROUSDT","TUROUSDT","MOGUUSDT"],
-    "Oracle":  ["LINKUSDT","BANDUSDT","APIUSDT","UMAUSDT","DIAUSDT"],
-    "Privacy": ["XMRUSDT","DASHUSDT","SCRTUSDT","ROSEUSDT","ZECUSDT"],
-    "Storage": ["FILUSDT","ARUSDT","STORJUSDT","SCUSDT","BLZUSDT"],
-    "DePIN":   ["IOTAUSDT","WLDUSDT","AIOZUSDT","XNETUSDT","MOBIUSDT"],
-    "Old":     ["LTCUSDT","ETCUSDT","XEMUSDT","LUNCUSDT","BTGUSDT"],
+    "AI": [
+        "FETUSDT","AGIXUSDT","OCEANUSDT","RENDUSDT","GRTUSDT",
+        "TAOAUSDT","ARKMUSDT","PHAUSDT","AIXBTUSDT","NEWTUSDT",
+        "NEIROUSDT","AIUSDT","CGPTUSDT","NEUROUSDT","VANAUSDT",
+        "DFUSDT","COOKIEUSDT","AIDOGEUSDT","MYRIAUSDT","ALETHUSDT",
+        "WLDUSDT","KAIAUSDT","GRIFFAINUSDT","VIRTUSDT","SWARMAUSDT",
+        "SENTIENTUSDT","MASKUSDT","AKTOUSDT","NUMUSDT","MEAIUSDT","MIRAUSDT",
+    ],
+    "RWA": [
+        "ONDOUSDT","CFGUSDT","RSRUSDT","MPLXUSDT","REALUSDT",
+        "TRSTUSDT","PROMUSDT","IDUSDT","MANTRAUSDT","XDCUSDT",
+        "LQTYUSDT","SPXUSDT","ONPUSDT","VAIUSDT","GOLDUSDT",
+        "TBLUSDT","PARCLUSDT","REXUSDT","HONEUSDT","OPENUSDT",
+        "LANDXUSDT","CREDIXUSDT","POLIXUSDT","TRUEUSDT","MTVUSDT",
+        "PROPUSDT","REUSDT","TPROTUSDT","STBTCUSDT","CULTUSDT",
+    ],
+    "Gaming": [
+        "AXSUSDT","SANDUSDT","MANAUSDT","ILVUSDT","GMTUSDT",
+        "YGGUSDT","SLPUSDT","GALAUSDT","RONUSDT","IMXUSDT",
+        "BEAMUSDT","PIXELUSDT","NOTUSDT","XAIUSDT","ALICEUSDT",
+        "RAREUSDT","MOBAUSDT","PORTALUSDT","CHZUSDT","PGXUSDT",
+        "HEROESUSDT","BEXUSDT","GOMAUSDT","ACEUSDT","METAUSDT",
+        "WAXPUSDT","GALUSDT","VIDYAUSDT","ELFUSDT","TWTUSDT",
+    ],
+    "DeFi": [
+        "UNIUSDT","AAVEUSDT","CAKEUSDT","SUSHIUSDT","COMPUSDT",
+        "MKRUSDT","CRVUSDT","LDOUSDT","1INCHUSDT","C98USDT",
+        "DYDXUSDT","GMXUSDT","JUPUSDT","RAYUSDT","ORCAUSDT",
+        "PENDLEUSDT","EIGENUSDT","ETHFIUSDT","IDEXUSDT","REZUSDT",
+        "SYRUPUSDT","BONEUSDT","CVXUSDT","FRAXUSDT","FXSUSDT",
+        "TRIBEUSDT","RADUSDT","ALPACAUSDT","RAMPUSDT","DODOUSUSDT","WOOUSDT",
+    ],
+    "Layer1": [
+        "AVAXUSDT","ADAUSDT","ATOMUSDT","NEARUSDT","FTMUSDT",
+        "ALGOUSDT","ICPUSDT","APTUSDT","SUIUSDT","SEIUSDT",
+        "INJUSDT","KASUSDT","TONUSDT","HBARUSDT","EGLDUSDT",
+        "ZILUSDT","ONEUSDT","CFXUSDT","JASMYUSDT","LSKUSDT",
+        "QNTUSDT","CELOUSDT","FLOWUSDT","MINAUSDT","KAVAUSDT",
+        "VETUSDT","ONTUSDT","WAVESUSDT","XTZUSDT","NEOUSDT",
+    ],
+    "Layer2": [
+        "MATICUSDT","OPUSDT","ARBUSDT","ZKUSDT","STRKUSDT",
+        "LRCUSDT","METISUSDT","MANTAUSDT","SCROLLUSDT","MNTUSDT",
+        "MERLUSDT","ALTUSDT","WUSDT","ZROUSDT","LINEAUSDT",
+        "TAIKOUSDT","MODUSDT","BVMUSDT","SOLUSDT","XRPUSDT",
+        "CELRUSDT","SKLUSDT","OMGUSDT","SXUSDT","RLYUSDT",
+        "SSVUSDT","NEONUSDT","BOBIUSDT","XVMUSDT","BOBAUSUSDT","ZKCUSDT",
+    ],
+    "Meme": [
+        "DOGEUSDT","SHIBUSDT","PEPEUSDT","FLOKIUSDT","WIFUSDT",
+        "BOMUSDT","MEMEUSDT","TUROUSDT","POPCATUSDT","MOGUSDT",
+        "BABYDOGEUSDT","BONKUSDT","DOGSUSDT","CATIUSDT","GOATUSDT",
+        "PNUTUSDT","ACTUSDT","CHILLGUYUSDT","TURBOUSDT","LUNAUSDT",
+        "BOMEUSDT","MOTHERUSDT","PONKEUSDT","COSUSDT","XLMUSDT",
+        "GMEUSDT","MIGGOUSDT","WOJAKSUSDT","HONKUSDT","MYROUSUSDT",
+    ],
+    "Oracle": [
+        "LINKUSDT","BANDUSDT","UMAUSDT","DIAUSDT","PYTHUSDT",
+        "STORKUSDT","SXTUSDT","TELLOUSDT","CHRUSDT","PROSUSDT",
+        "IOUSDT","WINGUSDT","ORAOUSDT","ACXUSDT","ATLUSDT",
+        "HEMUSDT","NEXUSDT","SUPRUSDT","APIUSDT","DPIUSDT",
+        "ORAIUSDT","DORSAUSDT","TRUFUSDT","PRIMUSDT","PLPUSDT",
+        "DMTUSDT","REPUSDT","BCOTUSDT","XVSUSDT","SEER1USDT",
+    ],
+    "Privacy": [
+        "XMRUSDT","DASHUSDT","SCRTUSDT","ROSEUSDT","ZECUSDT",
+        "OXENUSDT","RAILUSDT","TORNUSDT","NYMOUSDT","DUSKUSDT",
+        "IRONUSDT","NAMEUSDT","KREDUSDT","ZENNUSDT","SIVUSDT",
+        "PHALAAUSDT","AZEROUSUSDT","PANTHERUSDT","LTZUSDT","PANCUSDT",
+        "PRVSUSDT","FIROUSDT","PIVXUSDT","XCMUSDT","GRINUSDT",
+        "BEAMXUSDT","ZENUSDT","COINUSDT","CTXCUSDT","NYMOUSDT2",
+    ],
+    "Storage": [
+        "FILUSDT","ARUSDT","STORJUSDT","SCUSDT","BLZUSDT",
+        "HOTUSDT","BTTSUSDT","CKBUSDT","AIOZUSDT","KYVEUSDT",
+        "ALEPHUSDT","MXCUSDT","ACPUSDT","DATAUSDT","GEOUSDT",
+        "CSPUSDT","MNETUSDT","ZETAUSDT","SIACOINUSDT","IPFSUSDT",
+        "AMBASUSDT","STORXUSDT","LAMBUSDT","BLSUSDT","BTTCUSDT",
+        "APEXUSDT","NKUSUSDT","PEAQUSDT","RDXUSDT","ORDIUSDT",
+    ],
+    "DePIN": [
+        "IOTAUSDT","XNETUSDT","MOBIUSDT","HNTUSDT","LPTUSDT",
+        "NTRNUSDT","GPUUSDT","NOSANAUSDT","PONDUSDT","GEODNETUSDT",
+        "DAWNUSDT","WIFIUSDT","OXTUSDT","HELIUMUSDT","RDNTUSDT",
+        "GRASSUSDT","IONUSDT","DINGOUSDT","TIAUSDT","CUDOSUSDT",
+        "SOARXUSDT","NGLAUSDT","PINGUSDT","ROAMUSDT","NODELUSDT",
+        "CPOOLUSDT","SHDWUSDT","IOTXUSDT","POKTUSDT","POLKAUSDT","DOTUSDT",
+    ],
+    "Old": [
+        "LTCUSDT","ETCUSDT","XEMUSDT","LUNCUSDT","BTGUSDT",
+        "BCHUSDT","EOSUSDT","TRXUSDT","QTUMUSDT","ICXUSDT",
+        "RVNUSDT","STEEMUSDT","ARKUSDT","NMRUSDT","DCRUSDT",
+        "DGBUSDT","NAVUSDT","ZRXUSDT","NEIROUSDT2","TWTUSDT2",
+        "MXCUSUSDT","NEOUSDT2","SCUSUSDT","ONTUSDT2","RSRUSDT2",
+        "XTZUSUSDT","VETUSUSDT","WAVESUSUSDT","PIVXUSUSDT","NEONUSDT2",
+    ],
 }
 
 # ── 🆕 Smart Money Detection ─────────────────────
@@ -798,83 +875,147 @@ def analyze_smart_money(force_report=False):
 
 
 # ═══════════════════════════════════════════════
-#   🆕 MOMENTUM DETECTOR
-#   يرصد الحركة اللحظية — الدخول عند 3-5%
+#   🆕 MOMENTUM DETECTOR — نظام الإشعارات الثلاثي
+#   🔵 إشعار 1: مراقبة   | 🟡 إشعار 2: تأكيد دخول
+#   🟢 إشعار 3: إيجابية  | كل عملة = 3 إشعارات فقط
 # ═══════════════════════════════════════════════
+
+def _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map):
+    # type: (str, dict, dict, dict, dict, dict) -> list
+    """يجلب أفضل 10 عملات من القطاع بناءً على السيولة والارتداد"""
+    coins = SECTORS.get(sector, [])
+    scored = []
+    for sym in coins:
+        if sym not in price_map: continue
+        price    = price_map[sym]
+        vol      = vol_now.get(sym, 0)
+        ch       = change_now.get(sym, 0)
+        high_24h = high_map.get(sym, price)
+        low_24h  = low_map.get(sym, price)
+        if vol < MOMENTUM_MIN_VOL: continue
+        if ch <= 0 or ch > 10: continue
+        if high_24h <= 0 or low_24h <= 0: continue
+        rebound = (price - low_24h) / low_24h * 100 if low_24h > 0 else 0
+        if rebound < 3: continue
+        # Score بسيط: حجم + ارتداد + تغيير إيجابي
+        score = (vol / 1_000_000) * 0.5 + rebound * 0.3 + ch * 0.2
+        scored.append((sym, score, price, vol, ch, rebound, high_24h, low_24h))
+    scored.sort(key=lambda x: -x[1])
+    return scored[:10]
+
+
 def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
-    # type: (Dict[str, float], Dict[str, float], Dict[str, float], Dict, Dict) -> None
+    # type: (dict, dict, dict, dict, dict) -> None
     """
     نظام الإشعارات الثلاثي — اصطياد القاع مع السيولة:
-    🔵 المرحلة 1: Momentum Detected  — أول رصد للسيولة
-    🟡 المرحلة 2: السيولة ترتفع      — سعر +2% + حجم متصاعد
-    🟢 المرحلة 3: تأكيد الدخول       — كل الشروط معاً (Score 65+)
+    🔵 إشعار 1: Momentum Detected  — أول رصد
+    🟡 إشعار 2: تأكيد الدخول       — سعر +2% + حجم متصاعد
+    🟢 إشعار 3: تأكيد الإيجابية    — Score 65+ + سيولة قوية
+    كل عملة = 3 إشعارات كحد أقصى — لا تكرار
     """
     global price_prev, momentum_alerted, momentum_stage
 
     now = time.time()
 
-    # ── المرحلة 2 و 3: متابعة العملات المرصودة ──────────
-    for sym, stage_data in list(momentum_stage.items()):
+    # ══════════════════════════════════════════════
+    # متابعة المراحل 2 و 3 للعملات المرصودة
+    # ══════════════════════════════════════════════
+    for sym, sd in list(momentum_stage.items()):
         if sym not in price_map: continue
-        price      = price_map[sym]
-        vol        = vol_now.get(sym, 0)
-        change_24h = change_now.get(sym, 0)
-        entry_price = stage_data["entry_price"]
-        entry_vol   = stage_data["entry_vol"]
+        price       = price_map[sym]
+        vol         = vol_now.get(sym, 0)
+        change_24h  = change_now.get(sym, 0)
+        entry_price = sd["entry_price"]
+        entry_vol   = sd["entry_vol"]
         gain        = (price - entry_price) / entry_price * 100 if entry_price > 0 else 0
 
-        # تنظيف: إذا مضى أكثر من 2 ساعة بدون تأكيد = احذف
-        if now - stage_data["entry_time"] > 7200:
+        # تنظيف: مضت 4 ساعات أو السعر نزل عن الدخول
+        if now - sd["entry_time"] > 14400 or gain < 0:
             del momentum_stage[sym]
             continue
 
-        # إذا السعر نزل -5% من نقطة الرصد = احذف
-        if gain < -5:
-            del momentum_stage[sym]
-            continue
+        vol_ratio = vol / entry_vol if entry_vol > 0 else 1
+        high_24h  = high_map.get(sym, price)
+        low_24h   = low_map.get(sym, price)
+        drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
-        # ── المرحلة 2: السيولة ترتفع ──────────────────
-        if stage_data["stage"] == 1 and not stage_data.get("alerted_2"):
-            vol_ratio = vol / entry_vol if entry_vol > 0 else 1
+        # ── 🟡 إشعار 2: تأكيد الدخول ──────────────
+        if sd["stage"] == 1 and not sd.get("alerted_2"):
             if gain >= 2.0 and vol_ratio >= 1.3:
-                stage_data["alerted_2"] = True
-                in_hot = sym in hot_symbols
-                hot_tag = " 🔥" if in_hot else ""
+                sd["alerted_2"] = True
+                sd["stage"]     = 2
+                sector = next((s for s, syms in SECTORS.items() if sym in syms), "")
+                top10  = _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map)
+                top10_txt = ""
+                for i, (s, sc, p, v, c, rb, *_) in enumerate(top10[:5], 1):
+                    top10_txt += "  {}. *{}* `+{:.1f}%` | حجم:`{:,.0f}`\n".format(
+                        i, s.replace("USDT",""), c, v)
+
                 send(
-                    "🟡 *السيولة ترتفع*{hot}\n"
+                    "🟡 *تأكيد الدخول*\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     "💰 *{sym}*\n"
                     "📈 ارتفع: `+{gain:.2f}%` من نقطة الرصد\n"
                     "💧 الحجم: `{ratio:.1f}x` المعدل\n"
                     "💵 السعر: `{price}`\n"
+                    "📉 من القمة: `-{drop:.1f}%`\n"
+                    "{top}"
                     "🕐 `{time}`\n"
                     "━━━━━━━━━━━━━━━━━━\n"
-                    "⚡ _قريب من التأكيد..._".format(
-                        hot=hot_tag, sym=sym,
-                        gain=gain, ratio=vol_ratio,
+                    "✅ *ادخل الآن — السيولة تتدفق*".format(
+                        sym=sym, gain=gain,
+                        ratio=vol_ratio,
                         price=format_price(price),
+                        drop=drop_from_high,
+                        top="🏆 *أفضل عملات القطاع:*\n{}\n".format(top10_txt) if top10_txt else "",
                         time=datetime.now().strftime("%H:%M:%S"),
                     )
                 )
-                stage_data["stage"] = 2
                 log.info("🟡 Stage2 | %s | +%.2f%% | vol_ratio=%.1f", sym, gain, vol_ratio)
 
-        # ── المرحلة 3: تأكيد الدخول ───────────────────
-        if stage_data["stage"] == 2 and not stage_data.get("alerted_3"):
-            vol_ratio = vol / entry_vol if entry_vol > 0 else 1
+        # ── 🟢 إشعار 3: تأكيد الإيجابية ────────────
+        if sd["stage"] == 2 and not sd.get("alerted_3"):
             if gain >= 3.0 and vol_ratio >= 2.0 and change_24h > 0:
-                # Deep Scan للتحقق من Score
-                deep_scan(sym, price, change_24h)
-                # الإشعار يُرسل من داخل deep_scan إذا Score >= 65
-                stage_data["alerted_3"] = True
-                stage_data["stage"] = 3
-                log.info("🟢 Stage3 | %s | +%.2f%% | deep_scan triggered", sym, gain)
+                sd["alerted_3"] = True
+                sd["stage"]     = 3
 
-    # ── المرحلة 1: رصد جديد ──────────────────────────
+                # فحص الإغلاق اليومي فوق الدعم
+                daily_close_ok = price > low_24h * 1.1 if low_24h > 0 else None
+                close_icon = "✅ فوق الدعم" if daily_close_ok else "⚠️ تحت الدعم"
+
+                send(
+                    "🟢 *تأكيد الإيجابية* 🎯\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "💰 *{sym}*\n"
+                    "📈 إجمالي الارتفاع: `+{gain:.2f}%`\n"
+                    "💧 السيولة: `{ratio:.1f}x` المعدل\n"
+                    "💵 السعر: `{price}`\n"
+                    "📅 الإغلاق اليومي: `{close}`\n"
+                    "🕐 `{time}`\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "🚀 *سيولة قوية — ارفع Stop Loss*".format(
+                        sym=sym, gain=gain,
+                        ratio=vol_ratio,
+                        price=format_price(price),
+                        close=close_icon,
+                        time=datetime.now().strftime("%H:%M:%S"),
+                    )
+                )
+                # Deep Scan للتأكيد النهائي
+                deep_scan(sym, price, change_24h)
+                log.info("🟢 Stage3 | %s | +%.2f%%", sym, gain)
+
+    # ══════════════════════════════════════════════
+    # 🔵 إشعار 1: رصد جديد
+    # ══════════════════════════════════════════════
     for sym, price in price_map.items():
         if sym in tracked: continue
         if sym in momentum_stage: continue
         if not sym.endswith("USDT"): continue
+
+        # فقط العملات في قائمتنا
+        in_our_list = any(sym in coins for coins in SECTORS.values())
+        if not in_our_list: continue
 
         vol = vol_now.get(sym, 0)
         if vol < MOMENTUM_MIN_VOL: continue
@@ -888,38 +1029,54 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
         price_prev[sym] = price
         if prev <= 0 or price <= 0: continue
 
+        # تحقق من صحة السعر (ليس سعراً قديماً)
+        high_24h = high_map.get(sym, price)
+        low_24h  = low_map.get(sym, price)
+        if high_24h > 0 and low_24h > 0:
+            if price < low_24h * 0.85 or price > high_24h * 1.15:
+                price_prev[sym] = 0
+                continue
+
         move       = (price - prev) / prev * 100
         change_24h = change_now.get(sym, 0)
-        high_24h   = high_map.get(sym, price)
-        low_24h    = low_map.get(sym, price)
 
-        # ── فلاتر اصطياد القاع ──────────────────────
+        # فلتر التحرك
+        if abs(move) > 30: price_prev[sym] = 0; continue
         if move < MOMENTUM_MOVE_MIN: continue
         if move > MOMENTUM_MOVE_MAX: continue
-        if change_24h <= 0: continue
-        if change_24h > 10: continue   # أكثر من 10% = pump — تجاهل
 
+        # فلتر 24h: 0 < change < 10%
+        if change_24h <= 0: continue
+        if change_24h > 10: continue
+
+        # فلتر القاع
         if low_24h > 0 and price > low_24h * 2.5: continue
         if high_24h > 0 and price > high_24h * 0.90: continue
-
         if low_24h > 0:
             rebound = (price - low_24h) / low_24h * 100
             if rebound < 5: continue
 
-        # cooldown للمرحلة 1
-        if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN:
-            continue
+        # Cooldown 4 ساعات
+        if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN: continue
 
         momentum_alerted[sym] = now
+
+        # القطاع وأفضل 10 عملات فيه
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "")
         in_hot  = sym in hot_symbols
-        sector  = next((s for s, syms in SECTORS.items()
-                       if sym in syms and s in hot_sectors), "")
         hot_tag = " 🔥 *{}*".format(sector) if in_hot else ""
 
         rebound        = (price - low_24h) / low_24h * 100 if low_24h > 0 else 0
         drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
-        # حفظ بيانات المرحلة 1
+        # أفضل 10 عملات في نفس القطاع
+        top10     = _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map)
+        top10_txt = ""
+        for i, (s, sc, p, v, c, rb, *_) in enumerate(top10[:5], 1):
+            top10_txt += "  {}. *{}* `+{:.1f}%` | `{:,.0f}`\n".format(
+                i, s.replace("USDT",""), c, v)
+
+        # حفظ المرحلة 1
         momentum_stage[sym] = {
             "stage":       1,
             "entry_price": price,
@@ -929,26 +1086,32 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
             "alerted_3":   False,
         }
 
-        log.info("🔵 Stage1 | %s | +%.2f%% لحظي | 24h:%.1f%% | vol:%.0f",
-                 sym, move, change_24h, vol)
+        log.info("🔵 Stage1 | %s | +%.2f%% | 24h:%.1f%% | vol:%.0f | sector:%s",
+                 sym, move, change_24h, vol, sector)
 
-        # ── إشعار المرحلة 1 ─────────────────────────
         send(
             "🔵 *Momentum Detected*{hot}\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "💰 *{sym}*\n"
+            "💰 *{sym}*  |  🏷️ `{sector}`\n"
             "📈 تحرك لحظي: `+{move:.2f}%`\n"
             "📊 تغيير 24h: `+{ch:.1f}%`\n"
             "💧 حجم: `{vol:,.0f}`\n"
             "💵 السعر: `{price}`\n"
             "📉 من القمة: `-{drop:.1f}%` | ارتداد: `+{reb:.1f}%`\n"
+            "{top}"
             "🕐 `{time}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "👀 _مراقبة — انتظر التأكيد_".format(
-                hot=hot_tag, sym=sym,
-                move=move, ch=change_24h,
-                vol=vol, price=format_price(price),
-                drop=drop_from_high, reb=rebound,
+            "👀 _مراقبة — انتظر إشعار التأكيد_".format(
+                hot=hot_tag,
+                sym=sym,
+                sector=sector if sector else "—",
+                move=move,
+                ch=change_24h,
+                vol=vol,
+                price=format_price(price),
+                drop=drop_from_high,
+                reb=rebound,
+                top="🏆 *أفضل عملات القطاع:*\n{}\n".format(top10_txt) if top10_txt else "",
                 time=datetime.now().strftime("%H:%M:%S"),
             )
         )
@@ -996,17 +1159,15 @@ def refresh_tickers():
 
     result.sort(key=lambda x: -x[1])
 
-    # نأخذ 200 عملة بدل 80 لتغطية أكبر
-    base_candidates = [s for s, _ in result[:200]]
-
-    # أضف عملات القطاعات الساخنة دائماً
-    extra = [s for s in hot_symbols
-             if s not in base_candidates and s not in EXCLUDED]
-    candidates = base_candidates + extra
+    # ══════════════════════════════════════════════
+    # نراقب فقط عملات قائمتنا المختارة — لا غيرها
+    # ══════════════════════════════════════════════
+    our_coins = set(sym for coins in SECTORS.values() for sym in coins)
+    candidates = [sym for sym in our_coins if sym not in EXCLUDED]
     last_tickers = time.time()
 
-    log.info("📋 Candidates: %d من %d | Hot: %s",
-             len(candidates), len(data), ", ".join(hot_sectors) or "لا يوجد")
+    log.info("📋 Candidates: %d عملة من قائمتنا | Hot: %s",
+             len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
 
 # ═══════════════════════════════════════════════
@@ -1552,8 +1713,12 @@ def run():
             for t in tickers_now:
                 sym = t.get("symbol","")
                 try:
-                    price_map[sym]  = float(t["lastPrice"])
-                    change_now[sym] = float(t["priceChangePercent"])
+                    last  = float(t["lastPrice"])
+                    open_ = float(t.get("openPrice", last))
+                    # حساب تغيير 24h حقيقي من openPrice
+                    real_change = (last - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
+                    price_map[sym]  = last
+                    change_now[sym] = real_change
                     vol_now[sym]    = float(t["quoteVolume"])
                     high_map[sym]   = float(t["highPrice"])
                     low_map[sym]    = float(t["lowPrice"])
