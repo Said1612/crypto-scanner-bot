@@ -159,6 +159,7 @@ VOL_HISTORY_MIN   = 3         # أدنى عدد قراءات للمقارنة ا
 BACKTEST_CHECK_1H  = 3600     # 1 ساعة
 BACKTEST_CHECK_4H  = 14400    # 4 ساعات
 BACKTEST_CHECK_24H = 86400    # 24 ساعة
+BACKTEST_FEE       = 0.2      # 🆕 V15: رسوم التداول الواقعية (0.1% دخول + 0.1% خروج)
 
 # ── Smart Money ──────────────────────────────────
 SMART_MONEY_SIGMA      = 3.0
@@ -592,23 +593,39 @@ def send(msg):
         log.error("Telegram: %s", e)
 
 
-def safe_get(url, params=None):
-    # type: (str, Optional[dict]) -> Optional[Any]
+def safe_get(url, params=None, retries=3):
+    # type: (str, Optional[dict], int) -> Optional[Any]
+    """
+    🆕 V15: Retry مع Exponential Backoff
+    المحاولة 1: فوراً
+    المحاولة 2: انتظر 2 ثانية
+    المحاولة 3: انتظر 4 ثانية
+    """
     global api_calls_total, api_calls_minute, api_minute_reset
-    try:
-        r = session.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        api_calls_total  += 1
-        api_calls_minute += 1
-        if time.time() - api_minute_reset >= 60:
-            log.info("📡 API: %d طلب/دقيقة | إجمالي: %d",
-                     api_calls_minute, api_calls_total)
-            api_calls_minute = 0
-            api_minute_reset = time.time()
-        return r.json()
-    except Exception as e:
-        log.debug("API خطأ [%s]: %s", url.split("/")[-1], e)
-        return None
+
+    for attempt in range(retries):
+        try:
+            r = session.get(url, params=params, timeout=10)
+            r.raise_for_status()
+            api_calls_total  += 1
+            api_calls_minute += 1
+            if time.time() - api_minute_reset >= 60:
+                log.info("📡 API: %d طلب/دقيقة | إجمالي: %d",
+                         api_calls_minute, api_calls_total)
+                api_calls_minute = 0
+                api_minute_reset = time.time()
+            return r.json()
+
+        except Exception as e:
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            if attempt < retries - 1:
+                log.debug("API retry %d/%d [%s]: %s — انتظر %ds",
+                          attempt + 1, retries, url.split("/")[-1], e, wait)
+                time.sleep(wait)
+            else:
+                log.debug("API فشل نهائي [%s]: %s", url.split("/")[-1], e)
+
+    return None
 
 
 # ═══════════════════════════════════════════════
@@ -1437,68 +1454,73 @@ def check_backtest(price_map):
             continue
 
         elapsed = now - data["entry_time"]
-        gain    = (price - entry) / entry * 100
-        emoji   = "✅" if gain > 0 else "🔴"
+        # 🆕 V15: خصم رسوم التداول الواقعية (0.1% دخول + 0.1% خروج = 0.2%)
+        gain_raw = (price - entry) / entry * 100
+        gain     = round(gain_raw - BACKTEST_FEE, 2)
+        emoji    = "✅" if gain > 0 else "🔴"
+        fee_note = "_(بعد خصم {:.1f}% رسوم)_".format(BACKTEST_FEE)
 
         # ── تحقق 1 ساعة ──────────────────────────
         if not data["checked_1h"] and elapsed >= BACKTEST_CHECK_1H:
             data["checked_1h"]  = True
-            data["result_1h"]   = round(gain, 2)
+            data["result_1h"]   = gain
             send(
                 "📊 *BACKTEST 1H* | `{sym}`\n"
-                "{em} النتيجة: `{gain:+.2f}%`\n"
+                "{em} الربح الصافي: `{gain:+.2f}%` {fee}\n"
+                "📈 قبل الرسوم: `{raw:+.2f}%`\n"
                 "💵 دخول: `{entry}` ← الآن: `{now_p}`\n"
                 "🏷️ قطاع: `{sector}`".format(
-                    sym=sym.replace("USDT",""), em=emoji, gain=gain,
+                    sym=sym.replace("USDT",""), em=emoji,
+                    gain=gain, fee=fee_note, raw=gain_raw,
                     entry=entry, now_p=round(price, 6),
                     sector=data["sector"],
                 )
             )
-            log.info("📊 Backtest 1H | %s | %+.2f%%", sym, gain)
+            log.info("📊 Backtest 1H | %s | صافي=%+.2f%% | خام=%+.2f%%",
+                     sym, gain, gain_raw)
 
         # ── تحقق 4 ساعات ─────────────────────────
         elif not data["checked_4h"] and elapsed >= BACKTEST_CHECK_4H:
             data["checked_4h"]  = True
-            data["result_4h"]   = round(gain, 2)
+            data["result_4h"]   = gain
             send(
                 "📊 *BACKTEST 4H* | `{sym}`\n"
-                "{em} النتيجة: `{gain:+.2f}%`\n"
+                "{em} الربح الصافي: `{gain:+.2f}%` {fee}\n"
+                "📈 قبل الرسوم: `{raw:+.2f}%`\n"
                 "💵 دخول: `{entry}` ← الآن: `{now_p}`\n"
                 "1H كان: `{r1h}%` | 4H الآن: `{gain:+.2f}%`".format(
-                    sym=sym.replace("USDT",""), em=emoji, gain=gain,
+                    sym=sym.replace("USDT",""), em=emoji,
+                    gain=gain, fee=fee_note, raw=gain_raw,
                     entry=entry, now_p=round(price, 6),
                     r1h=data.get("result_1h","N/A"),
                 )
             )
-            log.info("📊 Backtest 4H | %s | %+.2f%%", sym, gain)
+            log.info("📊 Backtest 4H | %s | صافي=%+.2f%%", sym, gain)
 
         # ── تحقق 24 ساعة ─────────────────────────
         elif not data["checked_24h"] and elapsed >= BACKTEST_CHECK_24H:
             data["checked_24h"] = True
-            data["result_24h"]  = round(gain, 2)
-            # تقرير نهائي مفصل
+            data["result_24h"]  = gain
             r1h  = data.get("result_1h")
             r4h  = data.get("result_4h")
-            best = max(
-                x for x in [r1h, r4h, gain] if x is not None
-            )
+            best = max(x for x in [r1h, r4h, gain] if x is not None)
             send(
                 "🏁 *BACKTEST 24H — نهائي* | `{sym}`\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "{em} 24H: `{gain:+.2f}%`\n"
+                "{em} صافي 24H: `{gain:+.2f}%` {fee}\n"
                 "📈 أفضل نقطة: `+{best:.2f}%`\n"
                 "⏱️ 1H: `{r1h}%` | 4H: `{r4h}%`\n"
                 "💵 دخول: `{entry}`\n"
                 "🏷️ قطاع: `{sector}`".format(
-                    sym=sym.replace("USDT",""), em=emoji, gain=gain,
+                    sym=sym.replace("USDT",""), em=emoji,
+                    gain=gain, fee=fee_note,
                     best=best,
                     r1h=r1h if r1h is not None else "N/A",
                     r4h=r4h if r4h is not None else "N/A",
                     entry=entry, sector=data["sector"],
                 )
             )
-            log.info("🏁 Backtest 24H | %s | %+.2f%%", sym, gain)
-            # احذف بعد 24h (تم الانتهاء)
+            log.info("🏁 Backtest 24H | %s | صافي=%+.2f%%", sym, gain)
             del backtest_signals[sym]
 
 
@@ -2398,8 +2420,12 @@ def score_label(score):
 # ═══════════════════════════════════════════════
 #   DEEP SCAN
 # ═══════════════════════════════════════════════
-def deep_scan(symbol, price, change):
-    # type: (str, float, float) -> None
+def deep_scan(symbol, price, change, fetch_orderbook=True):
+    # type: (str, float, float, bool) -> None
+    """
+    🆕 V15: fetch_orderbook=True فقط لأفضل العملات
+    يوفر طلبات API كثيرة
+    """
     if symbol in tracked: return
 
     if market_state == "DANGER" and symbol not in hot_symbols:
@@ -2431,7 +2457,8 @@ def deep_scan(symbol, price, change):
         log.debug("⛔ %s رُفض: شموع خضراء %.0f%%", symbol, gp)
         return
 
-    ob = get_order_book(symbol)
+    # 🆕 V15: OrderBook فقط للعملات التي اجتازت الفلاتر الأولية
+    ob = get_order_book(symbol) if fetch_orderbook else None
     if ob:
         if ob["imb"] < MIN_IMBALANCE or ob["imb"] > MAX_IMBALANCE:
             log.debug("⛔ %s رُفض: OB Imbalance %.2f", symbol, ob["imb"])
@@ -3005,17 +3032,38 @@ def run():
 
             # Deep Scan
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
-                log.info("🔍 Deep Scan — %d عملة...", len(candidates))
-                scanned = 0
+                # 🆕 V15: ترتيب مسبق — OrderBook لأفضل 20 فقط
+                # نرتب العملات حسب: حجم مرتفع + تغيير إيجابي أولاً
+                pre_scored = []
                 for sym in candidates:
                     if sym in tracked: continue
                     price  = price_map.get(sym, 0)
                     change = changes_map.get(sym, 0)
+                    vol    = vol_now.get(sym, 0)
                     if price <= 0: continue
-                    deep_scan(sym, price, change)
+                    # نقاط مبدئية سريعة بدون API
+                    pre_score = (
+                        (vol / 1_000_000) * 0.5 +      # حجم
+                        max(change, 0) * 0.3 +          # تغيير إيجابي
+                        (1 if sym in hot_symbols else 0) * 2  # قطاع ساخن
+                    )
+                    pre_scored.append((sym, price, change, pre_score))
+
+                # ترتيب تنازلي — الأفضل أولاً
+                pre_scored.sort(key=lambda x: -x[3])
+
+                log.info("🔍 Deep Scan — %d عملة (أفضل 20 تأخذ OrderBook)...",
+                         len(pre_scored))
+
+                scanned = 0
+                for rank, (sym, price, change, _) in enumerate(pre_scored):
+                    # OrderBook فقط لأفضل 20 عملة
+                    fetch_ob = (rank < 20)
+                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
                     scanned += 1
                     if scanned % 10 == 0:
                         time.sleep(0.5)
+
                 last_deep_scan = now
                 log.info("✅ Deep Scan انتهى | %d عملة", scanned)
 
