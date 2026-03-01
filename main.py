@@ -1,8 +1,8 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO BOT SIGNAL V13 — UNIFIED ENGINE            ║
+║           MAFIO BOT SIGNAL V14 — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
-║   Sector Flow Tracker + 50 Coins/Sector                   ║
+║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
 
 التحسينات في V12 (فوق V11):
@@ -122,6 +122,21 @@ FLOW_HISTORY_MAX   = 20        # أقصى تاريخ محفوظ للقطاع
 
 # ── 🆕 Auto Expand ───────────────────────────────
 EXPAND_EVERY       = 86400     # إعادة توسيع القوائم كل 24 ساعة
+
+# ── 🆕 Smart Top10 — اصطياد قبل الانفجار ────────
+TOP10_CHANGE_MIN   = 0.0      # تغيير 24h أدنى — لم تنزل
+TOP10_CHANGE_MAX   = 5.0      # تغيير 24h أقصى — لم تنطلق بعد!
+TOP10_VOL_RATIO    = 1.5      # الحجم ارتفع 1.5x على الأقل
+TOP10_REBOUND_MAX  = 15.0     # ارتداد من القاع أقل من 15% = لا يزال قريباً
+TOP10_MIN_VOL      = 150_000  # حجم 24h أدنى للقبول
+TOP10_COOLDOWN     = 1800     # 30 دقيقة cooldown لنفس القطاع
+TOP10_COUNT        = 10       # عدد العملات في الإشعار
+
+# أوزان نقاط الترتيب
+W_VOL_RATIO    = 40   # الأهم: حجم مرتفع فجأة
+W_HOT_SECTOR   = 25   # قطاع ساخن + Flow داخل
+W_REBOUND_LOW  = 20   # قريب من القاع
+W_CHANGE_SMALL = 15   # تغيير صغير = لم ينطلق بعد
 
 # ── Smart Money ──────────────────────────────────
 SMART_MONEY_SIGMA      = 3.0
@@ -502,6 +517,7 @@ sector_vol_snapshots = {}  # type: Dict[str, List[float]]   {sector: [vol1, vol2
 sector_change_snapshots = {}  # type: Dict[str, List[float]] {sector: [avg_ch1, avg_ch2, ...]}
 sector_flow_alerted  = {}  # type: Dict[str, float]          {sector: last_alert_time}
 sector_flow_state    = {}  # type: Dict[str, str]            {sector: "IN"/"OUT"/"NEUTRAL"}
+top10_alerted        = {}  # type: Dict[str, float]          {sector: last_top10_alert_time}
 
 api_calls_total    = 0
 api_calls_minute   = 0
@@ -942,6 +958,27 @@ def analyze_sector_flow():
         )
         log.info("💸 Flow IN | %s | ratio=%.2f | ch=%.1f%%", sector, info["vol_ratio"], info["ch"])
 
+        # 🆕 V14: إطلاق Smart Top10 فوراً بعد إشعار الدخول
+        # نحتاج ticker_map — نبنيه من all_tickers
+        if all_tickers:
+            tmap      = {t["symbol"]: t for t in all_tickers}
+            p_map     = {}
+            v_map     = {}
+            c_map     = {}
+            h_map     = {}
+            l_map     = {}
+            for t in all_tickers:
+                s = t.get("symbol", "")
+                try:
+                    p_map[s] = float(t["lastPrice"])
+                    v_map[s] = float(t["quoteVolume"])
+                    c_map[s] = float(t["priceChangePercent"])
+                    h_map[s] = float(t["highPrice"])
+                    l_map[s] = float(t["lowPrice"])
+                except (KeyError, ValueError):
+                    pass
+            smart_top10_alert(sector, tmap, p_map, v_map, c_map, h_map, l_map)
+
     # ── إرسال تنبيهات الخروج ──────────────────────
     if outflows:
         out_txt = ""
@@ -981,6 +1018,180 @@ def get_flow_summary():
     if out_sectors:
         txt += "📤 سيولة خارجة: `{}`\n".format(", ".join(out_sectors))
     return txt or "➡️ لا تدفق واضح\n"
+
+
+# ═══════════════════════════════════════════════
+#   🆕 SMART TOP10 ALERT V14
+#   اصطياد أفضل 10 عملات في القطاع قبل الانفجار
+#   يُستدعى فوراً عند رصد Sector Flow IN
+# ═══════════════════════════════════════════════
+def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_map, low_map):
+    # type: (str, dict, dict, dict, dict, dict, dict) -> None
+    """
+    يختار أفضل 10 عملات من القطاع قبل الانفجار.
+
+    معايير الفلترة الصارمة (يجب تحقيق كلها):
+    ✅ تغيير 24h: 0% → 5%  ← السر! لم تنطلق بعد
+    ✅ حجم ارتفع فجأة: vol_ratio >= 1.5x
+    ✅ ارتداد من قاع 24h: < 15%  ← لا تزال قريبة
+    ✅ حجم كافٍ: > 150k USDT
+    ✅ ليست في tracked أو momentum_stage
+
+    نظام النقاط (100 نقطة):
+    • vol_ratio    × 40  — الأهم
+    • in_hot       × 25  — قطاع ساخن
+    • rebound_low  × 20  — قريب القاع
+    • change_small × 15  — لم ينطلق بعد
+    """
+    global top10_alerted
+
+    now = time.time()
+
+    # cooldown: لا ترسل نفس القطاع كل 30 دقيقة
+    if now - top10_alerted.get(sector, 0) < TOP10_COOLDOWN:
+        return
+
+    coins    = SECTORS.get(sector, [])
+    scored   = []
+
+    for sym in coins:
+        # ── فلاتر أساسية ───────────────────────
+        if sym not in price_map: continue
+        if sym in tracked: continue
+        if sym in momentum_stage: continue
+        if sym in EXCLUDED: continue
+
+        price    = price_map[sym]
+        vol      = vol_now.get(sym, 0)
+        ch       = change_now.get(sym, 0)
+        high_24h = high_map.get(sym, price)
+        low_24h  = low_map.get(sym, price)
+
+        if vol < TOP10_MIN_VOL: continue
+        if price <= 0 or low_24h <= 0: continue
+
+        # ── الفلتر الذهبي: 0% < تغيير < 5% ────
+        # هذا هو سر الدخول قبل الانفجار
+        if ch < TOP10_CHANGE_MIN: continue
+        if ch > TOP10_CHANGE_MAX: continue
+
+        # ── حجم مرتفع فجأة ─────────────────────
+        # نقارن حجم العملة بمتوسط حجوم لقطاعها
+        sector_vols = [
+            vol_now.get(s, 0)
+            for s in coins
+            if vol_now.get(s, 0) > 0
+        ]
+        avg_sector_vol = sum(sector_vols) / len(sector_vols) if sector_vols else vol
+        vol_ratio = vol / avg_sector_vol if avg_sector_vol > 0 else 1.0
+
+        if vol_ratio < TOP10_VOL_RATIO: continue
+
+        # ── قريب من القاع ──────────────────────
+        rebound = (price - low_24h) / low_24h * 100 if low_24h > 0 else 99
+        if rebound > TOP10_REBOUND_MAX: continue
+
+        # ── ليس Stablecoin أو Leverage ─────────
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+
+        # ── حساب النقاط (100 نقطة) ─────────────
+        # 1. حجم مرتفع فجأة (40 نقطة)
+        vol_score = min(vol_ratio / 5.0, 1.0) * W_VOL_RATIO
+
+        # 2. قطاع ساخن + Flow داخل (25 نقطة)
+        is_hot    = sym in hot_symbols
+        flow_in   = sector_flow_state.get(sector, "NEUTRAL") == "IN"
+        hot_score = W_HOT_SECTOR if (is_hot and flow_in) else (W_HOT_SECTOR * 0.5 if is_hot else 0)
+
+        # 3. قريب من القاع (20 نقطة) — كلما أقل rebound كلما أفضل
+        rebound_score = max(0, (TOP10_REBOUND_MAX - rebound) / TOP10_REBOUND_MAX) * W_REBOUND_LOW
+
+        # 4. تغيير صغير = لم ينطلق بعد (15 نقطة) — كلما أقل تغيير كلما أفضل
+        change_score = max(0, (TOP10_CHANGE_MAX - ch) / TOP10_CHANGE_MAX) * W_CHANGE_SMALL
+
+        total_score = vol_score + hot_score + rebound_score + change_score
+
+        # حساب drop_from_high للعرض
+        drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
+
+        scored.append({
+            "sym":          sym,
+            "price":        price,
+            "ch":           ch,
+            "vol":          vol,
+            "vol_ratio":    round(vol_ratio, 2),
+            "rebound":      round(rebound, 1),
+            "drop":         round(drop_from_high, 1),
+            "score":        round(total_score, 1),
+            "is_hot":       is_hot,
+        })
+
+    if not scored:
+        log.info("🔍 Top10 [%s]: لا عملات تحقق الشروط", sector)
+        return
+
+    # ترتيب تنازلي حسب النقاط
+    scored.sort(key=lambda x: -x["score"])
+    top10 = scored[:TOP10_COUNT]
+
+    top10_alerted[sector] = now
+
+    # ── بناء رسالة Telegram ─────────────────────
+    flow_vol = sector_vol_snapshots.get(sector, [])
+    vol_surge = ""
+    if len(flow_vol) >= 2:
+        ratio = flow_vol[-1] / flow_vol[-2] if flow_vol[-2] > 0 else 1
+        vol_surge = "📊 حجم القطاع: `{:.1f}×` المعدل\n".format(ratio)
+
+    coins_txt = ""
+    for i, c in enumerate(top10, 1):
+        hot_tag = "🔥" if c["is_hot"] else "  "
+        coins_txt += (
+            "{i}. {hot} *{sym}*\n"
+            "     💵 `{price}` | 📈 `+{ch:.1f}%` | 💧 `{ratio:.1f}×`\n"
+            "     📉 من القاع: `+{reb:.1f}%` | من القمة: `-{drop:.1f}%`\n"
+        ).format(
+            i=i,
+            hot=hot_tag,
+            sym=c["sym"].replace("USDT", ""),
+            price=format_price(c["price"]),
+            ch=c["ch"],
+            ratio=c["vol_ratio"],
+            reb=c["rebound"],
+            drop=c["drop"],
+        )
+
+    mkt_icon = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}.get(market_state, "⚪")
+
+    msg = (
+        "🚨 *SMART TOP10 — قبل الانفجار!*\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🏷️ القطاع: *{sector}*\n"
+        "💸 السيولة تدخل الآن!\n"
+        "{vol_surge}"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🎯 *أفضل 10 عملات — تغيير 0→5% فقط:*\n\n"
+        "{coins}"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{mkt} BTC: `{btc:+.1f}%` | `{mst}`\n"
+        "🕐 `{time}`\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚡ _ادخل قبل الانفجار — SL تحت القاع_"
+    ).format(
+        sector=sector,
+        vol_surge=vol_surge,
+        coins=coins_txt,
+        mkt=mkt_icon,
+        btc=btc_change_24h,
+        mst=market_state,
+        time=datetime.now().strftime("%H:%M:%S"),
+    )
+
+    send(msg)
+    log.info("🚨 Top10 | %s | %d عملة | أفضل: %s (%.1f نقطة)",
+             sector, len(top10), top10[0]["sym"], top10[0]["score"])
 
 
 # ═══════════════════════════════════════════════
@@ -1950,7 +2161,7 @@ def deep_scan(symbol, price, change):
     mkt_icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"⚪")
 
     send(
-        "👑 *MAFIO BOT V13*\n"
+        "👑 *MAFIO BOT V14*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *{sym}*\n"
         "{label} | {stype}\n"
@@ -2058,7 +2269,7 @@ def run():
     global last_tickers, last_btc, last_sectors
     global last_deep_scan, last_stale, last_smart_money, last_expand
 
-    log.info("🚀 MAFIO BOT V13 يبدأ...")
+    log.info("🚀 MAFIO BOT V14 يبدأ...")
 
     log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
@@ -2079,7 +2290,7 @@ def run():
     last_deep_scan = 0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V13*\n"
+        "🤖 *MAFIO BOT SIGNAL V14*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -2198,7 +2409,7 @@ def run():
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            send("⛔ *MAFIO BOT V13* — تم الإيقاف")
+            send("⛔ *MAFIO BOT V14* — تم الإيقاف")
             break
         except Exception as e:
             log.error("خطأ: %s", e, exc_info=True)
