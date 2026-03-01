@@ -797,7 +797,7 @@ def analyze_smart_money(force_report=False):
 #   🆕 MOMENTUM DETECTOR
 #   يرصد الحركة اللحظية — الدخول عند 3-5%
 # ═══════════════════════════════════════════════
-def detect_momentum(price_map, change_now, vol_now):
+def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
     # type: (Dict[str, float], Dict[str, float], Dict[str, float]) -> None
     """
     يرصد الحركة اللحظية كل 12 ثانية.
@@ -848,7 +848,17 @@ def detect_momentum(price_map, change_now, vol_now):
         if move < MOMENTUM_MOVE_MIN: continue
         if move > MOMENTUM_MOVE_MAX: continue
         if change_24h > 15: continue   # متأخر جداً — تجاوز 15%
-        if change_24h < -10: continue  # نازل بقوة
+        if change_24h < 0: continue    # 24h سالب = في هبوط — تجاهل
+
+        # ── فلتر القمة: السعر يجب أن يكون قريباً من أعلى سعر 24h ──
+        high_24h = high_map.get(sym, price)
+        if high_24h > 0 and price < high_24h * 0.70:
+            continue  # نزل أكثر من 30% من القمة = في هبوط
+
+        # ── فلتر القاع: السعر لم يرتفع أكثر من 3x من أدنى سعر 24h ──
+        low_24h = low_map.get(sym, price)
+        if low_24h > 0 and price > low_24h * 3.0:
+            continue  # ارتفع 3x من القاع = متأخر جداً
 
         # cooldown
         if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN:
@@ -1484,12 +1494,16 @@ def run():
             price_map  = {}
             change_now = {}
             vol_now    = {}
+            high_map   = {}
+            low_map    = {}
             for t in tickers_now:
                 sym = t.get("symbol","")
                 try:
                     price_map[sym]  = float(t["lastPrice"])
                     change_now[sym] = float(t["priceChangePercent"])
                     vol_now[sym]    = float(t["quoteVolume"])
+                    high_map[sym]   = float(t["highPrice"])
+                    low_map[sym]    = float(t["lowPrice"])
                 except (KeyError, ValueError):
                     pass
 
@@ -1510,7 +1524,7 @@ def run():
 
             # ── 🆕 Momentum Detector (كل 12 ثانية) ──────
             # يرصد تحرك السعر اللحظي ويطلق Deep Scan فوراً
-            detect_momentum(price_map, change_now, vol_now)
+            detect_momentum(price_map, change_now, vol_now, high_map, low_map)
 
             # ── Deep Scan كل 15 دقيقة ────────────────────
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
