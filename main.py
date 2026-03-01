@@ -897,7 +897,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
         if move < MOMENTUM_MOVE_MIN: continue
         if move > MOMENTUM_MOVE_MAX: continue
         if change_24h <= 0: continue
-        if change_24h > 50: continue
+        if change_24h > 10: continue   # أكثر من 10% = pump — تجاهل
 
         if low_24h > 0 and price > low_24h * 2.5: continue
         if high_24h > 0 and price > high_24h * 0.90: continue
