@@ -481,7 +481,7 @@ SECTORS = {
 #   LOGGING
 # ═══════════════════════════════════════════════
 logging.basicConfig(
-    level=logging.DEBUG,   # 🧪 TEST (كان INFO) — لرؤية أسباب الرفض
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
