@@ -1950,7 +1950,7 @@ def deep_scan(symbol, price, change):
     mkt_icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"⚪")
 
     send(
-        "👑 *MAFIO BOT V11*\n"
+        "👑 *MAFIO BOT V13*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *{sym}*\n"
         "{label} | {stype}\n"
@@ -2058,7 +2058,7 @@ def run():
     global last_tickers, last_btc, last_sectors
     global last_deep_scan, last_stale, last_smart_money, last_expand
 
-    log.info("🚀 MAFIO BOT V11 يبدأ...")
+    log.info("🚀 MAFIO BOT V13 يبدأ...")
 
     log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
@@ -2079,7 +2079,7 @@ def run():
     last_deep_scan = 0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V12*\n"
+        "🤖 *MAFIO BOT SIGNAL V13*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -2198,7 +2198,7 @@ def run():
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            send("⛔ *MAFIO BOT V11* — تم الإيقاف")
+            send("⛔ *MAFIO BOT V13* — تم الإيقاف")
             break
         except Exception as e:
             log.error("خطأ: %s", e, exc_info=True)
