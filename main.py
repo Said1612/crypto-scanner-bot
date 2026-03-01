@@ -847,7 +847,7 @@ def detect_momentum(price_map, change_now, vol_now):
         # 2. تغيير 24h لا يزال معقولاً (لم يرتفع كثيراً بعد)
         if move < MOMENTUM_MOVE_MIN: continue
         if move > MOMENTUM_MOVE_MAX: continue
-        if change_24h > 20: continue   # متأخر جداً — تجاوز 20%
+        if change_24h > 15: continue   # متأخر جداً — تجاوز 15%
         if change_24h < -10: continue  # نازل بقوة
 
         # cooldown
