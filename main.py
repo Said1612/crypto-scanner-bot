@@ -1,18 +1,16 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO BOT SIGNAL V11 — UNIFIED ENGINE            ║
+║           MAFIO BOT SIGNAL V12 — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
-║   🆕 Sector Flow Tracker — تتبع السيولة بين القطاعات       ║
+║   Sector Flow Tracker + Auto Expand Sectors (50/sector)    ║
 ╚══════════════════════════════════════════════════════════════╝
 
-التحسينات في V11:
-  🐛 إصلاح Bug: return True مكررة في pre_filter
-  🐛 إصلاح Bug: all_tickers لم تكن global في run()
-  🐛 إصلاح Bug: analyze_btc تستخدم endpoint خاطئ
-  🐛 إصلاح Bug: candidates لا تأخذ فلتر الحجم
-  ✅ تحسين: score أدق — عقوبة BTC هابط + مكافأة Smart Money
-  ✅ تحسين: momentum_stage تنظيف أفضل
-  🆕 ميزة: Sector Flow Tracker — يرصد السيولة وهي تتنقل بين القطاعات
+التحسينات في V12 (فوق V11):
+  🆕 auto_expand_sectors(): يجلب عملات MEXC ويضيفها للقطاعات تلقائياً
+  🆕 الهدف: 50 عملة لكل قطاع — بدون تكرار
+  🆕 تصنيف بالكلمات المفتاحية لكل قطاع
+  🆕 فلتر الحجم: فقط عملات نشطة (>100k USDT حجم 24h)
+  🆕 تقرير Telegram بالعملات المضافة لكل قطاع
 
 استراتيجية الطلبات (Anti-Rate-Limit):
   ● طلب واحد للـ 24h Ticker  كل 12 ثانية   → 5/دقيقة
@@ -122,6 +120,9 @@ FLOW_EXIT_DROP     = -1.5      # نسبة انخفاض = خروج سيولة م�
 FLOW_ALERT_COOL    = 900       # 15 دقيقة cooldown لنفس القطاع
 FLOW_HISTORY_MAX   = 20        # أقصى تاريخ محفوظ للقطاع
 
+# ── 🆕 Auto Expand ───────────────────────────────
+EXPAND_EVERY       = 86400     # إعادة توسيع القوائم كل 24 ساعة
+
 # ── Smart Money ──────────────────────────────────
 SMART_MONEY_SIGMA      = 3.0
 SMART_MONEY_EVERY      = 86400
@@ -142,6 +143,109 @@ MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
 MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
 
 EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
+
+# ── 🆕 Auto Expand Sectors ───────────────────────
+SECTOR_TARGET      = 50       # الهدف: 50 عملة لكل قطاع
+EXPAND_MIN_VOL     = 100_000  # حجم 24h أدنى للقبول (100k USDT)
+EXPAND_MAX_VOL     = 500_000_000  # حجم أقصى
+
+# الكلمات المفتاحية لكل قطاع — للتصنيف التلقائي
+# كلما زادت الكلمات، زادت دقة التصنيف
+SECTOR_KEYWORDS = {
+    "AI": [
+        "AI","GPT","AGI","NEURAL","AGENT","BRAIN","MIND","THINK",
+        "COGN","LEARN","SENTIENT","VIRTUAL","FETCH","OCEAN","RENDER",
+        "GRAPH","TAO","ARKM","COOKIE","MIRA","MYRIA","ALETH","CGPT",
+        "NEURO","VANA","MASK","AKTO","MEAI","GRIFFAIN","SWARM",
+        "AIDO","WLDAI","KAIA","VIRT","NMT","AUTON","PAAL","SLEEPLESS",
+        "QUBIC","AITECH","GENSYN","AIUS","KAITO","DEAI","OPML",
+    ],
+    "RWA": [
+        "ONDO","CFG","MPLEX","REAL","TRST","PROM","MANTRA","XDC",
+        "LQTY","SPX","ONP","VAI","GOLD","TBL","PARCL","REX","HONE",
+        "OPEN","LANDX","CREDIX","POLIX","TRUE","MTV","PROP","TPROT",
+        "STBTC","CULT","BRICS","ESTATE","REALT","DEXT","POLYMATH",
+        "SECURITIZE","BACKED","MAPLE","CENTRIFUGE","GOLDFINCH",
+        "TOUCAN","COOREST","BASE","REALIO","LOFTY",
+    ],
+    "Gaming": [
+        "GAME","PLAY","QUEST","HERO","GUILD","YIELD","PIXEL","PORTAL",
+        "AXS","SAND","MANA","ILV","GMT","YGG","SLP","GALA","RON","IMX",
+        "BEAM","NOT","XAI","ALICE","RARE","MOBA","CHZ","PGX","HEROES",
+        "BEX","GOMA","ACE","META","WAXP","GAL","VIDYA","ELF","MAGIC",
+        "TWT","GHST","TOWER","REVV","NFTX","MOBOX","SKILL","DERACE",
+        "FIGHT","WARS","BATTLE","LEGEND","REALM","KART","SPORT","FAN",
+        "CHAMP","WIN","SUPER","GODS","AURY","ATLAS","POLIS","PVU",
+    ],
+    "DeFi": [
+        "UNI","AAVE","CAKE","SUSHI","COMP","MKR","CRV","LDO","1INCH",
+        "C98","DYDX","GMX","JUP","RAY","ORCA","PENDLE","EIGEN","ETHFI",
+        "IDEX","REZ","SYRUP","BONE","CVX","FRAX","FXS","TRIBE","RAD",
+        "ALPACA","RAMP","WOO","SWAP","DEX","YIELD","LEND","POOL",
+        "LIQUID","STAKE","VAULT","FARM","HARVEST","BADGER","BNT",
+        "PERP","SNX","KNC","BAL","BIFI","PANCAKE","QUICK","SPIRIT",
+        "SPOOKY","JOE","SOLAR","TRISOLARIS","VELODROME","AERODROME",
+        "CAMELOT","STERLING","RAMSES","THENA","KYBER","BANCOR",
+    ],
+    "Layer1": [
+        "AVAX","ADA","ATOM","NEAR","FTM","ALGO","ICP","APT","SUI","SEI",
+        "INJ","KAS","TON","HBAR","EGLD","ZIL","ONE","CFX","JASMY","LSK",
+        "QNT","CELO","FLOW","MINA","KAVA","VET","ONT","WAVES","XTZ","NEO",
+        "ROSE","SCRT","OASIS","HARMONY","ELROND","MULTIVERSX","APTOS",
+        "MOVEMENT","MONAD","BERACHAIN","INITIA","SAGA","STORY","SUPRA",
+        "HYPERLIQUID","ECLIPSE","FUSE","VENOM","NEON","ZETA",
+    ],
+    "Layer2": [
+        "MATIC","OP","ARB","ZK","STRK","LRC","METIS","MANTA","SCROLL",
+        "MNT","MERL","ALT","ZRO","LINEA","TAIKO","MOD","CELR","SKL",
+        "OMG","SSV","BOBA","STARKNET","ZKFAIR","ZKLINK","ZKME","LUMIA",
+        "POLYGON","OPTIMISM","ARBITRUM","STARKWARE","LOOPRING","MATTER",
+        "IMMUTABLE","RONIN","BASE","BLAST","MANTLE","MODE","MINT",
+        "FRAXTAL","ZORA","REDSTONE","CYBER","KINTO","ANCIENT8",
+    ],
+    "Meme": [
+        "DOGE","SHIB","PEPE","FLOKI","WIF","BOM","MEME","TURO","POPCAT",
+        "MOG","BABYDOGE","BONK","DOGS","CATI","GOAT","PNUT","ACT",
+        "CHILLGUY","TURBO","LUNA","BOME","MOTHER","PONKE","GME","HONK",
+        "MYRO","WOJAK","MIGGO","COQ","SLERF","SMOG","BOME","SILLY",
+        "NOOT","WOOF","COPE","CHAD","BASED","FROG","CAT","DOG","APE",
+        "MONKEY","HAMSTER","SQUIRREL","RACCOON","PENGUIN","PENG",
+        "BRETT","ANDY","MOO","BAD","HARAMBE","GIGA","APED","LADYS",
+    ],
+    "Oracle": [
+        "LINK","BAND","UMA","DIA","PYTH","STORK","SXT","TELL","CHR",
+        "PROS","IO","ORAO","ACX","ATL","SUPR","ORAI","TRUF","PRIM",
+        "DMT","REP","ORACLE","FEED","DATA","PRICE","TRUTH","REAL",
+        "API3","NEST","DOS","WITNET","RAZOR","UMBRELLA","FLUX",
+    ],
+    "Privacy": [
+        "XMR","DASH","SCRT","ROSE","ZEC","RAIL","DUSK","ZEN","COIN",
+        "CTXC","PHALA","AZERO","PANTHER","LTZ","PANC","PRV","FIRO",
+        "PIVX","XCM","GRIN","BEAMX","OXEN","NYM","TORN","IRON",
+        "NAME","KRED","ZENN","SIV","PRIV","ANON","STEALTH","HIDE",
+        "SHADOW","GHOST","INCOGNITO","HAVEN","NAVCOIN","PARTICL",
+    ],
+    "Storage": [
+        "FIL","AR","STORJ","SC","BLZ","HOT","BTT","CKB","AIOZ","KYVE",
+        "ALEPH","MXC","ACP","DATA","GEO","CSP","MNET","ZETA","SIA",
+        "IPFS","AMBA","STORX","LAMB","BLS","BTTC","APEX","NKU","PEAQ",
+        "RDX","ORDI","STORE","ARWEAVE","FILECOIN","AKASH","ANKR",
+        "FLUX","PINATA","BUNDLR","SWARM","BTFS","CRUST","MEMO",
+    ],
+    "DePIN": [
+        "IOTA","XNET","MOBI","HNT","LPT","NTRN","GPU","NOSANA","POND",
+        "GEODNET","DAWN","WIFI","OXT","HELIUM","RDNT","GRASS","ION",
+        "DINGO","TIA","CUDOS","SOARX","NGLA","PING","ROAM","NODEL",
+        "CPOOL","SHDW","IOTX","POKT","POLKA","DOT","DEPIN","NETWORK",
+        "SENSOR","WIRELESS","MESH","NODE","DEVICE","INFRA","PHYSICAL",
+        "HIVEMAPPER","HIVELLO","NATIX","DIMO","REACT","NUBILA",
+    ],
+    "Old": [
+        "LTC","ETC","XEM","LUNC","BTG","BCH","EOS","TRX","QTUM","ICX",
+        "RVN","STEEM","ARK","NMR","DCR","DGB","NAV","ZRX","NEO","ONT",
+        "XTZ","VET","WAVES","PIVX","CLASSIC","LEGACY","ORIGINAL",
+    ],
+}
 
 STABLECOINS = {
     "USDT","USDC","BUSD","FDUSD","USDP","GUSD","HUSD","USDN",
@@ -283,6 +387,7 @@ last_deep_scan    = 0.0
 last_stale        = 0.0
 last_report       = 0.0
 last_smart_money  = 0.0
+last_expand       = 0.0    # 🆕 آخر توسيع تلقائي للقوائم
 
 stable_vol_history = {}   # type: Dict[str, List[float]]
 smart_money_alert  = False
@@ -1167,6 +1272,168 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
 
 
 # ═══════════════════════════════════════════════
+#   🆕 AUTO EXPAND SECTORS V12
+#   يجلب عملات MEXC ويضيف الجديدة لكل قطاع (هدف 50/قطاع)
+# ═══════════════════════════════════════════════
+def _classify_symbol(base):
+    # type: (str) -> Optional[str]
+    """
+    يصنف العملة لقطاع بناءً على الكلمات المفتاحية.
+    يعيد اسم القطاع أو None إذا لم يتطابق مع أي قطاع.
+    الأولوية: أكثر كلمة تطابقاً تفوز.
+    """
+    base_upper = base.upper()
+    best_sector = None
+    best_score  = 0
+
+    for sector, keywords in SECTOR_KEYWORDS.items():
+        score = 0
+        for kw in keywords:
+            # تطابق كامل أو جزئي
+            if kw == base_upper:
+                score += 10   # تطابق تام = وزن أعلى
+            elif base_upper.startswith(kw) or base_upper.endswith(kw):
+                score += 5
+            elif kw in base_upper and len(kw) >= 3:
+                score += 2
+        if score > best_score:
+            best_score  = score
+            best_sector = sector
+
+    # نقبل فقط إذا كان هناك تطابق واضح
+    return best_sector if best_score >= 2 else None
+
+
+def auto_expand_sectors():
+    # type: () -> None
+    """
+    🆕 V12: يجلب كل عملات MEXC ويوزعها على القطاعات.
+
+    الخوارزمية:
+    1. جلب ticker/24hr الكامل (طلب واحد فقط)
+    2. فلترة: USDT pairs + حجم نشط + ليست Stablecoin/Leverage
+    3. تصنيف كل عملة جديدة لقطاعها بالكلمات المفتاحية
+    4. إضافة فقط العملات غير الموجودة حتى نصل 50/قطاع
+    5. إرسال تقرير Telegram بكل ما أُضيف
+    """
+    log.info("🔍 Auto Expand: جلب عملات MEXC...")
+
+    data = safe_get(MEXC_24H)
+    if not data:
+        log.warning("⚠️ Auto Expand: فشل جلب البيانات")
+        return
+
+    # كل العملات الموجودة حالياً في قائمتنا
+    existing = set(sym for coins in SECTORS.values() for sym in coins)
+
+    # بناء خريطة الحجوم
+    vol_map    = {}
+    change_map = {}
+    for t in data:
+        sym = t.get("symbol","")
+        if not sym.endswith("USDT"): continue
+        try:
+            vol_map[sym]    = float(t["quoteVolume"])
+            change_map[sym] = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            pass
+
+    # فرز حسب الحجم تنازلياً (الأنشط أولاً)
+    all_usdt = sorted(
+        [s for s in vol_map if vol_map[s] >= EXPAND_MIN_VOL],
+        key=lambda s: -vol_map[s]
+    )
+
+    added_per_sector = {s: [] for s in SECTORS}   # ما أُضيف جديداً
+    skipped_existing = 0
+    skipped_filter   = 0
+
+    for sym in all_usdt:
+        # تجاهل الموجودة أصلاً
+        if sym in existing:
+            skipped_existing += 1
+            continue
+
+        # تجاهل المستثنيات
+        if sym in EXCLUDED:
+            continue
+
+        base = sym.replace("USDT","")
+
+        # فلتر Stablecoin
+        if is_stablecoin(sym, 0.0, change_map.get(sym, 0.0)):
+            skipped_filter += 1
+            continue
+
+        # فلتر Leverage tokens
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            skipped_filter += 1
+            continue
+
+        # فلتر الحجم الأقصى
+        if vol_map[sym] > EXPAND_MAX_VOL:
+            skipped_filter += 1
+            continue
+
+        # تصنيف العملة
+        sector = _classify_symbol(base)
+        if not sector:
+            continue
+
+        # هل القطاع وصل الهدف؟
+        current_count = len(SECTORS[sector]) + len(added_per_sector[sector])
+        if current_count >= SECTOR_TARGET:
+            continue
+
+        # إضافة للقطاع
+        SECTORS[sector].append(sym)
+        added_per_sector[sector].append(sym)
+        existing.add(sym)
+
+    # ── تقرير ما أُضيف ──────────────────────────
+    total_added = sum(len(v) for v in added_per_sector.values())
+    log.info("✅ Auto Expand انتهى | أُضيف: %d عملة | موجودة: %d | مُرشَّح: %d",
+             total_added, skipped_existing, skipped_filter)
+
+    if total_added == 0:
+        log.info("ℹ️ لا عملات جديدة للإضافة — القوائم مكتملة")
+        return
+
+    # بناء رسالة Telegram
+    msg = (
+        "🔄 *AUTO EXPAND V12*\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "✅ أُضيف *{}* عملة جديدة\n\n".format(total_added)
+    )
+
+    for sector, coins in added_per_sector.items():
+        if not coins:
+            continue
+        total_in_sector = len(SECTORS[sector])
+        names = ", ".join(c.replace("USDT","") for c in coins[:10])
+        if len(coins) > 10:
+            names += " ... +{}".format(len(coins)-10)
+        msg += (
+            "🏷️ *{sector}* ({total}/50)\n"
+            "  ➕ {names}\n\n"
+        ).format(
+            sector=sector,
+            total=total_in_sector,
+            names=names,
+        )
+
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+    msg += "📋 راجع القائمة وأخبرني بأي تعديل"
+
+    send(msg)
+
+    # تحديث hot_symbols بعد التوسع
+    global hot_symbols
+    hot_symbols = {c for s in hot_sectors for c in SECTORS[s]}
+    log.info("🔥 hot_symbols محدَّثة | %d عملة", len(hot_symbols))
+
+
+# ═══════════════════════════════════════════════
 #   REFRESH TICKERS
 #   🐛 إصلاح V11: candidates تأخذ فلتر الحجم من all_tickers
 # ═══════════════════════════════════════════════
@@ -1689,7 +1956,7 @@ def run():
     # type: () -> None
     global all_tickers   # ✅ إصلاح V11: تأكيد أن all_tickers global
     global last_tickers, last_btc, last_sectors
-    global last_deep_scan, last_stale, last_smart_money
+    global last_deep_scan, last_stale, last_smart_money, last_expand
 
     log.info("🚀 MAFIO BOT V11 يبدأ...")
 
@@ -1700,6 +1967,11 @@ def run():
     time.sleep(2)
     refresh_tickers()
 
+    # 🆕 V12: توسيع القوائم تلقائياً عند البدء
+    log.info("🔍 تشغيل Auto Expand Sectors...")
+    auto_expand_sectors()
+    last_expand = time.time()
+
     analyze_sectors()
     log.info("✅ جاهز | Candidates: %d | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
@@ -1707,7 +1979,7 @@ def run():
     last_deep_scan = 0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V11*\n"
+        "🤖 *MAFIO BOT SIGNAL V12*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -1715,11 +1987,12 @@ def run():
         "✅ Sector Rotation (12 قطاع)\n"
         "✅ Score Min: `{score}` | Deep Scan: كل ساعة\n"
         "✅ Anti P&D | Supertrend | Dynamic SL\n"
-        "🆕 Sector Flow Tracker — تتبع السيولة\n"
-        "🆕 Score أدق: Flow Bonus + BTC Penalty\n"
+        "✅ Sector Flow Tracker — تتبع السيولة\n"
+        "🆕 Auto Expand: هدف 50 عملة/قطاع\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "₿ BTC: `{btc:+.2f}%` | السوق: `{mst}`\n"
-        "🔥 Hot: `{hot}`".format(
+        "🔥 Hot: `{hot}`\n"
+        "📋 القوائم: جاري التوسيع...".format(
             trail=TRAIL_DROP_TRIGGER,
             score=SCORE_MIN,
             btc=btc_change_24h,
@@ -1739,6 +2012,11 @@ def run():
             if now - last_btc         >= BTC_EVERY:         analyze_btc()
             if now - last_sectors     >= SECTORS_EVERY:     analyze_sectors()
             if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
+            if now - last_expand      >= EXPAND_EVERY:
+                # 🆕 V12: توسيع يومي تلقائي للقوائم
+                log.info("🔄 تحديث يومي — Auto Expand Sectors")
+                auto_expand_sectors()
+                last_expand = now
             if now - last_stale       >= STALE_EVERY:
                 cleanup()
                 last_stale = now
