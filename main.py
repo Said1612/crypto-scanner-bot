@@ -1,15 +1,23 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO BOT SIGNAL V10 — UNIFIED ENGINE            ║
-║     Anti-Rate-Limit + Smart Cache + Trailing Stop          ║
+║           MAFIO BOT SIGNAL V11 — UNIFIED ENGINE            ║
+║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
+║   🆕 Sector Flow Tracker — تتبع السيولة بين القطاعات       ║
 ╚══════════════════════════════════════════════════════════════╝
 
+التحسينات في V11:
+  🐛 إصلاح Bug: return True مكررة في pre_filter
+  🐛 إصلاح Bug: all_tickers لم تكن global في run()
+  🐛 إصلاح Bug: analyze_btc تستخدم endpoint خاطئ
+  🐛 إصلاح Bug: candidates لا تأخذ فلتر الحجم
+  ✅ تحسين: score أدق — عقوبة BTC هابط + مكافأة Smart Money
+  ✅ تحسين: momentum_stage تنظيف أفضل
+  🆕 ميزة: Sector Flow Tracker — يرصد السيولة وهي تتنقل بين القطاعات
+
 استراتيجية الطلبات (Anti-Rate-Limit):
-  ● طلب واحد للأسعار  كل 12 ثانية   → 5/دقيقة
-  ● طلب واحد للتغييرات كل 30 دقيقة  → 2/ساعة
-  ● Klines لعملة واحدة فقط عند الحاجة (بعد الفلتر المسبق)
+  ● طلب واحد للـ 24h Ticker  كل 12 ثانية   → 5/دقيقة
   ● Cache ذكي: 15m=60s, 1h=5min, 4h=15min
-  ● Scan عميق (Klines+OrderBook) كل 4 ساعات فقط
+  ● Scan عميق (Klines+OrderBook) كل ساعة
   ● الفلتر المسبق يرفض 90% من العملات بدون Klines
 
 النتيجة: ~8 طلبات/دقيقة بدل 492 ✅
@@ -78,66 +86,76 @@ BO_FLAT_MAX        = 15.0
 BO_VOL_SURGE       = 3.0
 BO_NEAR_LOW        = 30.0
 
-# ── فلتر مسبق (يمنع طلبات Klines غير ضرورية) ───
-PRE_MIN_CHANGE     = -5.0      # رفض إذا 24h < -5%
-PRE_MAX_CHANGE     = 80.0      # رفض إذا 24h > 80% (Pump)
+# ── فلتر مسبق ────────────────────────────────────
+PRE_MIN_CHANGE     = -5.0
+PRE_MAX_CHANGE     = 80.0
 PRE_MIN_VOL        = MIN_VOL_USDT
 PRE_MAX_VOL        = MAX_VOL_USDT
 
 # ── توقيتات الدورات ──────────────────────────────
-PRICES_EVERY       = 12        # جلب الأسعار كل 12 ثانية
-TICKERS_EVERY      = 1800      # جلب التغييرات كل 30 دقيقة
-BTC_EVERY          = 1800      # تحليل BTC كل 30 دقيقة
-SECTORS_EVERY      = 1800      # تحليل القطاعات كل 30 دقيقة
-DEEP_SCAN_EVERY    = 3600      # Scan عميق (Klines) كل ساعة
-STALE_EVERY        = 3600      # تنظيف العملات المتوقفة كل ساعة
-REPORT_EVERY       = 21600     # تقرير الأداء كل 6 ساعات
+PRICES_EVERY       = 12
+TICKERS_EVERY      = 1800
+BTC_EVERY          = 1800
+SECTORS_EVERY      = 1800
+DEEP_SCAN_EVERY    = 3600
+STALE_EVERY        = 3600
+REPORT_EVERY       = 21600
+STALE_REMOVE_SEC   = 86400
 
 # ── Cache ────────────────────────────────────────
-CACHE_15M          = 60        # شموع 15m صالحة 60 ثانية
-CACHE_1H           = 300       # شموع 1h صالحة 5 دقائق
-CACHE_4H           = 900       # شموع 4h صالحة 15 دقيقة
+CACHE_15M          = 60
+CACHE_1H           = 300
+CACHE_4H           = 900
 
-# ── 🆕 Momentum Detector ─────────────────────────
-# يرصد الحركة اللحظية كل 12 ثانية بدون Klines
-# الهدف: الدخول عند 3-5% قبل الانفجار
-MOMENTUM_MOVE_MIN  = 2.0    # السعر تحرك 2%+ عن آخر قراءة
-MOMENTUM_MOVE_MAX  = 8.0    # لم يتجاوز 8% بعد (مبكر)
-MOMENTUM_MIN_VOL   = 500_000 # حجم 24h أدنى (~Market Cap 5M$)
-MOMENTUM_COOLDOWN  = 14400  # 4 ساعات — عملة واحدة 3 إشعارات فقط
+# ── Momentum Detector ────────────────────────────
+MOMENTUM_MOVE_MIN  = 2.0
+MOMENTUM_MOVE_MAX  = 8.0
+MOMENTUM_MIN_VOL   = 500_000
+MOMENTUM_COOLDOWN  = 14400
+
+# ── 🆕 Sector Flow Tracker ───────────────────────
+# يرصد تدفق السيولة بين القطاعات
+FLOW_WINDOW        = 5         # عدد القراءات للمقارنة (~60 ثانية)
+FLOW_VOL_SURGE     = 1.5       # نسبة ارتفاع حجم القطاع = تدفق سيولة
+FLOW_CHANGE_MIN    = 2.0       # متوسط تغيير القطاع % للتأكيد
+FLOW_EXIT_DROP     = -1.5      # نسبة انخفاض = خروج سيولة من القطاع
+FLOW_ALERT_COOL    = 900       # 15 دقيقة cooldown لنفس القطاع
+FLOW_HISTORY_MAX   = 20        # أقصى تاريخ محفوظ للقطاع
+
+# ── Smart Money ──────────────────────────────────
+SMART_MONEY_SIGMA      = 3.0
+SMART_MONEY_EVERY      = 86400
+SMART_MONEY_ACCUM_MIN  = 2
+SMART_MONEY_FALL_PCT   = 55
+SMART_MONEY_ALERT_SIGMA= 5.0
+
+SMART_MONEY_STABLES = [
+    "USDCUSDT","FDUSDUSDT","TUSDUSDT","USD1USDT",
+    "RLUSDUSDT","BFUSDUSDT","USDPUSDT","USDDUSDT",
+]
 
 # ── MEXC Endpoints ──────────────────────────────
 MEXC_24H    = "https://api.mexc.com/api/v3/ticker/24hr"
+MEXC_TICKER = "https://api.mexc.com/api/v3/ticker/24hr"  # نفس الـ endpoint لكن بـ symbol
 MEXC_PRICE  = "https://api.mexc.com/api/v3/ticker/price"
 MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
 MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
 
-EXCLUDED          = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
+EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
 
-# ── قائمة شاملة لكل العملات المستقرة ────────────
 STABLECOINS = {
-    # دولار أمريكي
     "USDT","USDC","BUSD","FDUSD","USDP","GUSD","HUSD","USDN",
     "USDX","USDJ","USDK","USDQ","USDD","USD1","USDE","USDZ",
     "ZUSD","CUSD","SUSD","MUSD","RUSD","AUSD","NUSD","TUSD",
-    # يورو
     "EURS","EURT","EURC","EURA","EUROC",
-    # ذهب وسلع
     "PAXG","XAUT","CACHE","PMGT",
-    # خوارزمي / algo
-    "DAI","FRAX","MIM","LUSD","ALUSD","DOLA","USDD","CRVUSD",
+    "DAI","FRAX","MIM","LUSD","ALUSD","DOLA","CRVUSD",
     "MKUSD","PYUSD","USDM","USDY","USDS","GHO","LISUSD","BEAN",
-    # آخرى
     "PAX","UST","RSR","USDL","BUIDL",
 }
 
-# ── كلمات دالة على عملات غير قابلة للتداول ──────
-LEVERAGE_KEYWORDS = ["3L","3S","5L","5S","BULL","BEAR","UP","DOWN",
-                     "LONG","SHORT","HEDGE"]
-
-# ── كلمات في الاسم تدل على Stablecoin ───────────
-STABLE_KEYWORDS   = ["USD","EUR","GBP","JPY","CNY","AUD","CHF",
-                     "GOLD","SILVER","PAX","DAI","FRAX"]
+LEVERAGE_KEYWORDS = ["3L","3S","5L","5S","BULL","BEAR","UP","DOWN","LONG","SHORT","HEDGE"]
+STABLE_KEYWORDS   = ["USD","EUR","GBP","JPY","CNY","AUD","CHF","GOLD","SILVER","PAX","DAI","FRAX"]
 
 # ═══════════════════════════════════════════════
 #   SECTORS — 12 قطاع
@@ -173,7 +191,7 @@ SECTORS = {
         "DYDXUSDT","GMXUSDT","JUPUSDT","RAYUSDT","ORCAUSDT",
         "PENDLEUSDT","EIGENUSDT","ETHFIUSDT","IDEXUSDT","REZUSDT",
         "SYRUPUSDT","BONEUSDT","CVXUSDT","FRAXUSDT","FXSUSDT",
-        "TRIBEUSDT","RADUSDT","ALPACAUSDT","RAMPUSDT","DODOUSUSDT","WOOUSDT",
+        "TRIBEUSDT","RADUSDT","ALPACAUSDT","RAMPUSDT","WOOUSDT",
     ],
     "Layer1": [
         "AVAXUSDT","ADAUSDT","ATOMUSDT","NEARUSDT","FTMUSDT",
@@ -187,79 +205,47 @@ SECTORS = {
         "MATICUSDT","OPUSDT","ARBUSDT","ZKUSDT","STRKUSDT",
         "LRCUSDT","METISUSDT","MANTAUSDT","SCROLLUSDT","MNTUSDT",
         "MERLUSDT","ALTUSDT","WUSDT","ZROUSDT","LINEAUSDT",
-        "TAIKOUSDT","MODUSDT","BVMUSDT","SOLUSDT","XRPUSDT",
-        "CELRUSDT","SKLUSDT","OMGUSDT","SXUSDT","RLYUSDT",
-        "SSVUSDT","NEONUSDT","BOBIUSDT","XVMUSDT","BOBAUSUSDT","ZKCUSDT",
+        "TAIKOUSDT","MODUSDT","CELRUSDT","SKLUSDT","OMGUSDT",
+        "SSVUSDT","NEONUSDT","ZKCUSDT",
     ],
     "Meme": [
         "DOGEUSDT","SHIBUSDT","PEPEUSDT","FLOKIUSDT","WIFUSDT",
         "BOMUSDT","MEMEUSDT","TUROUSDT","POPCATUSDT","MOGUSDT",
         "BABYDOGEUSDT","BONKUSDT","DOGSUSDT","CATIUSDT","GOATUSDT",
         "PNUTUSDT","ACTUSDT","CHILLGUYUSDT","TURBOUSDT","LUNAUSDT",
-        "BOMEUSDT","MOTHERUSDT","PONKEUSDT","COSUSDT","XLMUSDT",
-        "GMEUSDT","MIGGOUSDT","WOJAKSUSDT","HONKUSDT","MYROUSUSDT",
+        "BOMEUSDT","MOTHERUSDT","PONKEUSDT","GMEUSDT","HONKUSDT",
     ],
     "Oracle": [
         "LINKUSDT","BANDUSDT","UMAUSDT","DIAUSDT","PYTHUSDT",
         "STORKUSDT","SXTUSDT","TELLOUSDT","CHRUSDT","PROSUSDT",
-        "IOUSDT","WINGUSDT","ORAOUSDT","ACXUSDT","ATLUSDT",
-        "HEMUSDT","NEXUSDT","SUPRUSDT","APIUSDT","DPIUSDT",
-        "ORAIUSDT","DORSAUSDT","TRUFUSDT","PRIMUSDT","PLPUSDT",
-        "DMTUSDT","REPUSDT","BCOTUSDT","XVSUSDT","SEER1USDT",
+        "IOUSDT","ORAOUSDT","ACXUSDT","ATLUSDT","SUPRUSDT",
+        "ORAIUSDT","TRUFUSDT","PRIMUSDT","DMTUSDT","REPUSDT",
     ],
     "Privacy": [
         "XMRUSDT","DASHUSDT","SCRTUSDT","ROSEUSDT","ZECUSDT",
-        "OXENUSDT","RAILUSDT","TORNUSDT","NYMOUSDT","DUSKUSDT",
-        "IRONUSDT","NAMEUSDT","KREDUSDT","ZENNUSDT","SIVUSDT",
-        "PHALAAUSDT","AZEROUSUSDT","PANTHERUSDT","LTZUSDT","PANCUSDT",
-        "PRVSUSDT","FIROUSDT","PIVXUSDT","XCMUSDT","GRINUSDT",
-        "BEAMXUSDT","ZENUSDT","COINUSDT","CTXCUSDT","NYMOUSDT2",
+        "RAILUSDT","DUSKUSDT","ZENUSDT","COINUSDT","CTXCUSDT",
     ],
     "Storage": [
         "FILUSDT","ARUSDT","STORJUSDT","SCUSDT","BLZUSDT",
-        "HOTUSDT","BTTSUSDT","CKBUSDT","AIOZUSDT","KYVEUSDT",
-        "ALEPHUSDT","MXCUSDT","ACPUSDT","DATAUSDT","GEOUSDT",
-        "CSPUSDT","MNETUSDT","ZETAUSDT","SIACOINUSDT","IPFSUSDT",
-        "AMBASUSDT","STORXUSDT","LAMBUSDT","BLSUSDT","BTTCUSDT",
-        "APEXUSDT","NKUSUSDT","PEAQUSDT","RDXUSDT","ORDIUSDT",
+        "HOTUSDT","CKBUSDT","AIOZUSDT","KYVEUSDT","ALEPHUSDT",
+        "DATAUSDT","SIACOINUSDT","LAMBUSDT","BTTCUSDT","PEAQUSDT",
     ],
     "DePIN": [
-        "IOTAUSDT","XNETUSDT","MOBIUSDT","HNTUSDT","LPTUSDT",
-        "NTRNUSDT","GPUUSDT","NOSANAUSDT","PONDUSDT","GEODNETUSDT",
-        "DAWNUSDT","WIFIUSDT","OXTUSDT","HELIUMUSDT","RDNTUSDT",
-        "GRASSUSDT","IONUSDT","DINGOUSDT","TIAUSDT","CUDOSUSDT",
-        "SOARXUSDT","NGLAUSDT","PINGUSDT","ROAMUSDT","NODELUSDT",
-        "CPOOLUSDT","SHDWUSDT","IOTXUSDT","POKTUSDT","POLKAUSDT","DOTUSDT",
+        "IOTAUSDT","HNTUSDT","LPTUSDT","NTRNUSDT","GPUUSDT",
+        "PONDUSDT","DAWNUSDT","WIFIUSDT","OXTUSDT","RDNTUSDT",
+        "GRASSUSDT","IONUSDT","TIAUSDT","CUDOSUSDT","IOTXUSDT",
+        "POKTUSDT","DOTUSDT","XNETUSDT","MOBIUSDT","NOSANAUSDT",
     ],
     "Old": [
-        "LTCUSDT","ETCUSDT","XEMUSDT","LUNCUSDT","BTGUSDT",
-        "BCHUSDT","EOSUSDT","TRXUSDT","QTUMUSDT","ICXUSDT",
-        "RVNUSDT","STEEMUSDT","ARKUSDT","NMRUSDT","DCRUSDT",
-        "DGBUSDT","NAVUSDT","ZRXUSDT","NEIROUSDT2","TWTUSDT2",
-        "MXCUSUSDT","NEOUSDT2","SCUSUSDT","ONTUSDT2","RSRUSDT2",
-        "XTZUSUSDT","VETUSUSDT","WAVESUSUSDT","PIVXUSUSDT","NEONUSDT2",
+        "LTCUSDT","ETCUSDT","LUNCUSDT","BCHUSDT","EOSUSDT",
+        "TRXUSDT","QTUMUSDT","RVNUSDT","ARKUSDT","DCRUSDT",
+        "DGBUSDT","ZRXUSDT","NEOUSDT","ONTUSDT","VETUSDT",
     ],
 }
 
-# ── 🆕 Smart Money Detection ─────────────────────
-SMART_MONEY_SIGMA      = 3.0    # Sigma ≥ 3 = حجم غير عادي
-SMART_MONEY_EVERY      = 86400  # تقرير يومي كل 24 ساعة
-SMART_MONEY_ACCUM_MIN  = 2      # عدد Stablecoins بحجم غير عادي للتأكيد
-SMART_MONEY_FALL_PCT   = 55     # % عملات نازلة = سوق في بيع
-SMART_MONEY_ALERT_SIGMA= 5.0    # Sigma ≥ 5 = تنبيه فوري (لا ينتظر 24h)
-
-# Stablecoins التي نراقب حجمها على MEXC
-SMART_MONEY_STABLES = [
-    "USDCUSDT",   # USDC — الأكثر استخداماً
-    "FDUSDUSDT",  # FDUSD — First Digital
-    "TUSDUSDT",   # TUSD
-    "USD1USDT",   # USD1 — مؤشر رئيسي
-    "RLUSDUSDT",  # RLUSD — Ripple
-    "BFUSDUSDT",  # BFUSD
-    "USDPUSDT",   # USDP — Paxos
-    "USDDUSDT",   # USDD — Tron
-]
-
+# ═══════════════════════════════════════════════
+#   LOGGING
+# ═══════════════════════════════════════════════
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -274,27 +260,22 @@ log = logging.getLogger("MafioBot")
 # ═══════════════════════════════════════════════
 #                   STATE
 # ═══════════════════════════════════════════════
-# إشارات نشطة
 tracked        = {}   # {sym: {entry, peak, level, sl_pct, entry_time, last_alert}}
 discovered     = {}   # {sym: {price, time, score}}
 
-# بيانات السوق
 btc_change_24h = 0.0
 btc_trend_1h   = 0.0
-market_state   = "SAFE"   # SAFE / CAUTION / DANGER
+market_state   = "SAFE"
 hot_sectors    = []        # type: List[str]
 hot_symbols    = set()     # type: Set[str]
 sector_vol_history = {}    # type: Dict[str, float]
 
-# قائمة العملات المرشحة (بعد الفلتر المسبق)
 candidates     = []        # type: List[str]
 changes_map    = {}        # type: Dict[str, float]
-all_tickers    = []        # type: List[Dict]
+all_tickers    = []        # type: List[Dict]  ← global محدَّثة في run()
 
-# Cache الشموع: {symbol_interval: (data, timestamp)}
-klines_cache   = {}        # type: Dict[str, Tuple[Dict, float]]
+klines_cache   = {}        # type: Dict[str, Tuple[Any, float]]
 
-# توقيتات آخر تشغيل
 last_tickers      = 0.0
 last_btc          = 0.0
 last_sectors      = 0.0
@@ -303,25 +284,26 @@ last_stale        = 0.0
 last_report       = 0.0
 last_smart_money  = 0.0
 
-# Smart Money — تاريخ حجم Stablecoins
 stable_vol_history = {}   # type: Dict[str, List[float]]
 smart_money_alert  = False
+smart_money_bonus  = 0    # 🆕 مكافأة Score عند تجميع الحيتان
 
-# 🆕 Momentum Detector — تتبع الأسعار اللحظية
-price_prev         = {}   # type: Dict[str, float]  السعر السابق
-momentum_alerted   = {}   # type: Dict[str, float]  آخر تنبيه {sym: time}
-
-# 🆕 نظام الإشعارات الثلاثي
-# {sym: {stage, entry_price, entry_vol, entry_time, alerted_2, alerted_3}}
+price_prev         = {}   # type: Dict[str, float]
+momentum_alerted   = {}   # type: Dict[str, float]
 momentum_stage     = {}   # type: Dict[str, Dict]
 
-# إحصائيات API (لمراقبة الاستخدام)
+# 🆕 Sector Flow Tracker State
+sector_vol_snapshots = {}  # type: Dict[str, List[float]]   {sector: [vol1, vol2, ...]}
+sector_change_snapshots = {}  # type: Dict[str, List[float]] {sector: [avg_ch1, avg_ch2, ...]}
+sector_flow_alerted  = {}  # type: Dict[str, float]          {sector: last_alert_time}
+sector_flow_state    = {}  # type: Dict[str, str]            {sector: "IN"/"OUT"/"NEUTRAL"}
+
 api_calls_total    = 0
 api_calls_minute   = 0
 api_minute_reset   = time.time()
 
 session = requests.Session()
-session.headers.update({"User-Agent": "MafioBot/10.0"})
+session.headers.update({"User-Agent": "MafioBot/11.0"})
 
 
 # ═══════════════════════════════════════════════
@@ -339,6 +321,7 @@ def format_price(p):
 def send(msg):
     # type: (str) -> None
     if "YOUR" in TELEGRAM_TOKEN:
+        log.info("[TELEGRAM] %s", msg[:80])
         return
     try:
         session.post(
@@ -358,7 +341,6 @@ def safe_get(url, params=None):
         r.raise_for_status()
         api_calls_total  += 1
         api_calls_minute += 1
-        # إعادة تعيين عداد الدقيقة
         if time.time() - api_minute_reset >= 60:
             log.info("📡 API: %d طلب/دقيقة | إجمالي: %d",
                      api_calls_minute, api_calls_total)
@@ -371,35 +353,20 @@ def safe_get(url, params=None):
 
 
 # ═══════════════════════════════════════════════
-#   SMART CACHE — يمنع طلبات Klines المتكررة
+#   SMART CACHE
 # ═══════════════════════════════════════════════
 def get_klines(symbol, interval="15m", limit=50):
     # type: (str, str, int) -> Optional[Dict]
-    """
-    يجلب الشموع مع Cache ذكي:
-      15m → صالح 60 ثانية
-      1h  → صالح 5 دقائق
-      4h  → صالح 15 دقيقة
-    """
-    cache_ttl = {
-        "15m": CACHE_15M,
-        "1h":  CACHE_1H,
-        "4h":  CACHE_4H,
-    }.get(interval, CACHE_15M)
-
+    cache_ttl = {"15m": CACHE_15M, "1h": CACHE_1H, "4h": CACHE_4H}.get(interval, CACHE_15M)
     key = "{}_{}".format(symbol, interval)
     now = time.time()
 
-    # إرجاع من Cache إذا صالح
     if key in klines_cache:
         data, ts = klines_cache[key]
         if now - ts < cache_ttl:
             return data
 
-    # جلب من API
-    raw = safe_get(MEXC_KLINES, {
-        "symbol": symbol, "interval": interval, "limit": limit
-    })
+    raw = safe_get(MEXC_KLINES, {"symbol": symbol, "interval": interval, "limit": limit})
     if not raw or len(raw) < 6:
         return None
 
@@ -422,91 +389,64 @@ def get_klines(symbol, interval="15m", limit=50):
 
 def clear_expired_cache():
     # type: () -> None
-    """تنظيف Cache القديم لتوفير الذاكرة."""
     now   = time.time()
-    stale = [k for k, (_, ts) in list(klines_cache.items())
-             if now - ts > CACHE_4H * 2]
+    stale = [k for k, (_, ts) in list(klines_cache.items()) if now - ts > CACHE_4H * 2]
     for k in stale:
         del klines_cache[k]
 
 
 # ═══════════════════════════════════════════════
-#   PRE-FILTER — يرفض 90% من العملات بدون Klines
+#   PRE-FILTER
 # ═══════════════════════════════════════════════
 def is_stablecoin(sym, last_price=0.0, change=0.0):
     # type: (str, float, float) -> bool
-    """
-    فلتر شامل للعملات المستقرة — 3 طبقات:
-    1. القائمة المباشرة
-    2. الكلمات الدالة في الاسم
-    3. السلوك السعري (تغيير < 0.5% = مستقرة)
-    """
     base = sym.replace("USDT", "")
-
-    # طبقة 1: القائمة المباشرة
-    if base in STABLECOINS:
-        return True
-
-    # طبقة 2: كلمات في الاسم تدل على Stablecoin
-    # مثال: USD1, USDE, EUROC, GBPT...
+    if base in STABLECOINS: return True
     for kw in STABLE_KEYWORDS:
-        if base.startswith(kw) or base.endswith(kw):
-            return True
-
-    # طبقة 3: السلوك السعري
-    # إذا التغيير 24h أقل من 0.5% = مستقرة على الأرجح
-    if abs(change) < 0.5 and last_price > 0:
-        return True
-
+        if base.startswith(kw) or base.endswith(kw): return True
+    if abs(change) < 0.5 and last_price > 0: return True
     return False
 
 
 def pre_filter(sym, change, vol, price=0.0):
     # type: (str, float, float, float) -> bool
     """
-    فلتر سريع بدون أي طلب API إضافي.
-    يستخدم البيانات الموجودة أصلاً من ticker/24hr.
-    يرفض العملات المستقرة والرافعة وخارج النطاق.
+    🐛 إصلاح V11: أُزيل return True المكرر الميت
     """
     if not sym.endswith("USDT"): return False
     if sym in EXCLUDED: return False
     if any(k in sym for k in LEVERAGE_KEYWORDS): return False
-
-    # فلتر Stablecoin الشامل
     if is_stablecoin(sym, price, change): return False
-
-    # حجم
     if vol < PRE_MIN_VOL or vol > PRE_MAX_VOL: return False
-
-    # تغيير
-    if change < PRE_MIN_CHANGE: return False
-    if change > PRE_MAX_CHANGE: return False
-
-    # السوق خطر
-    if market_state == "DANGER":
-        if change <= btc_change_24h: return False
-
-    return True
+    if change < PRE_MIN_CHANGE or change > PRE_MAX_CHANGE: return False
+    if market_state == "DANGER" and change <= btc_change_24h: return False
     return True
 
 
 # ═══════════════════════════════════════════════
-#   BTC MARKET ANALYSIS — كل 30 دقيقة
+#   BTC MARKET ANALYSIS
+#   🐛 إصلاح V11: استخدام params={"symbol":"BTCUSDT"} بدل endpoint منفصل
 # ═══════════════════════════════════════════════
 def analyze_btc():
     # type: () -> None
     global btc_change_24h, btc_trend_1h, market_state, last_btc
 
-    data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})  # طلب واحد فقط
+    # ✅ الإصلاح: نجلب بيانات BTC بالـ symbol param وليس بـ endpoint مختلف
+    data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
     if not data:
         return
 
     try:
-        btc_change_24h = float(data["priceChangePercent"])
-    except (KeyError, ValueError):
+        last_price = float(data.get("lastPrice", 0))
+        open_price = float(data.get("openPrice", last_price))
+        if open_price > 0:
+            btc_change_24h = (last_price - open_price) / open_price * 100
+        else:
+            btc_change_24h = float(data.get("priceChangePercent", 0))
+    except (KeyError, ValueError, TypeError):
         pass
 
-    # اتجاه 1h من Cache إذا وُجد
+    # اتجاه 1h
     kd1 = get_klines("BTCUSDT", "1h", 4)
     if kd1 and len(kd1["closes"]) >= 2:
         c = kd1["closes"]
@@ -546,13 +486,10 @@ def analyze_btc():
 
 
 # ═══════════════════════════════════════════════
-#   SECTOR ROTATION — كل 30 دقيقة
+#   SECTOR ROTATION
 # ═══════════════════════════════════════════════
 def analyze_sectors():
     # type: () -> None
-    """
-    يستخدم all_tickers المحفوظة مسبقاً — لا طلبات API جديدة!
-    """
     global hot_sectors, hot_symbols, sector_vol_history, last_sectors
 
     if not all_tickers:
@@ -595,8 +532,7 @@ def analyze_sectors():
             "top": sorted(rising, key=lambda x: -x[1])[:3],
         }
 
-        if (avg_ch >= SECTOR_HOT_CHANGE and
-                rising_pct >= SECTOR_MIN_RISING):
+        if avg_ch >= SECTOR_HOT_CHANGE and rising_pct >= SECTOR_MIN_RISING:
             new_hot.append(sector)
 
     old_hot     = set(hot_sectors)
@@ -605,7 +541,6 @@ def analyze_sectors():
     hot_symbols = {c for s in hot_sectors for c in SECTORS[s]}
     last_sectors = time.time()
 
-    # إرسال تقرير عند تغيير القطاعات
     entered = new_hot_set - old_hot
     exited  = old_hot - new_hot_set
 
@@ -616,8 +551,7 @@ def analyze_sectors():
             for s in entered:
                 st = stats.get(s, {})
                 coins_txt = " | ".join(
-                    "{} +{:.0f}%".format(c, p)
-                    for c, p in st.get("top", [])
+                    "{} +{:.0f}%".format(c, p) for c, p in st.get("top", [])
                 )
                 msg += "  🔥 *{}* avg:`+{:.1f}%`\n  {}\n".format(
                     s, st.get("avg", 0), coins_txt)
@@ -632,49 +566,233 @@ def analyze_sectors():
 
 
 # ═══════════════════════════════════════════════
-#   TICKERS — كل 30 دقيقة
+#   🆕 SECTOR FLOW TRACKER V11
+#   يرصد تدفق السيولة بين القطاعات في الوقت الحقيقي
+#   يعمل كل 12 ثانية — بدون طلبات API إضافية!
 # ═══════════════════════════════════════════════
+def update_sector_flow(ticker_map):
+    # type: (Dict) -> None
+    """
+    الخطوة 1: يجمع لقطات الحجم والتغيير لكل قطاع.
+    يُستدعى من run() في كل دورة.
+    """
+    global sector_vol_snapshots, sector_change_snapshots
+
+    for sector, coins in SECTORS.items():
+        total_vol = 0.0
+        changes   = []
+
+        for sym in coins:
+            if sym not in ticker_map:
+                continue
+            try:
+                vol = float(ticker_map[sym]["quoteVolume"])
+                ch  = float(ticker_map[sym]["priceChangePercent"])
+                total_vol += vol
+                changes.append(ch)
+            except (KeyError, ValueError):
+                pass
+
+        if not changes:
+            continue
+
+        avg_ch = sum(changes) / len(changes)
+
+        # حفظ اللقطة
+        if sector not in sector_vol_snapshots:
+            sector_vol_snapshots[sector] = []
+        if sector not in sector_change_snapshots:
+            sector_change_snapshots[sector] = []
+
+        sector_vol_snapshots[sector].append(total_vol)
+        sector_change_snapshots[sector].append(avg_ch)
+
+        # الاحتفاظ بآخر FLOW_HISTORY_MAX لقطة فقط
+        if len(sector_vol_snapshots[sector]) > FLOW_HISTORY_MAX:
+            sector_vol_snapshots[sector].pop(0)
+        if len(sector_change_snapshots[sector]) > FLOW_HISTORY_MAX:
+            sector_change_snapshots[sector].pop(0)
+
+
+def analyze_sector_flow():
+    # type: () -> None
+    """
+    الخطوة 2: يحلل اللقطات ويرسل تنبيه عند:
+    ● دخول سيولة: حجم القطاع ارتفع FLOW_VOL_SURGE× + متوسط تغيير > FLOW_CHANGE_MIN%
+    ● خروج سيولة: حجم القطاع انخفض + متوسط تغيير < FLOW_EXIT_DROP%
+
+    يُستدعى كل 60 ثانية (بعد 5 دورات × 12 ثانية)
+    """
+    global sector_flow_state, sector_flow_alerted
+
+    now       = time.time()
+    inflows   = []   # قطاعات تدخل إليها سيولة الآن
+    outflows  = []   # قطاعات تخرج منها سيولة
+
+    for sector in SECTORS:
+        vols    = sector_vol_snapshots.get(sector, [])
+        changes = sector_change_snapshots.get(sector, [])
+
+        # نحتاج على الأقل FLOW_WINDOW لقطات للمقارنة
+        if len(vols) < FLOW_WINDOW or len(changes) < FLOW_WINDOW:
+            continue
+
+        # آخر لقطة vs متوسط السابقات
+        recent_vol  = vols[-1]
+        prev_avg_vol = sum(vols[-FLOW_WINDOW:-1]) / (FLOW_WINDOW - 1)
+        if prev_avg_vol <= 0:
+            continue
+
+        vol_ratio   = recent_vol / prev_avg_vol
+        recent_ch   = changes[-1]
+        avg_ch_prev = sum(changes[-FLOW_WINDOW:-1]) / (FLOW_WINDOW - 1)
+
+        # ── رصد دخول السيولة ──────────────────────
+        is_inflow = (
+            vol_ratio >= FLOW_VOL_SURGE and
+            recent_ch >= FLOW_CHANGE_MIN
+        )
+
+        # ── رصد خروج السيولة ──────────────────────
+        is_outflow = (
+            vol_ratio < (1.0 / FLOW_VOL_SURGE) and  # انخفض الحجم
+            recent_ch <= FLOW_EXIT_DROP
+        )
+
+        prev_state = sector_flow_state.get(sector, "NEUTRAL")
+
+        if is_inflow:
+            inflows.append({
+                "sector":    sector,
+                "vol_ratio": round(vol_ratio, 2),
+                "ch":        round(recent_ch, 2),
+                "ch_delta":  round(recent_ch - avg_ch_prev, 2),
+            })
+            sector_flow_state[sector] = "IN"
+
+        elif is_outflow:
+            outflows.append({
+                "sector":    sector,
+                "vol_ratio": round(vol_ratio, 2),
+                "ch":        round(recent_ch, 2),
+            })
+            sector_flow_state[sector] = "OUT"
+
+        else:
+            sector_flow_state[sector] = "NEUTRAL"
+
+    # ── إرسال تنبيهات الدخول ──────────────────────
+    for info in inflows:
+        sector = info["sector"]
+        last_alert = sector_flow_alerted.get(sector, 0)
+        if now - last_alert < FLOW_ALERT_COOL:
+            continue
+
+        sector_flow_alerted[sector] = now
+
+        # أفضل عملات في هذا القطاع الآن
+        coins_in_sector = SECTORS.get(sector, [])
+        top_coins = []
+        tmap = {t["symbol"]: t for t in all_tickers}
+        for sym in coins_in_sector:
+            if sym not in tmap: continue
+            try:
+                ch  = float(tmap[sym]["priceChangePercent"])
+                vol = float(tmap[sym]["quoteVolume"])
+                if ch > 0 and vol > 200_000:
+                    top_coins.append((sym.replace("USDT",""), ch, vol))
+            except (KeyError, ValueError):
+                pass
+        top_coins.sort(key=lambda x: -x[1])
+        top_txt = ""
+        for name, ch, vol in top_coins[:5]:
+            top_txt += "  • *{}* `+{:.1f}%` vol:`{:,.0f}`\n".format(name, ch, vol)
+
+        # هل القطاع ساخن أصلاً؟
+        is_hot = sector in hot_sectors
+        hot_tag = " 🔥 *SECTOR HOT*" if is_hot else ""
+
+        send(
+            "💸 *SECTOR FLOW — دخول سيولة*{hot}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🏷️ القطاع: *{sector}*\n"
+            "📊 الحجم ارتفع: `{ratio}×` المعدل\n"
+            "📈 متوسط التغيير: `+{ch:.1f}%`\n"
+            "🔺 تسارع: `+{delta:.1f}%` عن السابق\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🏆 *أفضل العملات الآن:*\n"
+            "{top}"
+            "₿ BTC: `{btc:+.1f}%` | `{mst}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "👀 _راقب هذا القطاع — السيولة تدخل_".format(
+                hot=hot_tag,
+                sector=sector,
+                ratio=info["vol_ratio"],
+                ch=info["ch"],
+                delta=info["ch_delta"],
+                top=top_txt if top_txt else "  لا بيانات\n",
+                btc=btc_change_24h,
+                mst=market_state,
+            )
+        )
+        log.info("💸 Flow IN | %s | ratio=%.2f | ch=%.1f%%", sector, info["vol_ratio"], info["ch"])
+
+    # ── إرسال تنبيهات الخروج ──────────────────────
+    if outflows:
+        out_txt = ""
+        for info in outflows:
+            out_txt += "  📤 *{}* حجم:`{}×` ch:`{:.1f}%`\n".format(
+                info["sector"], info["vol_ratio"], info["ch"])
+
+        # لا ترسل إشعار خروج إذا أُرسل مؤخراً لجميع القطاعات
+        any_new = any(
+            now - sector_flow_alerted.get(i["sector"], 0) >= FLOW_ALERT_COOL
+            for i in outflows
+        )
+        if any_new:
+            for info in outflows:
+                sector_flow_alerted[info["sector"]] = now
+            send(
+                "📤 *SECTOR FLOW — خروج سيولة*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "{out}"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "₿ BTC: `{btc:+.1f}%` | `{mst}`\n"
+                "⚠️ _لا تدخل هذه القطاعات الآن_".format(
+                    out=out_txt, btc=btc_change_24h, mst=market_state
+                )
+            )
+            log.info("📤 Flow OUT | %s", [i["sector"] for i in outflows])
+
+
+def get_flow_summary():
+    # type: () -> str
+    """يرجع ملخص حالة السيولة للقطاعات — يُستخدم في تقرير الأداء"""
+    in_sectors  = [s for s, state in sector_flow_state.items() if state == "IN"]
+    out_sectors = [s for s, state in sector_flow_state.items() if state == "OUT"]
+    txt = ""
+    if in_sectors:
+        txt += "💸 سيولة داخلة: `{}`\n".format(", ".join(in_sectors))
+    if out_sectors:
+        txt += "📤 سيولة خارجة: `{}`\n".format(", ".join(out_sectors))
+    return txt or "➡️ لا تدفق واضح\n"
+
+
 # ═══════════════════════════════════════════════
-#   🆕 SMART MONEY DETECTION
-#   رصد تجميع الحيتان في Stablecoins
+#   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
 def analyze_smart_money(force_report=False):
     # type: (bool) -> None
-    """
-    🐋 رصد تجميع الحيتان في Stablecoins
-
-    المنطق:
-    ┌─────────────────────────────────────────────┐
-    │  المرحلة 1 — بيع:                           │
-    │    الحيتان يبيعون عملاتهم → السوق ينزل      │
-    │    حجم Stablecoins يرتفع بشكل غير طبيعي     │
-    │                                             │
-    │  المرحلة 2 — تجميع:                         │
-    │    Sigma ≥ 3 = حجم 3× أعلى من المعتاد       │
-    │    Sigma ≥ 5 = تنبيه فوري (لا ينتظر 24h)   │
-    │                                             │
-    │  المرحلة 3 — ضخ:                            │
-    │    بعد 24-48h الحيتان يشترون عملات محددة    │
-    │    Sector Rotation يبدأ → إشارات قوية       │
-    └─────────────────────────────────────────────┘
-
-    التقرير:
-    • يومي كل 24 ساعة (ملخص الحالة)
-    • فوري إذا Sigma ≥ 5 (تجميع استثنائي)
-    """
-    global stable_vol_history, smart_money_alert, last_smart_money
+    global stable_vol_history, smart_money_alert, smart_money_bonus, last_smart_money
 
     if not all_tickers:
         return
 
     ticker_map  = {t["symbol"]: t for t in all_tickers}
-    detected    = []    # Stablecoins بحجم غير عادي
-    urgent      = []    # Stablecoins بـ Sigma ≥ 5 (تنبيه فوري)
+    detected    = []
+    urgent      = []
     total_sigma = 0.0
 
-    # ═══════════════════════════════════════════
-    #  الخطوة 1: تحليل حجم كل Stablecoin
-    # ═══════════════════════════════════════════
     for sym in SMART_MONEY_STABLES:
         if sym not in ticker_map:
             continue
@@ -684,7 +802,6 @@ def analyze_smart_money(force_report=False):
         except (KeyError, ValueError):
             continue
 
-        # بناء تاريخ الحجم (آخر 48 قراءة = 48 ساعة)
         if sym not in stable_vol_history:
             stable_vol_history[sym] = []
         hist = stable_vol_history[sym]
@@ -692,11 +809,9 @@ def analyze_smart_money(force_report=False):
         if len(hist) > 48:
             hist.pop(0)
 
-        # نحتاج على الأقل 4 نقاط تاريخية
         if len(hist) < 4:
             continue
 
-        # حساب Sigma
         avg      = sum(hist) / len(hist)
         variance = sum((v - avg) ** 2 for v in hist) / len(hist)
         std      = variance ** 0.5
@@ -704,29 +819,26 @@ def analyze_smart_money(force_report=False):
         if std == 0 or avg == 0:
             continue
 
-        sigma       = (vol - avg) / std
-        vol_ratio   = vol / avg  # كم مرة أعلى من المتوسط
+        sigma     = (vol - avg) / std
+        vol_ratio = vol / avg
 
         if sigma >= SMART_MONEY_SIGMA:
             entry = {
-                "sym":       sym.replace("USDT", ""),
-                "sigma":     round(sigma, 1),
-                "vol":       vol,
+                "sym": sym.replace("USDT", ""),
+                "sigma": round(sigma, 1),
+                "vol": vol,
                 "vol_ratio": round(vol_ratio, 1),
-                "change":    change,
+                "change": change,
             }
             detected.append(entry)
             total_sigma += sigma
             if sigma >= SMART_MONEY_ALERT_SIGMA:
                 urgent.append(entry)
 
-    # ═══════════════════════════════════════════
-    #  الخطوة 2: تحليل حالة السوق العام
-    # ═══════════════════════════════════════════
     sell_pressure = 0.0
     rising_count  = 0
     falling_count = 0
-    top_falling   = []   # أكثر العملات انخفاضاً
+    top_falling   = []
 
     for t in all_tickers:
         sym = t.get("symbol", "")
@@ -736,8 +848,7 @@ def analyze_smart_money(force_report=False):
         try:
             ch  = float(t["priceChangePercent"])
             vol = float(t["quoteVolume"])
-            if ch > 0:
-                rising_count  += 1
+            if ch > 0: rising_count  += 1
             else:
                 falling_count += 1
                 if ch < -5 and vol > 500_000:
@@ -749,25 +860,21 @@ def analyze_smart_money(force_report=False):
     total_coins  = rising_count + falling_count
     avg_market   = sell_pressure / total_coins if total_coins > 0 else 0
     falling_pct  = falling_count / total_coins * 100 if total_coins > 0 else 0
-    top_falling.sort(key=lambda x: x[1])  # الأكثر انخفاضاً أولاً
+    top_falling.sort(key=lambda x: x[1])
 
-    # ═══════════════════════════════════════════
-    #  الخطوة 3: تحديد مرحلة السوق
-    # ═══════════════════════════════════════════
     is_accumulation = (
         len(detected) >= SMART_MONEY_ACCUM_MIN and
-        falling_pct   >= SMART_MONEY_FALL_PCT  and
+        falling_pct   >= SMART_MONEY_FALL_PCT and
         avg_market    <= -1.0
     )
-    is_neutral = len(detected) > 0 and not is_accumulation
 
     old_alert         = smart_money_alert
     smart_money_alert = is_accumulation
     last_smart_money  = time.time()
 
-    # ═══════════════════════════════════════════
-    #  الخطوة 4: إرسال تنبيه فوري (Sigma ≥ 5)
-    # ═══════════════════════════════════════════
+    # 🆕 مكافأة Score عند تجميع الحيتان: عملة في قطاع ساخن + تجميع = score+10
+    smart_money_bonus = 10 if is_accumulation else 0
+
     if urgent and not force_report:
         urgent.sort(key=lambda x: -x["sigma"])
         urgent_lines = ""
@@ -791,37 +898,28 @@ def analyze_smart_money(force_report=False):
         log.info("🚨 Urgent Smart Money! %d stables | sigma_max=%.1f",
                  len(urgent), max(d["sigma"] for d in urgent))
 
-    # ═══════════════════════════════════════════
-    #  الخطوة 5: التقرير اليومي الكامل
-    # ═══════════════════════════════════════════
     if not force_report and not detected:
         return
 
     detected.sort(key=lambda x: -x["sigma"])
-
-    # بناء جدول Stablecoins
     stable_lines = ""
     if detected:
         for d in detected[:6]:
-            bar   = "█" * min(int(d["sigma"]), 10)
+            bar = "█" * min(int(d["sigma"]), 10)
             stable_lines += (
                 "  • *{sym}*\n"
                 "    Sigma: `{sig}` | `{ratio}×` المتوسط\n"
                 "    [{bar}]\n"
-            ).format(
-                sym=d["sym"], sig=d["sigma"],
-                ratio=d["vol_ratio"], bar=bar,
-            )
+            ).format(sym=d["sym"], sig=d["sigma"], ratio=d["vol_ratio"], bar=bar)
     else:
         stable_lines = "  ✅ لا نشاط غير عادي\n"
 
-    # أكثر العملات انخفاضاً
     falling_lines = ""
     for base, ch, vol in top_falling[:3]:
         falling_lines += "  • *{}* `{:.1f}%`\n".format(base, ch)
 
-    # تحديد الحالة
     market_icon = "🔴" if falling_pct >= 55 else "🟡" if falling_pct >= 45 else "🟢"
+    is_neutral  = len(detected) > 0 and not is_accumulation
 
     if is_accumulation:
         status_line  = "🐋 *تجميع نشط — الحيتان يجمعون!*"
@@ -836,54 +934,40 @@ def analyze_smart_money(force_report=False):
         warning_line = "✅ *الإشارات مفعّلة بشكل طبيعي*"
         phase_desc   = "لا نشاط غير عادي في Stablecoins"
 
-    msg = (
+    send(
         "🐋 *SMART MONEY DAILY REPORT*\n"
         "📅 `{date}`\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "{status}\n"
-        "_{desc}_\n"
+        "{status}\n_{desc}_\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 *Stablecoins (حجم غير عادي):*\n"
-        "{stables}\n"
+        "📊 *Stablecoins (حجم غير عادي):*\n{stables}\n"
         "📉 *حالة السوق:*\n"
         "  {mkt} `{fall:.0f}%` من العملات نازلة\n"
         "  📊 متوسط: `{avg:+.2f}%`\n"
         "  ₿ BTC 24h: `{btc:+.2f}%`\n"
         "{falling_section}"
         "━━━━━━━━━━━━━━━━━━\n"
-        "{warning}"
-    ).format(
-        date=datetime.now().strftime("%Y-%m-%d %H:%M"),
-        status=status_line,
-        desc=phase_desc,
-        stables=stable_lines,
-        mkt=market_icon,
-        fall=falling_pct,
-        avg=avg_market,
-        btc=btc_change_24h,
-        falling_section=(
-            "📉 *أكثر انخفاضاً:*\n{}\n".format(falling_lines)
-            if falling_lines else ""
-        ),
-        warning=warning_line,
+        "{warning}".format(
+            date=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            status=status_line, desc=phase_desc,
+            stables=stable_lines,
+            mkt=market_icon, fall=falling_pct, avg=avg_market, btc=btc_change_24h,
+            falling_section=(
+                "📉 *أكثر انخفاضاً:*\n{}\n".format(falling_lines) if falling_lines else ""
+            ),
+            warning=warning_line,
+        )
     )
-
-    send(msg)
-    log.info("🐋 Smart Money Report | accum=%s | stables=%d | falling=%.0f%% | avg=%.2f%%",
-             is_accumulation, len(detected), falling_pct, avg_market)
-
+    log.info("🐋 Smart Money | accum=%s | stables=%d | falling=%.0f%%",
+             is_accumulation, len(detected), falling_pct)
 
 
 # ═══════════════════════════════════════════════
-#   🆕 MOMENTUM DETECTOR — نظام الإشعارات الثلاثي
-#   🔵 إشعار 1: مراقبة   | 🟡 إشعار 2: تأكيد دخول
-#   🟢 إشعار 3: إيجابية  | كل عملة = 3 إشعارات فقط
+#   MOMENTUM DETECTOR — نظام الإشعارات الثلاثي
 # ═══════════════════════════════════════════════
-
 def _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map):
     # type: (str, dict, dict, dict, dict, dict) -> list
-    """يجلب أفضل 10 عملات من القطاع بناءً على السيولة والارتداد"""
-    coins = SECTORS.get(sector, [])
+    coins  = SECTORS.get(sector, [])
     scored = []
     for sym in coins:
         if sym not in price_map: continue
@@ -897,7 +981,6 @@ def _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map)
         if high_24h <= 0 or low_24h <= 0: continue
         rebound = (price - low_24h) / low_24h * 100 if low_24h > 0 else 0
         if rebound < 3: continue
-        # Score بسيط: حجم + ارتداد + تغيير إيجابي
         score = (vol / 1_000_000) * 0.5 + rebound * 0.3 + ch * 0.2
         scored.append((sym, score, price, vol, ch, rebound, high_24h, low_24h))
     scored.sort(key=lambda x: -x[1])
@@ -906,40 +989,31 @@ def _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map)
 
 def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
     # type: (dict, dict, dict, dict, dict) -> None
-    """
-    نظام الإشعارات الثلاثي — اصطياد القاع مع السيولة:
-    🔵 إشعار 1: Momentum Detected  — أول رصد
-    🟡 إشعار 2: تأكيد الدخول       — سعر +2% + حجم متصاعد
-    🟢 إشعار 3: تأكيد الإيجابية    — Score 65+ + سيولة قوية
-    كل عملة = 3 إشعارات كحد أقصى — لا تكرار
-    """
     global price_prev, momentum_alerted, momentum_stage
 
     now = time.time()
 
-    # ══════════════════════════════════════════════
-    # متابعة المراحل 2 و 3 للعملات المرصودة
-    # ══════════════════════════════════════════════
-    for sym, sd in list(momentum_stage.items()):
+    # متابعة المراحل 2 و 3
+    for sym in list(momentum_stage.keys()):
         if sym not in price_map: continue
-        price       = price_map[sym]
-        vol         = vol_now.get(sym, 0)
-        change_24h  = change_now.get(sym, 0)
-        entry_price = sd["entry_price"]
-        entry_vol   = sd["entry_vol"]
-        gain        = (price - entry_price) / entry_price * 100 if entry_price > 0 else 0
+        price      = price_map[sym]
+        sd         = momentum_stage[sym]
+        vol        = vol_now.get(sym, 0)
+        change_24h = change_now.get(sym, 0)
+        entry_price= sd["entry_price"]
+        entry_vol  = sd["entry_vol"]
+        gain       = (price - entry_price) / entry_price * 100 if entry_price > 0 else 0
 
-        # تنظيف: مضت 4 ساعات أو السعر نزل عن الدخول
-        if now - sd["entry_time"] > 14400 or gain < 0:
+        # 🐛 إصلاح V11: تنظيف أفضل — نحذف فقط إذا انتهت 4 ساعات أو خسر >5%
+        if now - sd["entry_time"] > 14400 or gain < -5.0:
             del momentum_stage[sym]
             continue
 
-        vol_ratio = vol / entry_vol if entry_vol > 0 else 1
-        high_24h  = high_map.get(sym, price)
-        low_24h   = low_map.get(sym, price)
+        vol_ratio      = vol / entry_vol if entry_vol > 0 else 1
+        high_24h       = high_map.get(sym, price)
         drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
-        # ── 🟡 إشعار 2: تأكيد الدخول ──────────────
+        # 🟡 إشعار 2
         if sd["stage"] == 1 and not sd.get("alerted_2"):
             if gain >= 2.0 and vol_ratio >= 1.3:
                 sd["alerted_2"] = True
@@ -963,25 +1037,22 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                     "🕐 `{time}`\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     "✅ *ادخل الآن — السيولة تتدفق*".format(
-                        sym=sym, gain=gain,
-                        ratio=vol_ratio,
-                        price=format_price(price),
-                        drop=drop_from_high,
+                        sym=sym, gain=gain, ratio=vol_ratio,
+                        price=format_price(price), drop=drop_from_high,
                         top="🏆 *أفضل عملات القطاع:*\n{}\n".format(top10_txt) if top10_txt else "",
                         time=datetime.now().strftime("%H:%M:%S"),
                     )
                 )
                 log.info("🟡 Stage2 | %s | +%.2f%% | vol_ratio=%.1f", sym, gain, vol_ratio)
 
-        # ── 🟢 إشعار 3: تأكيد الإيجابية ────────────
-        if sd["stage"] == 2 and not sd.get("alerted_3"):
+        # 🟢 إشعار 3
+        elif sd["stage"] == 2 and not sd.get("alerted_3"):
             if gain >= 3.0 and vol_ratio >= 2.0 and change_24h > 0:
                 sd["alerted_3"] = True
                 sd["stage"]     = 3
-
-                # فحص الإغلاق اليومي فوق الدعم
+                low_24h        = low_map.get(sym, price)
                 daily_close_ok = price > low_24h * 1.1 if low_24h > 0 else None
-                close_icon = "✅ فوق الدعم" if daily_close_ok else "⚠️ تحت الدعم"
+                close_icon     = "✅ فوق الدعم" if daily_close_ok else "⚠️ تحت الدعم"
 
                 send(
                     "🟢 *تأكيد الإيجابية* 🎯\n"
@@ -994,26 +1065,20 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                     "🕐 `{time}`\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     "🚀 *سيولة قوية — ارفع Stop Loss*".format(
-                        sym=sym, gain=gain,
-                        ratio=vol_ratio,
-                        price=format_price(price),
-                        close=close_icon,
+                        sym=sym, gain=gain, ratio=vol_ratio,
+                        price=format_price(price), close=close_icon,
                         time=datetime.now().strftime("%H:%M:%S"),
                     )
                 )
-                # Deep Scan للتأكيد النهائي
                 deep_scan(sym, price, change_24h)
                 log.info("🟢 Stage3 | %s | +%.2f%%", sym, gain)
 
-    # ══════════════════════════════════════════════
     # 🔵 إشعار 1: رصد جديد
-    # ══════════════════════════════════════════════
     for sym, price in price_map.items():
         if sym in tracked: continue
         if sym in momentum_stage: continue
         if not sym.endswith("USDT"): continue
 
-        # فقط العملات في قائمتنا
         in_our_list = any(sym in coins for coins in SECTORS.values())
         if not in_our_list: continue
 
@@ -1029,7 +1094,6 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
         price_prev[sym] = price
         if prev <= 0 or price <= 0: continue
 
-        # تحقق من صحة السعر (ليس سعراً قديماً)
         high_24h = high_map.get(sym, price)
         low_24h  = low_map.get(sym, price)
         if high_24h > 0 and low_24h > 0:
@@ -1040,57 +1104,46 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
         move       = (price - prev) / prev * 100
         change_24h = change_now.get(sym, 0)
 
-        # فلتر التحرك
         if abs(move) > 30: price_prev[sym] = 0; continue
         if move < MOMENTUM_MOVE_MIN: continue
         if move > MOMENTUM_MOVE_MAX: continue
-
-        # فلتر 24h: 0 < change < 10%
-        if change_24h <= 0: continue
-        if change_24h > 10: continue
-
-        # فلتر القاع
+        if change_24h <= 0 or change_24h > 10: continue
         if low_24h > 0 and price > low_24h * 2.5: continue
         if high_24h > 0 and price > high_24h * 0.90: continue
         if low_24h > 0:
             rebound = (price - low_24h) / low_24h * 100
             if rebound < 5: continue
 
-        # Cooldown 4 ساعات
         if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN: continue
 
         momentum_alerted[sym] = now
 
-        # القطاع وأفضل 10 عملات فيه
-        sector = next((s for s, syms in SECTORS.items() if sym in syms), "")
-        in_hot  = sym in hot_symbols
-        hot_tag = " 🔥 *{}*".format(sector) if in_hot else ""
-
+        sector         = next((s for s, syms in SECTORS.items() if sym in syms), "")
+        in_hot         = sym in hot_symbols
+        hot_tag        = " 🔥 *{}*".format(sector) if in_hot else ""
         rebound        = (price - low_24h) / low_24h * 100 if low_24h > 0 else 0
         drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
-        # أفضل 10 عملات في نفس القطاع
+        # 🆕 تحقق إذا القطاع يستقبل سيولة الآن
+        flow_state = sector_flow_state.get(sector, "NEUTRAL")
+        flow_tag   = " 💸 *سيولة داخلة*" if flow_state == "IN" else ""
+
         top10     = _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map)
         top10_txt = ""
         for i, (s, sc, p, v, c, rb, *_) in enumerate(top10[:5], 1):
             top10_txt += "  {}. *{}* `+{:.1f}%` | `{:,.0f}`\n".format(
                 i, s.replace("USDT",""), c, v)
 
-        # حفظ المرحلة 1
         momentum_stage[sym] = {
-            "stage":       1,
-            "entry_price": price,
-            "entry_vol":   vol,
-            "entry_time":  now,
-            "alerted_2":   False,
-            "alerted_3":   False,
+            "stage": 1, "entry_price": price, "entry_vol": vol,
+            "entry_time": now, "alerted_2": False, "alerted_3": False,
         }
 
-        log.info("🔵 Stage1 | %s | +%.2f%% | 24h:%.1f%% | vol:%.0f | sector:%s",
-                 sym, move, change_24h, vol, sector)
+        log.info("🔵 Stage1 | %s | +%.2f%% | 24h:%.1f%% | vol:%.0f | sector:%s | flow:%s",
+                 sym, move, change_24h, vol, sector, flow_state)
 
         send(
-            "🔵 *Momentum Detected*{hot}\n"
+            "🔵 *Momentum Detected*{hot}{flow}\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💰 *{sym}*  |  🏷️ `{sector}`\n"
             "📈 تحرك لحظي: `+{move:.2f}%`\n"
@@ -1102,27 +1155,23 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
             "🕐 `{time}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "👀 _مراقبة — انتظر إشعار التأكيد_".format(
-                hot=hot_tag,
-                sym=sym,
-                sector=sector if sector else "—",
-                move=move,
-                ch=change_24h,
-                vol=vol,
+                hot=hot_tag, flow=flow_tag,
+                sym=sym, sector=sector if sector else "—",
+                move=move, ch=change_24h, vol=vol,
                 price=format_price(price),
-                drop=drop_from_high,
-                reb=rebound,
+                drop=drop_from_high, reb=rebound,
                 top="🏆 *أفضل عملات القطاع:*\n{}\n".format(top10_txt) if top10_txt else "",
                 time=datetime.now().strftime("%H:%M:%S"),
             )
         )
 
 
+# ═══════════════════════════════════════════════
+#   REFRESH TICKERS
+#   🐛 إصلاح V11: candidates تأخذ فلتر الحجم من all_tickers
+# ═══════════════════════════════════════════════
 def refresh_tickers():
     # type: () -> None
-    """
-    طلب واحد يجيب بكل بيانات السوق.
-    يبني قائمة candidates بعد الفلتر المسبق.
-    """
     global all_tickers, changes_map, candidates, last_tickers
 
     data = safe_get(MEXC_24H)
@@ -1131,39 +1180,28 @@ def refresh_tickers():
 
     all_tickers = data
     changes_map = {}
-    result      = []
 
+    # بناء خريطة الحجوم من البيانات الحالية
+    vol_map = {}
     for t in data:
         sym = t.get("symbol", "")
         try:
             ch    = float(t["priceChangePercent"])
             vol   = float(t["quoteVolume"])
             price = float(t.get("lastPrice", 0))
+            changes_map[sym] = ch
+            vol_map[sym]     = vol
         except (KeyError, ValueError):
-            continue
+            pass
 
-        changes_map[sym] = ch
-
-        # فلتر بسيط فقط — نريد أكبر قائمة ممكنة
-        if not sym.endswith("USDT"): continue
-        if sym in EXCLUDED: continue
-        base = sym.replace("USDT","")
-        if base in STABLECOINS: continue
-        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
-        if vol < MIN_VOL_USDT: continue       # حجم أدنى فقط
-        if vol > MAX_VOL_USDT: continue       # حجم أقصى فقط
-        if ch < -15: continue                 # نازل بقوة جداً
-        if 0.95 <= price <= 1.05 and price > 0: continue  # Stablecoin بالسعر
-
-        result.append((sym, vol))
-
-    result.sort(key=lambda x: -x[1])
-
-    # ══════════════════════════════════════════════
-    # نراقب فقط عملات قائمتنا المختارة — لا غيرها
-    # ══════════════════════════════════════════════
-    our_coins = set(sym for coins in SECTORS.values() for sym in coins)
-    candidates = [sym for sym in our_coins if sym not in EXCLUDED]
+    # ✅ الإصلاح: candidates = عملات قائمتنا التي تجاوزت فلتر الحجم
+    our_coins  = set(sym for coins in SECTORS.values() for sym in coins)
+    candidates = [
+        sym for sym in our_coins
+        if sym not in EXCLUDED and
+           vol_map.get(sym, 0) >= MIN_VOL_USDT and
+           vol_map.get(sym, 0) <= MAX_VOL_USDT
+    ]
     last_tickers = time.time()
 
     log.info("📋 Candidates: %d عملة من قائمتنا | Hot: %s",
@@ -1265,7 +1303,6 @@ def detect_green_candles(kd):
 
 def detect_pre_breakout(symbol):
     # type: (str) -> Tuple[bool, float, str]
-    """يفحص التجميع على 4h — من Cache إذا وُجد."""
     kd = get_klines(symbol, "4h", BO_4H_CANDLES)
     if not kd or len(kd["closes"]) < 10:
         return False, 0.0, ""
@@ -1322,12 +1359,6 @@ def calc_sl(kd, score, ob, is_bo=False):
 # ═══════════════════════════════════════════════
 def check_trailing(symbol, price):
     # type: (str, float) -> bool
-    """
-    Trailing Stop ذكي:
-    - يرفع حد الوقف مع كل ارتفاع في السعر
-    - يخرج إذا نزل 1.5% من القمة بعد +2% ربح
-    أفضل من SL الثابت لأنه يحمي الأرباح
-    """
     if symbol not in tracked:
         return False
 
@@ -1341,7 +1372,6 @@ def check_trailing(symbol, price):
     gain = (peak - entry) / entry * 100
     drop = (peak - price) / peak * 100
 
-    # Trailing: بعد +2% ربح، إذا نزل 1.5% من القمة = خروج
     if gain >= TRAIL_GAIN_TRIGGER and drop >= TRAIL_DROP_TRIGGER:
         result = (price - entry) / entry * 100
         emoji  = "✅" if result > 0 else "❌"
@@ -1356,11 +1386,9 @@ def check_trailing(symbol, price):
             )
         )
         log.info("🛑 Trailing: %s | %.2f%%", symbol, result)
-        if symbol in tracked:
-            del tracked[symbol]
+        del tracked[symbol]
         return True
 
-    # Stop Loss عادي
     sl_pct = tracked[symbol].get("sl_pct", SL_BASE)
     change = (price - entry) / entry * 100
     if change <= -sl_pct:
@@ -1373,19 +1401,19 @@ def check_trailing(symbol, price):
             )
         )
         log.info("🛑 SL: %s | %.2f%%", symbol, change)
-        if symbol in tracked:
-            del tracked[symbol]
+        del tracked[symbol]
         return True
 
     return False
 
 
 # ═══════════════════════════════════════════════
-#   SCORE SYSTEM v10
+#   SCORE SYSTEM V11
+#   🆕 تحسين: عقوبة BTC هابط + مكافأة Sector Flow + Smart Money
 # ═══════════════════════════════════════════════
 def calculate_score(kd, ob, vol_accum, vol_spike, consol,
-                    higher_lows, green, bo_str, in_hot, st):
-    # type: (Dict, Optional[Dict], Tuple, Tuple, Tuple, Tuple, Tuple, float, bool, str) -> int
+                    higher_lows, green, bo_str, in_hot, st, symbol=""):
+    # type: (Dict, Optional[Dict], Tuple, Tuple, Tuple, Tuple, Tuple, float, bool, str, str) -> int
     score = 0
     avg   = kd["avg_vol"]
 
@@ -1393,9 +1421,9 @@ def calculate_score(kd, ob, vol_accum, vol_spike, consol,
     r = kd["vols"][-1]/avg if avg>0 else 0
     score += 15 if r>=3 else 10 if r>=2 else 6 if r>=1.5 else 0
 
-    # Supertrend (10) — مهم جداً
+    # Supertrend (10)
     if st == "UP":   score += 10
-    elif st == "DOWN": score -= 5   # عقوبة للاتجاه النازل
+    elif st == "DOWN": score -= 5
 
     # Order Book (12)
     if ob:
@@ -1432,6 +1460,22 @@ def calculate_score(kd, ob, vol_accum, vol_spike, consol,
     # Sector Rotation Bonus (15)
     if in_hot: score += SECTOR_BONUS
 
+    # 🆕 Sector Flow Bonus (+8): القطاع يستقبل سيولة الآن
+    if symbol:
+        sector = next((s for s, syms in SECTORS.items() if symbol in syms), "")
+        if sector and sector_flow_state.get(sector) == "IN":
+            score += 8
+
+    # 🆕 BTC Penalty: إذا BTC ينزل بقوة، عملة غير محمية = طرح نقاط
+    if btc_change_24h < -2.0 and not in_hot:
+        score -= 8
+    elif btc_change_24h < -1.0 and not in_hot:
+        score -= 4
+
+    # 🆕 Smart Money Bonus: تجميع حيتان + قطاع ساخن
+    if smart_money_bonus > 0 and in_hot:
+        score += smart_money_bonus
+
     return min(max(score, 0), 100)
 
 
@@ -1443,62 +1487,50 @@ def score_label(score):
 
 
 # ═══════════════════════════════════════════════
-#   DEEP SCAN — يُشغَّل كل 4 ساعات
+#   DEEP SCAN
 # ═══════════════════════════════════════════════
 def deep_scan(symbol, price, change):
     # type: (str, float, float) -> None
-    """
-    الفحص الكامل: Klines + OrderBook + كل المؤشرات.
-    يُشغَّل فقط على candidates بعد الفلتر المسبق.
-    """
     if symbol in tracked: return
 
-    # حالة السوق
     if market_state == "DANGER" and symbol not in hot_symbols:
         return
 
-    # الشموع (من Cache إذا وُجدت)
     kd = get_klines(symbol, "15m", 50)
     if not kd: return
 
-    # Pump & Dump
     is_pd, pd_r = detect_pump_dump(kd)
     if is_pd:
         log.debug("🚫 P&D: %s | %s", symbol, pd_r)
         return
 
-    # حجم أساسي
     if kd["vols"][-1] < kd["avg_vol"] * 1.2: return
 
-    # Supertrend
     st = get_supertrend(kd)
     if st == "DOWN" and symbol not in hot_symbols: return
 
-    # Green Candles
     ig, gp = detect_green_candles(kd)
     if not ig: return
 
-    # Order Book (طلب API إضافي — نادر لأن 90% رُفضوا مسبقاً)
     ob = get_order_book(symbol)
     if ob:
         if ob["imb"] < MIN_IMBALANCE or ob["imb"] > MAX_IMBALANCE: return
         if ob["bid"] < MIN_BID_DEPTH: return
 
-    # تحليلات
-    vol_spike  = detect_volume_spike(kd)
-    vol_accum  = detect_volume_accum(kd)
-    consol     = detect_consolidation(kd)
-    higher_lows= detect_higher_lows(kd)
+    vol_spike   = detect_volume_spike(kd)
+    vol_accum   = detect_volume_accum(kd)
+    consol      = detect_consolidation(kd)
+    higher_lows = detect_higher_lows(kd)
     is_bo, bo_str, bo_desc = detect_pre_breakout(symbol)
 
     in_hot = symbol in hot_symbols
     sector = next((s for s,syms in SECTORS.items()
                    if symbol in syms and s in hot_sectors), "")
 
+    # ✅ V11: نمرر symbol للـ score لحساب Flow Bonus
     score = calculate_score(kd, ob, vol_accum, vol_spike, consol,
-                            higher_lows, (ig,gp), bo_str, in_hot, st)
+                            higher_lows, (ig,gp), bo_str, in_hot, st, symbol)
 
-    # حالة CAUTION: Gold فقط
     min_s = GOLD_MIN if market_state == "CAUTION" else SCORE_MIN
     label = score_label(score)
     if not label or score < min_s:
@@ -1507,17 +1539,12 @@ def deep_scan(symbol, price, change):
     sl_pct = calc_sl(kd, score, ob, is_bo)
 
     tracked[symbol] = {
-        "entry":      price,
-        "peak":       price,
-        "level":      1,
-        "score":      score,
-        "sl_pct":     sl_pct,
-        "entry_time": time.time(),
-        "last_alert": time.time(),
+        "entry": price, "peak": price, "level": 1,
+        "score": score, "sl_pct": sl_pct,
+        "entry_time": time.time(), "last_alert": time.time(),
     }
     discovered[symbol] = {"price": price, "time": time.time(), "score": score}
 
-    # بناء نص الإشارة
     sigs = ""
     if in_hot:          sigs += "\n🔥 *قطاع ساخن:* `{}`".format(sector)
     if is_bo:           sigs += "\n💥 *Breakout:* `{:.0f}%` _{}_".format(bo_str, bo_desc)
@@ -1531,6 +1558,15 @@ def deep_scan(symbol, price, change):
     if ih:              sigs += "\n📈 *Higher Lows:* `{:.0f}%`".format(hp)
     if ig:              sigs += "\n🟢 *Green Candles:* `{:.0f}%`".format(gp)
     sigs += "\n📊 *Supertrend:* `{}`".format("🟢 UP" if st=="UP" else "🔴 DOWN")
+
+    # 🆕 إضافة Flow Status للإشارة
+    flow_state = sector_flow_state.get(
+        next((s for s, syms in SECTORS.items() if symbol in syms), ""), "NEUTRAL"
+    )
+    if flow_state == "IN":
+        sigs += "\n💸 *Sector Flow:* `سيولة داخلة ✅`"
+    elif flow_state == "OUT":
+        sigs += "\n📤 *Sector Flow:* `سيولة خارجة ⚠️`"
 
     ob_txt = ""
     if ob:
@@ -1547,7 +1583,7 @@ def deep_scan(symbol, price, change):
     mkt_icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"⚪")
 
     send(
-        "👑 *MAFIO BOT V10*\n"
+        "👑 *MAFIO BOT V11*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *{sym}*\n"
         "{label} | {stype}\n"
@@ -1633,10 +1669,16 @@ def send_report():
         except: pass
     if not rows: return
     rows.sort(key=lambda x: -x[1])
-    msg = "📊 *PERFORMANCE REPORT V10*\n🕐 `{}`\n\n".format(
+    msg = "📊 *PERFORMANCE REPORT V11*\n🕐 `{}`\n\n".format(
         datetime.now().strftime("%Y-%m-%d %H:%M"))
     for sym, gr, sc in rows[:5]:
         msg += "🔥 *{}* `+{:.2f}%` Score:{}\n".format(sym, gr, sc)
+
+    # 🆕 إضافة ملخص السيولة
+    msg += "\n━━━━━━━━━━━━━━━━━━\n"
+    msg += "💸 *حالة السيولة:*\n"
+    msg += get_flow_summary()
+
     send(msg)
 
 
@@ -1644,28 +1686,28 @@ def send_report():
 #   MAIN LOOP
 # ═══════════════════════════════════════════════
 def run():
+    # type: () -> None
+    global all_tickers   # ✅ إصلاح V11: تأكيد أن all_tickers global
     global last_tickers, last_btc, last_sectors
     global last_deep_scan, last_stale, last_smart_money
 
-    log.info("🚀 MAFIO BOT V10 يبدأ...")
+    log.info("🚀 MAFIO BOT V11 يبدأ...")
 
-    # ── تهيئة كاملة قبل البدء ──────────────────
     log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
 
-    # نكرر refresh_tickers مرتين للتأكد من البيانات
     refresh_tickers()
     time.sleep(2)
-    refresh_tickers()   # مرة ثانية للتأكد
+    refresh_tickers()
 
     analyze_sectors()
     log.info("✅ جاهز | Candidates: %d | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
-    last_deep_scan = 0  # نبدأ Deep Scan فوراً
+    last_deep_scan = 0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V10*\n"
+        "🤖 *MAFIO BOT SIGNAL V11*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -1673,6 +1715,8 @@ def run():
         "✅ Sector Rotation (12 قطاع)\n"
         "✅ Score Min: `{score}` | Deep Scan: كل ساعة\n"
         "✅ Anti P&D | Supertrend | Dynamic SL\n"
+        "🆕 Sector Flow Tracker — تتبع السيولة\n"
+        "🆕 Score أدق: Flow Bonus + BTC Penalty\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "₿ BTC: `{btc:+.2f}%` | السوق: `{mst}`\n"
         "🔥 Hot: `{hot}`".format(
@@ -1685,11 +1729,13 @@ def run():
     )
 
     cycle = 0
+    flow_cycle = 0  # عداد لتحليل Flow كل 5 دورات (~60 ثانية)
+
     while True:
         try:
             now = time.time()
 
-            # ── تحديثات دورية ────────────────────────
+            # تحديثات دورية
             if now - last_btc         >= BTC_EVERY:         analyze_btc()
             if now - last_sectors     >= SECTORS_EVERY:     analyze_sectors()
             if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
@@ -1697,25 +1743,29 @@ def run():
                 cleanup()
                 last_stale = now
 
-            # ── جلب 24h Ticker (كل دورة = طلب واحد) ──
-            # يحتوي على السعر + الحجم + التغيير = كل ما نحتاج
+            # جلب 24h Ticker
             tickers_now = safe_get(MEXC_24H)
             if not tickers_now:
                 time.sleep(CHECK_INTERVAL)
                 continue
 
-            # بناء الخرائط من الـ ticker
+            # ✅ إصلاح V11: تحديث all_tickers كـ global
+            all_tickers = tickers_now
+
+            # بناء الخرائط
             price_map  = {}
             change_now = {}
             vol_now    = {}
             high_map   = {}
             low_map    = {}
+            ticker_map = {}
+
             for t in tickers_now:
                 sym = t.get("symbol","")
+                ticker_map[sym] = t
                 try:
                     last  = float(t["lastPrice"])
                     open_ = float(t.get("openPrice", last))
-                    # حساب تغيير 24h حقيقي من openPrice
                     real_change = (last - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
                     price_map[sym]  = last
                     change_now[sym] = real_change
@@ -1725,26 +1775,31 @@ def run():
                 except (KeyError, ValueError):
                     pass
 
-            # تحديث all_tickers و changes_map للقطاعات
-            all_tickers = tickers_now
             changes_map.update(change_now)
 
-            # تحديث candidates كل 15 دقيقة فقط
             if now - last_tickers >= TICKERS_EVERY:
                 refresh_tickers()
-                analyze_sectors()  # تحديث القطاعات بعد كل refresh
+                analyze_sectors()
 
-            # ── Trailing Stop + Signal Progression ──────
+            # Trailing Stop + Signal Progression
             for sym in list(tracked.keys()):
                 if sym in price_map:
                     if not check_trailing(sym, price_map[sym]):
                         check_progression(sym, price_map[sym])
 
-            # ── 🆕 Momentum Detector (كل 12 ثانية) ──────
-            # يرصد تحرك السعر اللحظي ويطلق Deep Scan فوراً
+            # 🆕 Sector Flow: تجميع لقطات كل دورة
+            update_sector_flow(ticker_map)
+            flow_cycle += 1
+
+            # 🆕 Sector Flow: تحليل كل 5 دورات (~60 ثانية)
+            if flow_cycle >= FLOW_WINDOW:
+                analyze_sector_flow()
+                flow_cycle = 0
+
+            # Momentum Detector
             detect_momentum(price_map, change_now, vol_now, high_map, low_map)
 
-            # ── Deep Scan كل 15 دقيقة ────────────────────
+            # Deep Scan
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
                 log.info("🔍 Deep Scan — %d عملة...", len(candidates))
                 scanned = 0
@@ -1765,7 +1820,7 @@ def run():
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            send("⛔ *MAFIO BOT V10* — تم الإيقاف")
+            send("⛔ *MAFIO BOT V11* — تم الإيقاف")
             break
         except Exception as e:
             log.error("خطأ: %s", e, exc_info=True)
