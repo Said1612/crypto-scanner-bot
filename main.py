@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO BOT SIGNAL V15 — UNIFIED ENGINE            ║
+║           MAFIO BOT SIGNAL V16 — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
 ║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -59,7 +59,7 @@ BTC_CAUTION_ZONE   = -1.5
 BTC_DANGER_BUFFER  = 0.3   # يدخل DANGER عند -3.3% | يخرج عند -2.7%
 BTC_CAUTION_BUFFER = 0.3   # يدخل CAUTION عند -1.8% | يخرج عند -1.2%
 # عدد المرات المتتالية للتأكيد قبل تغيير الحالة
-BTC_CONFIRM_COUNT  = 3     # 3 × 30 دقيقة = 90 دقيقة تأكيد
+BTC_CONFIRM_COUNT  = 1     # ⚡ قراءة واحدة فقط (كان 3 = 90 دقيقة)
 
 # ── Supertrend ───────────────────────────────────
 ST_ATR_PERIOD      = 10
@@ -82,7 +82,7 @@ MAX_VOL_USDT       = 80_000_000
 MIN_BID_DEPTH      = 20_000
 MIN_IMBALANCE      = 0.8
 MAX_IMBALANCE      = 3.0
-GREEN_MIN_RATIO    = 0.60
+GREEN_MIN_RATIO    = 0.45  # ⚡ تخفيف (كان 0.60) — يقبل سوق يرتفع فجأة
 HIGHER_LOWS_MIN    = 0.60
 
 # ── Pre-Breakout (4h) ────────────────────────────
@@ -100,7 +100,7 @@ PRE_MAX_VOL        = MAX_VOL_USDT
 # ── توقيتات الدورات ──────────────────────────────
 PRICES_EVERY       = 12
 TICKERS_EVERY      = 1800
-BTC_EVERY          = 1800
+BTC_EVERY          = 300   # ⚡ كل 5 دقائق (كان 30)
 SECTORS_EVERY      = 1800
 DEEP_SCAN_EVERY    = 3600
 STALE_EVERY        = 3600
@@ -160,6 +160,19 @@ BACKTEST_CHECK_1H  = 3600     # 1 ساعة
 BACKTEST_CHECK_4H  = 14400    # 4 ساعات
 BACKTEST_CHECK_24H = 86400    # 24 ساعة
 BACKTEST_FEE       = 0.2      # 🆕 V15: رسوم التداول الواقعية (0.1% دخول + 0.1% خروج)
+
+# ══════════════════════════════════════════════════════════════
+# 🆕 V16: LIQUIDITY ZONES — مناطق السيولة اليومية
+# ══════════════════════════════════════════════════════════════
+# منطق: إغلاق يومي فوق Zone = سيولة شرائية ✅
+#        إغلاق يومي تحت Zone = سيولة بيعية  ❌
+LZ_TOUCHES_MIN     = 3        # أدنى عدد لمسات للمنطقة (= Sigma)
+LZ_TOUCHES_RARE    = 8        # نادر جداً 🐋🔥
+LZ_VOL_MULT        = 1.5      # الحجم يجب أن يكون 1.5× المعدل
+LZ_LOOKBACK        = 90       # عدد الشمعات اليومية للبحث (90 يوم)
+LZ_ZONE_MARGIN     = 0.02     # 2% هامش للمنطقة
+LZ_COOLDOWN        = 86400    # 24 ساعة بين إشارات نفس العملة
+LZ_SCORE_MIN       = 60       # حد أدنى للـ Score للإشارة اليومية
 
 # ── Smart Money ──────────────────────────────────
 SMART_MONEY_SIGMA      = 3.0
@@ -536,6 +549,10 @@ last_daily_report = 0.0    # 🆕 V15: آخر تقرير يومي عند 00:00 U
 # 🆕 V15: تاريخ حجم السوق اليومي للمقارنة
 daily_market_vol_history = []  # type: List[float]   [أمس, اليوم]
 daily_report_sent_date   = ""  # type: str            تاريخ آخر تقرير أُرسل
+
+# 🆕 V16: Liquidity Zones
+lz_alerted         = {}   # type: Dict[str, float]  {sym: last_alert_time}
+lz_daily_sent_date = ""   # type: str               تاريخ آخر فحص يومي
 
 stable_vol_history = {}   # type: Dict[str, List[float]]
 smart_money_alert  = False
@@ -2610,6 +2627,304 @@ def cleanup():
 #   تقرير يومي شامل عند إغلاق الشمعة اليومية
 #   يكشف: هل الحيتان داخل السوق أم خارجه؟
 # ═══════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════
+#   🆕 V16: LIQUIDITY ZONES ENGINE
+#   يكتشف مناطق السيولة ديناميكياً من الشمعات اليومية
+#   ويرسل إشارة عند الإغلاق فوق/تحت المنطقة
+# ═══════════════════════════════════════════════════════════════
+
+def detect_liquidity_zones(kd_daily):
+    # type: (Dict) -> List[Dict]
+    """
+    V16 SAVAGE — اكتشاف مناطق السيولة
+    نوعان:
+    1. FRESH: سعر جديد منخفض + حجم ضخم (3x) = الحيتان يشترون في منطقة جديدة
+    2. REPEAT: لمسات متعددة + حجم مرتفع = دعم كلاسيكي مؤكد
+    """
+    if not kd_daily:
+        return []
+
+    highs  = kd_daily["highs"]
+    lows   = kd_daily["lows"]
+    vols   = kd_daily["vols"]
+    closes = kd_daily["closes"]
+    n      = len(highs)
+
+    if n < 15:
+        return []
+
+    avg_vol = sum(vols) / n
+    if avg_vol <= 0:
+        return []
+
+    zones = []
+
+    for i in range(3, n):
+        zone_high  = highs[i]
+        zone_low   = lows[i]
+        zone_vol   = vols[i]
+        zone_mid   = (zone_high + zone_low) / 2.0
+
+        if zone_mid <= 0 or zone_high <= zone_low:
+            continue
+
+        vol_ratio = zone_vol / avg_vol
+
+        # ── النوع 1: FRESH ZONE ──────────────────────
+        # سعر جديد منخفض تاريخياً + حجم 3x المعدل
+        is_new_low   = zone_low <= min(lows[:i])
+        is_vol_spike = vol_ratio >= 3.0
+
+        if is_new_low and is_vol_spike:
+            sigma = min(int(vol_ratio * 3), 20)
+            zone  = {
+                "high": zone_high, "low": zone_low, "mid": zone_mid,
+                "sigma": sigma, "vol": zone_vol,
+                "vol_ratio": round(vol_ratio, 1),
+                "type": "FRESH", "index": i,
+            }
+            dup = False
+            for z in zones:
+                if z["mid"] > 0 and abs(z["mid"] - zone_mid) / z["mid"] < 0.03:
+                    if sigma > z["sigma"]:
+                        z.update(zone)
+                    dup = True
+                    break
+            if not dup:
+                zones.append(zone)
+            continue
+
+        # ── النوع 2: REPEAT ZONE ─────────────────────
+        # لمسات متعددة + حجم مرتفع
+        if vol_ratio < LZ_VOL_MULT:
+            continue
+
+        touches    = 0
+        vol_touches = 0.0
+        for j in range(n):
+            if j == i:
+                continue
+            if (lows[j]  <= zone_high * (1 + LZ_ZONE_MARGIN) and
+                highs[j] >= zone_low  * (1 - LZ_ZONE_MARGIN)):
+                touches     += 1
+                vol_touches += vols[j]
+
+        if touches < LZ_TOUCHES_MIN:
+            continue
+
+        avg_touch_vol = vol_touches / touches if touches > 0 else 0
+        sigma = min(touches + int(avg_touch_vol / avg_vol), 20)
+
+        zone = {
+            "high": zone_high, "low": zone_low, "mid": zone_mid,
+            "sigma": sigma, "vol": zone_vol,
+            "vol_ratio": round(vol_ratio, 1),
+            "touches": touches, "type": "REPEAT", "index": i,
+        }
+        dup = False
+        for z in zones:
+            if z["mid"] > 0 and abs(z["mid"] - zone_mid) / z["mid"] < 0.03:
+                if sigma > z["sigma"]:
+                    z.update(zone)
+                dup = True
+                break
+        if not dup:
+            zones.append(zone)
+
+    # FRESH اولاً ثم Sigma تنازلياً
+    zones.sort(key=lambda z: (0 if z["type"] == "FRESH" else 1, -z["sigma"]))
+    return zones[:5]
+
+
+def check_liquidity_breakout(sym, price, daily_close, zones):
+    # type: (str, float, float, List[Dict]) -> Optional[Dict]
+    """
+    V16 SAVAGE — التحقق من الاختراق
+    يعطي أولوية لـ FRESH ZONE على REPEAT ZONE
+    """
+    if not zones:
+        return None
+
+    for zone in zones:
+        zone_high  = zone["high"]
+        zone_low   = zone["low"]
+        sigma      = zone["sigma"]
+        zone_type  = zone.get("type", "REPEAT")
+        vol_ratio  = zone.get("vol_ratio", 1.0)
+
+        # هامش الاختراق
+        margin = LZ_ZONE_MARGIN * (0.3 if zone_type == "FRESH" else 0.5)
+
+        # إغلاق فوق المنطقة = سيولة شرائية
+        if daily_close > zone_high * (1 + margin):
+            target_pct = round((zone_high / zone_low - 1) * 100, 1) if zone_low > 0 else 0
+            return {
+                "type":       "BUY",
+                "zone_type":  zone_type,
+                "zone_high":  zone_high,
+                "zone_low":   zone_low,
+                "sigma":      sigma,
+                "vol_ratio":  vol_ratio,
+                "close":      daily_close,
+                "target_pct": target_pct,
+            }
+
+        # تحت المنطقة — تجاهل (لا نرسل إشارات بيع)
+
+    return None
+
+
+def sigma_label(sigma):
+    # type: (int) -> str
+    """تحويل Sigma إلى وصف مع emoji"""
+    if sigma >= LZ_TOUCHES_RARE:
+        return "🐋🔥 نادر جداً ({}/تاريخ)".format(sigma)
+    elif sigma >= 5:
+        return "⭐ قوي ({} لمسات)".format(sigma)
+    else:
+        return "✅ عادي ({} لمسات)".format(sigma)
+
+
+def run_daily_liquidity_scan():
+    # type: () -> None
+    """
+    🆕 V16: الفحص اليومي للسيولة عند 00:00 UTC
+    يفحص كل العملات على الإطار اليومي 1D
+    يرسل إشارة لكل عملة أغلقت فوق/تحت منطقة سيولة
+    """
+    global lz_daily_sent_date, lz_alerted
+
+    now_utc = datetime.utcnow()
+    today   = now_utc.strftime("%Y-%m-%d")
+
+    # مرة واحدة في اليوم عند 00:00→00:10 UTC
+    if lz_daily_sent_date == today:
+        return
+    if now_utc.hour != 0 or now_utc.minute > 10:
+        return
+
+    lz_daily_sent_date = today
+    log.info("🌊 V16: بدء الفحص اليومي للسيولة...")
+
+    signals_found = 0
+
+    for sym in list(candidates):
+        # تجنب التكرار
+        last_alert = lz_alerted.get(sym, 0)
+        if time.time() - last_alert < LZ_COOLDOWN:
+            continue
+
+        # جلب شمعات يومية
+        kd_daily = get_klines(sym, "1d", LZ_LOOKBACK)
+        if not kd_daily or len(kd_daily.get("closes", [])) < 20:
+            continue
+
+        closes = kd_daily["closes"]
+        daily_close = closes[-1]   # آخر إغلاق يومي
+
+        # اكتشاف مناطق السيولة
+        zones = detect_liquidity_zones(kd_daily)
+        if not zones:
+            continue
+
+        # هل أغلق فوق/تحت منطقة؟
+        signal = check_liquidity_breakout(sym, daily_close, daily_close, zones)
+        if not signal:
+            continue
+
+        # فقط إشارات الشراء — البيع للتحذير فقط
+        if signal["type"] == "SELL":
+            continue
+
+        zone_high  = signal["zone_high"]
+        zone_low   = signal["zone_low"]
+        sigma      = signal["sigma"]
+        vol_ratio  = signal.get("vol_ratio", 1.0)
+        zone_type  = signal.get("zone_type", "REPEAT")
+        sig_label  = sigma_label(sigma)
+
+        # نوع المنطقة
+        if zone_type == "FRESH":
+            type_tag = "🆕 *منطقة جديدة* — سعر تاريخي جديد + حجم ضخم"
+            type_icon = "🆕"
+        else:
+            type_tag = "🔁 *منطقة متكررة* — دعم مؤكد بالحجم"
+            type_icon = "🔁"
+
+        # حساب الهدف ووقف الخسارة
+        sl_pct     = round((daily_close - zone_low) / daily_close * 100, 2) if daily_close > 0 else 0
+        target_pct = round((zone_high / zone_low - 1) * 100, 1) if zone_low > 0 else 0
+
+        # القطاع
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+
+        # إشارة نادرة؟
+        rare_tag = "\n🐋🔥 *RARE — نادر جداً!*" if sigma >= LZ_TOUCHES_RARE else ""
+
+        msg = (
+            "🌊 *DAILY LIQUIDITY SIGNAL V16*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🟢 *{sym}* — سيولة شرائية\n"
+            "{type_tag}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 *منطقة السيولة:*\n"
+            "  🔼 Zone High: `{zh}`\n"
+            "  🔽 Zone Low:  `{zl}`\n"
+            "  💧 Sigma: {sl}\n"
+            "  📦 حجم المنطقة: `{vr}×` المعدل\n"
+            "{rare}"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💵 الإغلاق اليومي: `{close}`\n"
+            "✅ أغلق فوق المنطقة\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🎯 *نقطة الدخول:*  `{close}`\n"
+            "🛡️ *وقف الخسارة:* `{zl}` (-{sl_pct}%)\n"
+            "🚀 *الهدف:*        `{zh}` (+{tgt}%)\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🏷️ القطاع: `{sector}` | السوق: `{mst}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚡ _إشارة يومية — دخول عند الإغلاق_\n"
+            "🔄 _Backtest سيصل: 1h / 4h / 24h_"
+        ).format(
+            sym=sym.replace("USDT", ""),
+            type_tag=type_tag,
+            zh=round(zone_high, 8),
+            zl=round(zone_low, 8),
+            sl=sig_label,
+            vr=vol_ratio,
+            rare=rare_tag,
+            close=round(daily_close, 8),
+            sl_pct=sl_pct,
+            tgt=target_pct,
+            sector=sector,
+            mst=market_state,
+        )
+
+        send(msg)
+        lz_alerted[sym] = time.time()
+        register_backtest(sym, daily_close, sector)
+        signals_found += 1
+        log.info("🌊 Daily LZ Signal | %s | sigma=%d | close=%.8f",
+                 sym, sigma, daily_close)
+
+        time.sleep(1)  # لا نضغط على Telegram
+
+    log.info("🌊 Daily Liquidity Scan انتهى | إشارات: %d", signals_found)
+
+    if signals_found == 0:
+        send(
+            "🌊 *DAILY LIQUIDITY SCAN*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📅 `{}` — إغلاق اليوم\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "😴 لا توجد إشارات سيولة اليوم\n"
+            "السوق: `{}` | العملات المفحوصة: `{}`".format(
+                today, market_state, len(candidates)
+            )
+        )
+
+
 def send_daily_report():
     # type: () -> None
     global daily_report_sent_date, daily_market_vol_history
@@ -2784,12 +3099,7 @@ def send_daily_report():
 
     # أفضل/أسوأ العملات
     gainers_txt = ""
-    for base, ch, vol in top_gainers[:3]:
-        gainers_txt += "  🟢 *{}* `+{:.1f}%`\n".format(base, ch)
-
-    losers_txt = ""
-    for base, ch, vol in top_losers[:3]:
-        losers_txt += "  🔴 *{}* `{:.1f}%`\n".format(base, ch)
+    losers_txt  = ""
 
     # مؤشر السوق
     mkt_bar_green = int(rising_pct / 10)
@@ -2822,11 +3132,6 @@ def send_daily_report():
         "💵 *أكبر Stablecoins اليوم:*\n"
         "{stables}"
         "━━━━━━━━━━━━━━━━━━\n"
-        "🏆 *أفضل 3 عملات:*\n"
-        "{gainers}"
-        "📉 *أسوأ 3 عملات:*\n"
-        "{losers}"
-        "━━━━━━━━━━━━━━━━━━\n"
         "💸 *تدفق السيولة بين القطاعات:*\n"
         "{flow}"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -2845,8 +3150,6 @@ def send_daily_report():
         total_vol=total_market_vol / 1_000_000,
         whale=whale_txt,
         stables=stable_txt,
-        gainers=gainers_txt if gainers_txt else "  لا بيانات\n",
-        losers=losers_txt if losers_txt else "  لا بيانات\n",
         flow=flow_sum,
         action=whale_action,
     )
@@ -2898,8 +3201,9 @@ def run():
     global last_tickers, last_btc, last_sectors
     global last_deep_scan, last_stale, last_smart_money, last_expand
     global last_daily_report, daily_report_sent_date
+    global lz_daily_sent_date, lz_alerted   # 🆕 V16
 
-    log.info("🚀 MAFIO BOT V15 يبدأ...")
+    log.info("🚀 MAFIO BOT V16 يبدأ...")
 
     log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
@@ -2908,7 +3212,6 @@ def run():
     time.sleep(2)
     refresh_tickers()
 
-    # 🆕 V12: توسيع القوائم تلقائياً عند البدء
     log.info("🔍 تشغيل Auto Expand Sectors...")
     auto_expand_sectors()
     last_expand = time.time()
@@ -2920,25 +3223,27 @@ def run():
     last_deep_scan = 0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V15*\n"
+        "🤖 *MAFIO BOT SIGNAL V16*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
         "✅ Trailing Stop (`{trail}%` من القمة)\n"
         "✅ Sector Rotation (12 قطاع)\n"
-        "✅ Score Min: `{score}` | Deep Scan: كل ساعة\n"
         "✅ Anti P&D | Supertrend | Dynamic SL\n"
-        "✅ Sector Flow Tracker — تتبع السيولة\n"
-        "🆕 V15: RSI Filter (رفض RSI > 70)\n"
-        "🆕 V15: Vol تاريخي للعملة نفسها\n"
-        "🆕 V15: Backtest تلقائي (1h/4h/24h)\n"
-        "🆕 V15: تصحيح جميع رموز SECTORS\n"
+        "✅ Sector Flow Tracker\n"
+        "✅ Buffer System (منع التذبذب)\n"
+        "✅ Daily Market Report (00:00 UTC)\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🆕 V16: 🌊 Liquidity Zones يومية\n"
+        "🆕 V16: Sigma تلقائي من التاريخ\n"
+        "🆕 V16: إشارة عند الإغلاق فوق Zone\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚡ إشارات سريعة: 15m/1h (مستمر)\n"
+        "📅 إشارات يومية: 1D (00:00 UTC)\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "₿ BTC: `{btc:+.2f}%` | السوق: `{mst}`\n"
-        "🔥 Hot: `{hot}`\n"
-        "📋 القوائم: جاري التوسيع...".format(
+        "🔥 Hot: `{hot}`".format(
             trail=TRAIL_DROP_TRIGGER,
-            score=SCORE_MIN,
             btc=btc_change_24h,
             mst=market_state,
             hot=", ".join(hot_sectors) or "لا يوجد",
@@ -2959,6 +3264,7 @@ def run():
 
             # 🆕 V15: تقرير يومي عند 00:00 UTC
             send_daily_report()
+            run_daily_liquidity_scan()   # 🆕 V16: فحص السيولة اليومي
             if now - last_expand      >= EXPAND_EVERY:
                 # 🆕 V12: توسيع يومي تلقائي للقوائم
                 log.info("🔄 تحديث يومي — Auto Expand Sectors")
