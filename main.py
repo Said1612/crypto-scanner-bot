@@ -2603,71 +2603,62 @@ def scan_sector_activity():
     #  الخطوة 3: بناء التقرير
     # ═══════════════════════════════════════════
 
-    # ── القطاعات النشطة ───────────────────────
+    # ── القطاعات الساخنة فقط ──────────────────
     sector_lines = ""
+    icons = ["🔥","⚡","📈","📊","📊"]
     for i, (sector, st) in enumerate(sorted_sectors[:5]):
-        if i == 0:
-            icon = "🔥"
-        elif i == 1:
-            icon = "⚡"
-        elif i == 2:
-            icon = "📈"
-        else:
-            icon = "📊"
-
-        top_coins = " | ".join(
-            "{} `+{:.0f}%`".format(c, p)
-            for c, p in st["rising"][:3]
-        ) if st["rising"] else "_لا يوجد_"
-
-        sector_lines += (
-            "{icon} *{sec}* — avg:`{avg:+.1f}%` | {rp:.0f}% صاعد\n"
-            "   {coins}\n"
-        ).format(
-            icon=icon, sec=sector,
-            avg=st["avg"], rp=st["rising_pct"],
-            coins=top_coins,
+        vol_m = st["vol"] / 1_000_000
+        sector_lines += "{} *{}* — {}% صاعد | `{:.1f}M`\n".format(
+            icons[min(i,4)], sector,
+            int(st["rising_pct"]), vol_m,
         )
 
-    # ── تجميع الحيتان ─────────────────────────
+    # ── تجميع الحيتان — قيعان فقط ────────────
+    # تجاهل: صاعدة > 5% (فات) أو نازلة < -15% (خطر)
     whale_lines = ""
-    if whale_accumulation:
-        for w in whale_accumulation[:8]:
-            indicators = []
-            if w["near_bottom"]:  indicators.append("📍قاع")
-            if w["high_vol"]:     indicators.append("📊{}×".format(w["vol_ratio"]))
-            if w["compressed"]:   indicators.append("🔒مضغوط")
+    shown = 0
+    for w in whale_accumulation:
+        if w["ch"] > 5 or w["ch"] < -15:
+            continue
 
-            whale_lines += (
-                "  🐋 *{base}* `{ch:+.1f}%` | {ind}\n"
-            ).format(
-                base=w["base"],
-                ch=w["ch"],
-                ind=" ".join(indicators),
-            )
-    else:
+        in_hot = any(w["sym"] in SECTORS.get(s,[]) for s in hot_sectors)
+        pri    = "🔥" if in_hot else "🐋"
+        ind    = []
+        if w["near_bottom"]: ind.append("📍قاع")
+        if w["high_vol"]:    ind.append("📊{}×".format(w["vol_ratio"]))
+        if w["compressed"]:  ind.append("🔒مضغوط")
+
+        whale_lines += "  {} *{}* `{:+.1f}%` | {} | `{:.1f}M`\n".format(
+            pri, w["base"], w["ch"],
+            " ".join(ind), w["vol"]/1_000_000,
+        )
+        shown += 1
+        if shown >= 8: break
+
+    if not whale_lines:
         whale_lines = "  _لا يوجد تجميع واضح الآن_\n"
 
     # ── حالة السوق ────────────────────────────
-    total   = sum(1 for t in all_tickers if t.get("symbol","").endswith("USDT"))
-    rising  = sum(1 for t in all_tickers
-                  if t.get("symbol","").endswith("USDT")
-                  and float(t.get("priceChangePercent",0)) > 0)
-    rp      = rising / total * 100 if total > 0 else 0
+    total    = sum(1 for t in all_tickers if t.get("symbol","").endswith("USDT"))
+    rising_n = sum(1 for t in all_tickers
+                   if t.get("symbol","").endswith("USDT")
+                   and float(t.get("priceChangePercent",0)) > 0)
+    rp       = rising_n / total * 100 if total > 0 else 0
     mkt_icon = "🟢" if rp >= 55 else "🔴" if rp <= 40 else "🟡"
 
     msg = (
         "🌊 *SECTOR ACTIVITY REPORT*\n"
         "🕐 `{time}`\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 *أكثر القطاعات نشاطاً:*\n"
+        "🔥 *القطاعات الساخنة:*\n"
         "{sectors}\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "🐋 *تجميع الحيتان (قيعان):*\n"
+        "🐋 *تجميع في القيعان:*\n"
+        "🔥قطاع ساخن | 🐋عادي\n"
         "{whales}\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "{mkt} السوق: `{rp:.0f}%` صاعد | BTC: `{btc:+.2f}%`\n"
-        "💡 _هذه العملات في قيعانها — الحيتان يجمعون_"
+        "{mkt} `{rp:.0f}%` صاعد | ₿ `{btc:+.2f}%`\n"
+        "⚡ _انتظر Momentum + Signal للدخول_"
     ).format(
         time=datetime.now().strftime("%H:%M:%S"),
         sectors=sector_lines,
