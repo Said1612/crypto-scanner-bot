@@ -205,7 +205,10 @@ MEXC_PRICE  = "https://api.mexc.com/api/v3/ticker/price"
 MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
 MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
 
-EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
+EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
+            # عملات مشبوهة أو مستقرة تظهر في النتائج
+            "EURUSDT","STABLEUSDT","UCNUSDT","VERMUSDT",
+            "BDXUSDT","POLXUSDT","MBGUSDT","L3USDT","VERMUSDT"}
 
 # ── 🆕 Auto Expand Sectors ───────────────────────
 SECTOR_TARGET      = 50       # الهدف: 50 عملة لكل قطاع
@@ -571,11 +574,14 @@ hidden_accum_alerted = {}  # type: Dict[str, float]  {sym: last_alert_time}
 
 stable_vol_history = {}   # type: Dict[str, List[float]]
 smart_money_alert  = False
-smart_money_bonus  = 0    # 🆕 مكافأة Score عند تجميع الحيتان
+smart_money_bonus  = 0
 
 price_prev         = {}   # type: Dict[str, float]
 momentum_alerted   = {}   # type: Dict[str, float]
 momentum_stage     = {}   # type: Dict[str, Dict]
+
+# 🆕 قائمة المراقبة — قطاع ساخن + تجميع حيتان
+watchlist          = {}   # type: Dict[str, Dict]
 
 # 🆕 Sector Flow Tracker State
 sector_vol_snapshots = {}  # type: Dict[str, List[float]]   {sector: [vol1, vol2, ...]}
@@ -1956,15 +1962,21 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
 
         if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN: continue
 
+        # 🆕 إذا في Watchlist → تخفيف الـ cooldown (أولوية)
+        if sym in watchlist:
+            if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN / 3:
+                continue
+
         momentum_alerted[sym] = now
 
         sector         = next((s for s, syms in SECTORS.items() if sym in syms), "")
         in_hot         = sym in hot_symbols
+        in_watchlist   = sym in watchlist
+        wl_tag         = " 👁️ *مراقبة*" if in_watchlist else ""
         hot_tag        = " 🔥 *{}*".format(sector) if in_hot else ""
         rebound        = (price - low_24h) / low_24h * 100 if low_24h > 0 else 0
         drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
-        # 🆕 تحقق إذا القطاع يستقبل سيولة الآن
         flow_state = sector_flow_state.get(sector, "NEUTRAL")
         flow_tag   = " 💸 *سيولة داخلة*" if flow_state == "IN" else ""
 
@@ -1983,25 +1995,30 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                  sym, move, change_24h, vol, sector, flow_state)
 
         send(
-            "🔵 *Momentum Detected*{hot}{flow}\n"
+            "🔵 *Momentum Detected*{hot}{flow}{wl}\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💰 *{sym}*  |  🏷️ `{sector}`\n"
             "📈 تحرك لحظي: `+{move:.2f}%`\n"
-            "📊 تغيير 24h: `+{ch:.1f}%`\n"
+            "📊 تغيير 24h: `{ch:+.1f}%`\n"
             "💧 حجم: `{vol:,.0f}`\n"
             "💵 السعر: `{price}`\n"
             "📉 من القمة: `-{drop:.1f}%` | ارتداد: `+{reb:.1f}%`\n"
             "{top}"
             "🕐 `{time}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "👀 _مراقبة — انتظر إشعار التأكيد_".format(
-                hot=hot_tag, flow=flow_tag,
+            "{action}".format(
+                hot=hot_tag, flow=flow_tag, wl=wl_tag,
                 sym=sym, sector=sector if sector else "—",
                 move=move, ch=change_24h, vol=vol,
                 price=format_price(price),
                 drop=drop_from_high, reb=rebound,
                 top="🏆 *أفضل عملات القطاع:*\n{}\n".format(top10_txt) if top10_txt else "",
                 time=datetime.now().strftime("%H:%M:%S"),
+                action=(
+                    "🎯 *في قائمة المراقبة — جاهز للإشارة!*"
+                    if in_watchlist else
+                    "👀 _مراقبة — انتظر إشعار التأكيد_"
+                ),
             )
         )
 
@@ -2207,14 +2224,12 @@ def scan_sector_activity():
             if sym not in ticker_map:
                 continue
             try:
-                t     = ticker_map[sym]
-                last  = float(t["lastPrice"])
-                open_ = float(t.get("openPrice", last))
-                # حساب التغيير الحقيقي من open
-                ch  = (last - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
+                t   = ticker_map[sym]
+                # استخدام priceChangePercent مباشرة (أكثر دقة من MEXC)
+                ch  = float(t["priceChangePercent"])
                 vol = float(t["quoteVolume"])
+                last = float(t["lastPrice"])
 
-                # تجاهل العملات بدون حجم كافٍ
                 if vol < 50_000:
                     continue
 
@@ -2275,8 +2290,7 @@ def scan_sector_activity():
             high   = float(t["highPrice"])
             low    = float(t["lowPrice"])
             vol    = float(t["quoteVolume"])
-            open_  = float(t.get("openPrice", price))
-            ch     = (price - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
+            ch     = float(t["priceChangePercent"])
         except (KeyError, ValueError):
             continue
 
@@ -2328,6 +2342,46 @@ def scan_sector_activity():
     last_sector_report = time.time()
 
     # ═══════════════════════════════════════════
+    #  🆕 تحديث Watchlist
+    #  عملة في قطاع ساخن + تجميع حيتان = أولوية قصوى
+    # ═══════════════════════════════════════════
+    new_watchlist = {}
+    for w in whale_accumulation:
+        sym    = w["sym"]
+        sector = next((s for s, coins in SECTORS.items()
+                       if sym in coins and s in hot_sectors), "")
+        priority = "🔥 HIGH" if sector else "📊 NORMAL"
+
+        new_watchlist[sym] = {
+            "sector":   sector or "—",
+            "strength": w["strength"],
+            "ch":       w["ch"],
+            "vol":      w["vol"],
+            "priority": priority,
+            "added":    time.time(),
+        }
+
+    # إشعار بالعملات الجديدة في القائمة
+    newly_added = [s for s in new_watchlist if s not in watchlist]
+    watchlist.update(new_watchlist)
+
+    if newly_added:
+        hot_new = [s for s in newly_added
+                   if watchlist[s]["priority"] == "🔥 HIGH"]
+        if hot_new:
+            lines = ""
+            for s in hot_new[:5]:
+                w = watchlist[s]
+                lines += "  🔥 *{}* | قطاع: {} | قوة: {}/100\n".format(
+                    s.replace("USDT",""), w["sector"], w["strength"])
+            send(
+                "👁️ *عملات جديدة في قائمة المراقبة*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "{lines}\n"
+                "⚡ _انتظر Momentum + Signal للدخول_".format(lines=lines)
+            )
+
+    # ═══════════════════════════════════════════
     #  الخطوة 3: بناء التقرير
     # ═══════════════════════════════════════════
     sector_lines = ""
@@ -2377,14 +2431,16 @@ def scan_sector_activity():
         "🌊 *SECTOR ACTIVITY REPORT*\n"
         "🕐 `{time}`\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 *أكثر القطاعات نشاطاً (بالحجم):*\n"
+        "⚠️ _هذا تقرير رصد مبكر — ليس إشارة دخول_\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 *أكثر القطاعات نشاطاً:*\n"
         "{sectors}\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "🐋 *تجميع الحيتان (قيعان):*\n"
+        "🐋 *تجميع الحيتان في القيعان:*\n"
+        "⚠️ _انتظر إشارة Signal قبل الدخول_\n"
         "{whales}\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "{mkt} السوق: `{rp:.0f}%` صاعد | ₿ BTC: `{btc:+.2f}%`\n"
-        "💡 _الحيتان يجمعون في هذه العملات_"
+        "{mkt} السوق: `{rp:.0f}%` صاعد | ₿ BTC: `{btc:+.2f}%`"
     ).format(
         time=datetime.now().strftime("%H:%M:%S"),
         sectors=sector_lines,
@@ -3936,7 +3992,8 @@ def run():
     last_expand = time.time()
 
     analyze_sectors()
-    scan_sector_activity()   # 🆕 تقرير فوري عند البدء
+    scan_sector_activity()   # تقرير فوري عند البدء
+    last_sector_report = time.time()  # منع إرسال ثانٍ فوراً
     log.info("✅ جاهز | Candidates: %d | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
@@ -4071,11 +4128,17 @@ def run():
                     change = changes_map.get(sym, 0)
                     vol    = vol_now.get(sym, 0)
                     if price <= 0: continue
-                    # نقاط مبدئية سريعة بدون API
+
+                    in_hot       = sym in hot_symbols
+                    in_watchlist = sym in watchlist
+                    wl_priority  = watchlist.get(sym, {}).get("priority","") == "🔥 HIGH"
+
                     pre_score = (
-                        (vol / 1_000_000) * 0.5 +      # حجم
-                        max(change, 0) * 0.3 +          # تغيير إيجابي
-                        (1 if sym in hot_symbols else 0) * 2  # قطاع ساخن
+                        (vol / 1_000_000) * 0.5 +
+                        max(change, 0) * 0.3 +
+                        (2  if in_hot       else 0) +
+                        (5  if in_watchlist else 0) +   # 🆕 watchlist أولوية
+                        (10 if wl_priority  else 0)     # 🆕 قطاع ساخن + تجميع = أقصى أولوية
                     )
                     pre_scored.append((sym, price, change, pre_score))
 
