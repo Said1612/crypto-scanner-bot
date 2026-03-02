@@ -2268,6 +2268,8 @@ def scan_sector_activity():
         if not sym.endswith("USDT"): continue
         if sym in EXCLUDED: continue
 
+        base = sym.replace("USDT","")  # ← تعريف base أولاً
+
         try:
             price  = float(t["lastPrice"])
             high   = float(t["highPrice"])
