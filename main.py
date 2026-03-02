@@ -82,8 +82,20 @@ MAX_VOL_USDT       = 80_000_000
 MIN_BID_DEPTH      = 20_000
 MIN_IMBALANCE      = 0.8
 MAX_IMBALANCE      = 3.0
-GREEN_MIN_RATIO    = 0.45  # ⚡ تخفيف (كان 0.60) — يقبل سوق يرتفع فجأة
+GREEN_MIN_RATIO    = 0.45
 HIGHER_LOWS_MIN    = 0.60
+
+# ── 🆕 فلتر العملات المشبوهة ─────────────────────
+# عملة حقيقية يجب أن يكون حجمها اليومي كافياً
+WHALE_MIN_VOL      = 1_000_000   # حجم أدنى 1M USDT للحيتان
+WHALE_MAX_CHANGE   = 25.0        # تجاهل إذا ارتفعت أكثر من 25% (Pump)
+WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
+# عملات مشبوهة بالاسم — يتم تجاهلها دائماً
+SUSPICIOUS_KEYWORDS = [
+    "STABLE","PEGGED","WRAPPED","BRIDGE",
+    "EUR","GBP","CNY","JPY",   # عملات مربوطة بعملات أجنبية
+    "TEST","DEMO","FAKE",       # عملات تجريبية
+]
 
 # ── Pre-Breakout (4h) ────────────────────────────
 BO_4H_CANDLES      = 30
@@ -775,6 +787,45 @@ def is_stablecoin(sym, last_price=0.0, change=0.0):
     for kw in STABLE_KEYWORDS:
         if base.startswith(kw) or base.endswith(kw): return True
     if abs(change) < 0.5 and last_price > 0: return True
+    return False
+
+
+def is_suspicious(sym, price=0.0, vol=0.0, change=0.0):
+    # type: (str, float, float, float) -> bool
+    """
+    يكشف العملات المشبوهة والـ Pump & Dump:
+
+    ┌──────────────────────────────────────────┐
+    │  Pump & Dump علامات:                      │
+    │  1. حجم يومي منخفض جداً (سهل التلاعب)   │
+    │  2. سعر قريب من الصفر (micro cap)        │
+    │  3. ارتفاع مفاجئ كبير (Pump)             │
+    │  4. اسم مشبوه (STABLE, EUR, TEST...)     │
+    └──────────────────────────────────────────┘
+    """
+    base = sym.replace("USDT","")
+
+    # 1. Stablecoin
+    if is_stablecoin(sym, price, change):
+        return True
+
+    # 2. كلمات مشبوهة في الاسم
+    for kw in SUSPICIOUS_KEYWORDS:
+        if kw in base:
+            return True
+
+    # 3. حجم منخفض جداً = سهل التلاعب
+    if vol < WHALE_MIN_VOL:
+        return True
+
+    # 4. سعر قريب من الصفر = Micro Cap
+    if 0 < price < WHALE_MIN_PRICE:
+        return True
+
+    # 5. ارتفاع كبير جداً = Pump مكتمل (فات الوقت)
+    if change > WHALE_MAX_CHANGE:
+        return True
+
     return False
 
 
@@ -2134,20 +2185,216 @@ last_sector_report  = 0.0
 
 def scan_sector_activity():
     # type: () -> None
-    """
-    يرسل تقريراً بـ:
-    1. أكثر القطاعات نشاطاً (سيولة تدخل)
-    2. العملات التي يجمع فيها الحيتان (قيعان)
-
-    منطق تجميع الحيتان:
-    ┌─────────────────────────────────────────┐
-    │  السعر قريب من القاع (24h low)          │
-    │  + حجم مرتفع عن المعتاد                 │
-    │  + الشمعات لها ذيول سفلية               │
-    │  = الحيتان يشترون عند كل نزول ✅         │
-    └─────────────────────────────────────────┘
-    """
     global last_sector_report
+
+    if not all_tickers:
+        return
+
+    ticker_map = {t["symbol"]: t for t in all_tickers}
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 1: تحليل نشاط كل قطاع
+    # ═══════════════════════════════════════════
+    sector_stats = {}
+
+    for sector, coins in SECTORS.items():
+        changes  = []
+        vols     = []
+        rising   = []
+        falling  = []
+
+        for sym in coins:
+            if sym not in ticker_map:
+                continue
+            try:
+                t     = ticker_map[sym]
+                last  = float(t["lastPrice"])
+                open_ = float(t.get("openPrice", last))
+                # حساب التغيير الحقيقي من open
+                ch  = (last - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
+                vol = float(t["quoteVolume"])
+
+                # تجاهل العملات بدون حجم كافٍ
+                if vol < 50_000:
+                    continue
+
+                changes.append(ch)
+                vols.append(vol)
+                if ch > 0:
+                    rising.append((sym.replace("USDT",""), round(ch, 1), vol))
+                else:
+                    falling.append((sym.replace("USDT",""), round(ch, 1), vol))
+            except (KeyError, ValueError):
+                pass
+
+        if len(changes) < 2:
+            continue
+
+        avg_ch     = sum(changes) / len(changes)
+        total_vol  = sum(vols)
+        rising_pct = len(rising) / len(changes) * 100
+
+        # ترتيب حسب الحجم (الأكثر تداولاً أولاً)
+        rising.sort(key=lambda x: -x[2])
+
+        # نشاط القطاع = حجم + نسبة صاعدة + متوسط تغيير
+        activity_score = (
+            total_vol / 1_000_000 * 0.5 +
+            rising_pct * 0.3 +
+            max(avg_ch, 0) * 5
+        )
+
+        sector_stats[sector] = {
+            "avg":        avg_ch,
+            "vol":        total_vol,
+            "rising_pct": rising_pct,
+            "rising":     rising[:3],
+            "falling":    sorted(falling, key=lambda x: x[1])[:3],
+            "score":      activity_score,
+            "count":      len(changes),
+        }
+
+    if not sector_stats:
+        return
+
+    sorted_sectors = sorted(sector_stats.items(), key=lambda x: -x[1]["score"])
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 2: تجميع الحيتان — فلتر أقوى
+    # ═══════════════════════════════════════════
+    whale_accumulation = []
+
+    for sym, t in ticker_map.items():
+        if not sym.endswith("USDT"): continue
+        if sym in EXCLUDED: continue
+
+        try:
+            price  = float(t["lastPrice"])
+            high   = float(t["highPrice"])
+            low    = float(t["lowPrice"])
+            vol    = float(t["quoteVolume"])
+            open_  = float(t.get("openPrice", price))
+            ch     = (price - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        # ── فلتر العملات المشبوهة ─────────────────
+        if is_suspicious(sym, price, vol, ch):
+            continue
+
+        price_range = high - low
+        if price_range <= 0: continue
+
+        position_in_range = (price - low) / price_range
+        near_bottom  = position_in_range <= 0.30   # أسفل 30%
+
+        # تاريخ الحجم
+        hist = coin_vol_history.get(sym, [])
+        if len(hist) >= 3:
+            avg_hist = sum(hist[:-1]) / (len(hist) - 1)
+            vol_ratio = vol / avg_hist if avg_hist > 0 else 1.0
+        else:
+            vol_ratio = 1.0
+
+        high_vol       = vol_ratio >= 1.3
+        price_supported = -8 <= ch <= 3
+        range_pct      = price_range / low * 100
+        compressed     = range_pct <= 12
+
+        accum_strength = 0
+        if near_bottom:      accum_strength += 30
+        if high_vol:         accum_strength += 30
+        if price_supported:  accum_strength += 20
+        if compressed:       accum_strength += 20
+
+        if accum_strength < 60: continue
+
+        whale_accumulation.append({
+            "sym":       sym,
+            "base":      base,
+            "price":     price,
+            "ch":        ch,
+            "vol":       vol,
+            "vol_ratio": round(vol_ratio, 1),
+            "strength":  accum_strength,
+            "near_bottom": near_bottom,
+            "high_vol":    high_vol,
+            "compressed":  compressed,
+        })
+
+    whale_accumulation.sort(key=lambda x: (-x["strength"], -x["vol"]))
+    last_sector_report = time.time()
+
+    # ═══════════════════════════════════════════
+    #  الخطوة 3: بناء التقرير
+    # ═══════════════════════════════════════════
+    sector_lines = ""
+    for i, (sector, st) in enumerate(sorted_sectors[:5]):
+        icons = ["🔥","⚡","📈","📊","📊"]
+        icon  = icons[min(i, 4)]
+
+        # عرض أفضل 3 عملات بالحجم + التغيير
+        top_coins = " | ".join(
+            "*{}* `{:+.1f}%`".format(c, p)
+            for c, p, _ in st["rising"][:3]
+        ) if st["rising"] else "_لا يوجد صاعد_"
+
+        vol_m = st["vol"] / 1_000_000
+        sector_lines += (
+            "{icon} *{sec}* — avg:`{avg:+.1f}%` | {rp:.0f}% صاعد | حجم:`{vol:.1f}M`\n"
+            "   {coins}\n"
+        ).format(
+            icon=icon, sec=sector,
+            avg=st["avg"], rp=st["rising_pct"],
+            vol=vol_m, coins=top_coins,
+        )
+
+    whale_lines = ""
+    if whale_accumulation:
+        for w in whale_accumulation[:8]:
+            ind = []
+            if w["near_bottom"]: ind.append("📍قاع")
+            if w["high_vol"]:    ind.append("📊{}×".format(w["vol_ratio"]))
+            if w["compressed"]:  ind.append("🔒مضغوط")
+            vol_k = w["vol"] / 1_000
+            whale_lines += "  🐋 *{base}* `{ch:+.1f}%` | {ind} | vol:`{vol:.0f}K`\n".format(
+                base=w["base"], ch=w["ch"],
+                ind=" ".join(ind), vol=vol_k,
+            )
+    else:
+        whale_lines = "  _لا يوجد تجميع واضح الآن_\n"
+
+    total   = sum(1 for t in all_tickers if t.get("symbol","").endswith("USDT"))
+    rising  = sum(1 for t in all_tickers
+                  if t.get("symbol","").endswith("USDT")
+                  and float(t.get("priceChangePercent",0)) > 0)
+    rp      = rising / total * 100 if total > 0 else 0
+    mkt_icon = "🟢" if rp >= 55 else "🔴" if rp <= 40 else "🟡"
+
+    msg = (
+        "🌊 *SECTOR ACTIVITY REPORT*\n"
+        "🕐 `{time}`\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 *أكثر القطاعات نشاطاً (بالحجم):*\n"
+        "{sectors}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🐋 *تجميع الحيتان (قيعان):*\n"
+        "{whales}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{mkt} السوق: `{rp:.0f}%` صاعد | ₿ BTC: `{btc:+.2f}%`\n"
+        "💡 _الحيتان يجمعون في هذه العملات_"
+    ).format(
+        time=datetime.now().strftime("%H:%M:%S"),
+        sectors=sector_lines,
+        whales=whale_lines,
+        mkt=mkt_icon, rp=rp,
+        btc=btc_change_24h,
+    )
+
+    send(msg)
+    log.info("🌊 Sector Report | hot=%s | whale_accum=%d",
+             ", ".join(s for s, _ in sorted_sectors[:3]),
+             len(whale_accumulation))
 
     if not all_tickers:
         return
@@ -3687,6 +3934,7 @@ def run():
     last_expand = time.time()
 
     analyze_sectors()
+    scan_sector_activity()   # 🆕 تقرير فوري عند البدء
     log.info("✅ جاهز | Candidates: %d | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
