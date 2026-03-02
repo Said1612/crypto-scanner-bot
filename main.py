@@ -209,7 +209,7 @@ SECTOR_KEYWORDS = {
         "GRAPH","TAO","ARKM","COOKIE","MIRA","MYRIA","ALETH","CGPT",
         "NEURO","VANA","MASK","AKTO","MEAI","GRIFFAIN","SWARM",
         "AIDO","WLDAI","KAIA","VIRT","NMT","AUTON","PAAL","SLEEPLESS",
-        "QUBIC","AITECH","GENSYN","AIUS","KAITO","DEAI","OPML",
+        "QUBIC","AITECH","GENSYN","AIUS","KAITO","DEAI","OPML","DORA","VIRTUAL",
     ],
     "RWA": [
         "ONDO","CFG","MPLEX","REAL","TRST","PROM","MANTRA","XDC",
@@ -226,7 +226,7 @@ SECTOR_KEYWORDS = {
         "BEX","GOMA","ACE","META","WAXP","GAL","VIDYA","ELF","MAGIC",
         "TWT","GHST","TOWER","REVV","NFTX","MOBOX","SKILL","DERACE",
         "FIGHT","WARS","BATTLE","LEGEND","REALM","KART","SPORT","FAN",
-        "CHAMP","WIN","SUPER","GODS","AURY","ATLAS","POLIS","PVU",
+        "CHAMP","WIN","SUPER","GODS","AURY","ATLAS","POLIS","PVU","HMSTR",
     ],
     "DeFi": [
         "UNI","AAVE","CAKE","SUSHI","COMP","MKR","CRV","LDO","1INCH",
@@ -236,7 +236,7 @@ SECTOR_KEYWORDS = {
         "LIQUID","STAKE","VAULT","FARM","HARVEST","BADGER","BNT",
         "PERP","SNX","KNC","BAL","BIFI","PANCAKE","QUICK","SPIRIT",
         "SPOOKY","JOE","SOLAR","TRISOLARIS","VELODROME","AERODROME",
-        "CAMELOT","STERLING","RAMSES","THENA","KYBER","BANCOR",
+        "CAMELOT","STERLING","RAMSES","THENA","KYBER","BANCOR","KMNO","MORPHO","WET",
     ],
     "Layer1": [
         "AVAX","ADA","ATOM","NEAR","FTM","ALGO","ICP","APT","SUI","SEI",
@@ -244,7 +244,7 @@ SECTOR_KEYWORDS = {
         "QNT","CELO","FLOW","MINA","KAVA","VET","ONT","WAVES","XTZ","NEO",
         "ROSE","SCRT","OASIS","HARMONY","ELROND","MULTIVERSX","APTOS",
         "MOVEMENT","MONAD","BERACHAIN","INITIA","SAGA","STORY","SUPRA",
-        "HYPERLIQUID","ECLIPSE","FUSE","VENOM","NEON","ZETA",
+        "HYPERLIQUID","ECLIPSE","FUSE","VENOM","NEON","ZETA","XPL",
     ],
     "Layer2": [
         "MATIC","OP","ARB","ZK","STRK","LRC","METIS","MANTA","SCROLL",
@@ -252,7 +252,7 @@ SECTOR_KEYWORDS = {
         "OMG","SSV","BOBA","STARKNET","ZKFAIR","ZKLINK","ZKME","LUMIA",
         "POLYGON","OPTIMISM","ARBITRUM","STARKWARE","LOOPRING","MATTER",
         "IMMUTABLE","RONIN","BASE","BLAST","MANTLE","MODE","MINT",
-        "FRAXTAL","ZORA","REDSTONE","CYBER","KINTO","ANCIENT8",
+        "FRAXTAL","ZORA","REDSTONE","CYBER","KINTO","ANCIENT8","BREV",
     ],
     "Meme": [
         "DOGE","SHIB","PEPE","FLOKI","WIF","BOM","MEME","TURO","POPCAT",
@@ -261,7 +261,7 @@ SECTOR_KEYWORDS = {
         "MYRO","WOJAK","MIGGO","COQ","SLERF","SMOG","BOME","SILLY",
         "NOOT","WOOF","COPE","CHAD","BASED","FROG","CAT","DOG","APE",
         "MONKEY","HAMSTER","SQUIRREL","RACCOON","PENGUIN","PENG",
-        "BRETT","ANDY","MOO","BAD","HARAMBE","GIGA","APED","LADYS",
+        "BRETT","ANDY","MOO","BAD","HARAMBE","GIGA","APED","LADYS","BABY",
     ],
     "Oracle": [
         "LINK","BAND","UMA","DIA","PYTH","STORK","SXT","TELL","CHR",
@@ -553,6 +553,9 @@ daily_report_sent_date   = ""  # type: str            تاريخ آخر تقري
 # 🆕 V16: Liquidity Zones
 lz_alerted         = {}   # type: Dict[str, float]  {sym: last_alert_time}
 lz_daily_sent_date = ""   # type: str               تاريخ آخر فحص يومي
+
+# 🆕 V16: Hidden Accumulation — كشف التجميع الخفي
+hidden_accum_alerted = {}  # type: Dict[str, float]  {sym: last_alert_time}
 
 stable_vol_history = {}   # type: Dict[str, List[float]]
 smart_money_alert  = False
@@ -2159,6 +2162,205 @@ def refresh_tickers():
 # ═══════════════════════════════════════════════
 #   ANALYSIS FUNCTIONS
 # ═══════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════
+#   🆕 V16: HIDDEN ACCUMULATION ENGINE
+#   كشف السيولة الخفية قبل الارتفاع
+#   الحيتان يشترون بهدوء في السوق النازل
+# ═══════════════════════════════════════════════════════════════
+
+def detect_hidden_accumulation(kd, ob=None):
+    # type: (Dict, Optional[Dict]) -> tuple
+    """
+    يكشف تجميع الحيتان الخفي قبل الارتفاع.
+
+    المؤشرات:
+    1. 📉📈 Volume Divergence  — السعر ينزل لكن الحجم يرتفع
+    2. 🕯️ Lower Wicks         — ذيول سفلية طويلة = رفض النزول
+    3. 💧 Bid Wall             — جدار شراء ضخم في Order Book
+    4. 🔇 Quiet Accumulation   — حجم يتصاعد تدريجياً بهدوء
+    5. 🔒 Price Compression    — السعر مضغوط في نطاق ضيق مع حجم
+
+    يعيد: (is_accumulating, score, description)
+    """
+    highs  = kd["highs"]
+    lows   = kd["lows"]
+    opens  = kd["opens"]
+    closes = kd["closes"]
+    vols   = kd["vols"]
+    n      = len(closes)
+
+    if n < 10:
+        return False, 0, ""
+
+    avg_vol = kd.get("avg_vol", sum(vols) / n)
+    if avg_vol <= 0:
+        return False, 0, ""
+
+    score    = 0
+    signals  = []
+
+    # ══════════════════════════════════════════════
+    # 1. Volume Divergence — أهم مؤشر
+    #    السعر ينزل أو ثابت لكن الحجم يرتفع
+    # ══════════════════════════════════════════════
+    price_5  = (closes[-5] - closes[-1]) / closes[-5] * 100 if closes[-5] > 0 else 0
+    vol_avg3 = sum(vols[-3:]) / 3
+    vol_avg_prev = sum(vols[-8:-3]) / 5 if n >= 8 else avg_vol
+
+    price_falling = price_5 <= -1.0        # السعر نزل أكثر من 1%
+    vol_rising    = vol_avg3 > vol_avg_prev * 1.4   # الحجم ارتفع 40%
+
+    if price_falling and vol_rising:
+        div_strength = vol_avg3 / vol_avg_prev
+        pts = min(int(div_strength * 15), 40)
+        score += pts
+        signals.append("📊 Divergence {:.1f}x".format(div_strength))
+
+    # ══════════════════════════════════════════════
+    # 2. Lower Wicks — ذيول سفلية طويلة
+    #    الحيتان يشترون كل مرة ينزل السعر
+    # ══════════════════════════════════════════════
+    wick_count = 0
+    for i in range(-6, 0):
+        body        = abs(closes[i] - opens[i])
+        lower_wick  = min(opens[i], closes[i]) - lows[i]
+        if body > 0 and lower_wick > body * 1.5:
+            wick_count += 1
+
+    if wick_count >= 3:
+        pts = wick_count * 5
+        score += pts
+        signals.append("🕯️ Wicks x{}".format(wick_count))
+
+    # ══════════════════════════════════════════════
+    # 3. Bid Wall — جدار شراء في Order Book
+    #    طلبات شراء ضخمة تحت السعر الحالي
+    # ══════════════════════════════════════════════
+    if ob and ob.get("bid", 0) > 0 and ob.get("ask", 0) > 0:
+        bid_ask_ratio = ob["bid"] / ob["ask"]
+        if bid_ask_ratio >= 1.8:
+            pts = min(int(bid_ask_ratio * 10), 30)
+            score += pts
+            signals.append("💧 BidWall {:.1f}x".format(bid_ask_ratio))
+        elif bid_ask_ratio >= 1.3:
+            score += 10
+            signals.append("💧 Bid+")
+
+    # ══════════════════════════════════════════════
+    # 4. Quiet Accumulation — تصاعد تدريجي هادئ
+    #    الحجم يزداد ببطء على مدى 5 شمعات
+    # ══════════════════════════════════════════════
+    if n >= 6:
+        vol_trend = 0
+        for i in range(-5, 0):
+            if vols[i] > vols[i-1]:
+                vol_trend += 1
+
+        if vol_trend >= 4:  # 4 من 5 شمعات بحجم متصاعد
+            score += 20
+            signals.append("🔇 Quiet Accum")
+
+    # ══════════════════════════════════════════════
+    # 5. Price Compression — ضغط السعر مع ارتفاع الحجم
+    #    نطاق سعري ضيق + حجم يرتفع = طاقة مكبوتة
+    # ══════════════════════════════════════════════
+    recent_high = max(highs[-8:])
+    recent_low  = min(lows[-8:])
+    price_range = (recent_high - recent_low) / recent_low * 100 if recent_low > 0 else 999
+
+    if price_range < 8.0 and vol_avg3 > avg_vol * 1.2:
+        compression_score = max(0, int((8.0 - price_range) * 3))
+        score += compression_score
+        signals.append("🔒 Compression {:.1f}%".format(price_range))
+
+    # ══════════════════════════════════════════════
+    # النتيجة
+    # ══════════════════════════════════════════════
+    is_accumulating = score >= 35
+    desc = " | ".join(signals) if signals else ""
+
+    return is_accumulating, score, desc
+
+
+def scan_hidden_accumulation(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🆕 V16: مسح مستمر للكشف عن التجميع الخفي
+    يعمل على كل العملات كل دورة
+    يرسل تنبيه مبكر قبل الارتفاع
+    """
+    global hidden_accum_alerted
+
+    now = time.time()
+    top_candidates = sorted(
+        [(s, vol_now.get(s, 0)) for s in candidates if s not in tracked],
+        key=lambda x: -x[1]
+    )[:50]  # أعلى 50 عملة حجماً
+
+    for sym, vol in top_candidates:
+        # cooldown 4 ساعات لنفس العملة
+        if now - hidden_accum_alerted.get(sym, 0) < 14400:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        kd = get_klines(sym, "15m", 30)
+        if not kd:
+            continue
+
+        # جلب OrderBook للأكثر حجماً فقط
+        ob = get_order_book(sym) if vol > 500_000 else None
+
+        is_accum, acc_score, acc_desc = detect_hidden_accumulation(kd, ob)
+
+        if not is_accum:
+            continue
+
+        # تأكيد إضافي: الحجم على 1h أيضاً يرتفع
+        kd1h = get_klines(sym, "1h", 10)
+        if not kd1h:
+            continue
+
+        vols_1h  = kd1h["vols"]
+        avg_1h   = sum(vols_1h) / len(vols_1h)
+        last_1h  = vols_1h[-1]
+        if last_1h < avg_1h * 1.3:
+            continue  # لا تأكيد على 1h
+
+        change_24h = changes_map.get(sym, 0)
+        sector     = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+
+        # نقاط الندرة
+        rarity = "🔥 قوي" if acc_score >= 60 else "⚡ متوسط"
+        if acc_score >= 80:
+            rarity = "🐋🔥 نادر جداً"
+
+        lines_msg = [
+            "👁️ *HIDDEN ACCUMULATION*",
+            "━━━━━━━━━━━━━━━━━━",
+            "🔇 *{}* — تجميع خفي مكتشف!".format(sym.replace("USDT","")),
+            "━━━━━━━━━━━━━━━━━━",
+            "📊 *المؤشرات:*",
+            "  {}".format(acc_desc),
+            "━━━━━━━━━━━━━━━━━━",
+            "💪 قوة التجميع: `{}/100` {}".format(acc_score, rarity),
+            "💵 السعر الحالي: `{}`".format(round(price, 8)),
+            "📉 24h: `{:+.2f}%` _(السوق نازل لكن الحيتان يشترون!)_".format(change_24h),
+            "📦 الحجم: `{:.0f}K USDT`".format(vol / 1000),
+            "🏷️ القطاع: `{}`".format(sector),
+            "━━━━━━━━━━━━━━━━━━",
+            "⚠️ _تنبيه مبكر — ليس إشارة دخول بعد_",
+            "⏳ _انتظر تأكيد الاتجاه قبل الدخول_",
+        ]
+        msg = "\n".join(lines_msg)
+        send(msg)
+        hidden_accum_alerted[sym] = now
+        log.info("👁️ Hidden Accum | %s | score=%d | %s", sym, acc_score, acc_desc)
+
+
 def detect_pump_dump(kd):
     # type: (Dict) -> Tuple[bool, str]
     closes = kd["closes"]
@@ -3202,6 +3404,7 @@ def run():
     global last_deep_scan, last_stale, last_smart_money, last_expand
     global last_daily_report, daily_report_sent_date
     global lz_daily_sent_date, lz_alerted   # 🆕 V16
+    global hidden_accum_alerted             # 🆕 V16 Hidden Accum
 
     log.info("🚀 MAFIO BOT V16 يبدأ...")
 
@@ -3335,6 +3538,9 @@ def run():
 
             # Momentum Detector
             detect_momentum(price_map, change_now, vol_now, high_map, low_map)
+
+            # 🆕 V16: كشف التجميع الخفي — الحيتان يشترون قبل الارتفاع
+            scan_hidden_accumulation(price_map, vol_now, changes_map)
 
             # Deep Scan
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
