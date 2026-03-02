@@ -2599,8 +2599,6 @@ def scan_sector_activity():
     # ترتيب حسب قوة التجميع
     whale_accumulation.sort(key=lambda x: -x["strength"])
 
-    last_sector_report = time.time()
-
     # ═══════════════════════════════════════════
     #  الخطوة 3: بناء التقرير
     # ═══════════════════════════════════════════
