@@ -95,16 +95,23 @@ BOTTOM_PRICE_RANGE   = 1.15   # السعر أقل من 15% فوق القاع
 BOTTOM_VOL_INCREASE  = 1.3    # الحجم أكبر من 1.3× المتوسط
 BOTTOM_MAX_CHANGE    = 5.0    # تغيير يومي أقل من 5%
 BOTTOM_MIN_DAYS      = 7      # أدنى عدد أيام لبناء التاريخ
-BOTTOM_COOLDOWN      = 21600  # 6 ساعات بين التنبيهات
+BOTTOM_COOLDOWN      = 86400  # 24 ساعة — فقط للعملات في ATH watchlist
 BOTTOM_SCAN_EVERY    = 3600    # فحص كل ساعة
 BOTTOM_MIN_VOL       = 1_000_000 # حجم 24h أدنى 1M USDT — عملات قوية فقط
 
 # 🆕 Volume Explosion — انفجار الحجم بعد التجميع
 EXPLOSION_VOL_MULT   = 3.0    # الحجم يتجاوز 3× المتوسط
 EXPLOSION_MIN_DAYS   = 5      # العملة في القاع 5+ أيام قبل الانفجار
-EXPLOSION_COOLDOWN   = 14400  # 4 ساعات بين التنبيهات
+EXPLOSION_COOLDOWN   = 86400  # 24 ساعة — فقط إذا مرت بالمرحلتين 1+2
 EXPLOSION_MAX_CHANGE = 30.0   # لا نريد Pump مسبق أكثر من 30%
 EXPLOSION_MIN_VOL    = 1_000_000 # حجم انفجار أدنى 1M USDT — عملات قوية فقط
+
+# 🆕 ATH Distance Filter — عملات انهارت من قمتها
+ATH_DROP_STRONG  = 0.90   # نزلت 90%+ من ATH = فرصة قوية
+ATH_DROP_EXTREME = 0.95   # نزلت 95%+ من ATH = فرصة نادرة
+ATH_MIN_VOL      = 1_000_000  # حجم أدنى 1M USDT
+ATH_COOLDOWN     = 86400  # 24 ساعة — مرة واحدة يومياً لكل عملة
+ATH_SCAN_EVERY   = 7200   # فحص كل ساعتين — أفضل 3 فقط يومياً
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
 # عملات مشبوهة بالاسم — يتم تجاهلها دائماً
 SUSPICIOUS_KEYWORDS = [
@@ -623,6 +630,11 @@ bottom_price_history = {}  # type: Dict[str, List[float]]  {sym: [price1, price2
 bottom_vol_history   = {}  # type: Dict[str, List[float]]  {sym: [vol1, vol2, ...]}
 bottom_alerted       = {}  # type: Dict[str, float]        {sym: last_alert_time}
 explosion_alerted    = {}  # type: Dict[str, float]  {sym: last_alert_time}
+ath_tracker      = {}  # type: Dict[str, float]  {sym: all_time_high_price}
+ath_alerted      = {}  # type: Dict[str, float]  {sym: last_alert_time}
+gem_watchlist    = {}  # type: Dict[str, Dict]  {sym: {stage, ath_drop, since}} المراحل
+daily_gem_count  = {"date": "", "count": 0}  # عداد يومي — حد 10 عملات
+last_ath_scan    = 0.0
 last_bottom_scan     = 0.0
 
 # 🆕 V15: Backtesting — تتبع إشارات Top10
@@ -1660,6 +1672,174 @@ def get_backtest_stats():
 #   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
 
+def scan_ath_distance():
+    # type: () -> None
+    """
+    يرصد العملات التي انهارت 90-95%+ من أعلى مستوى تاريخي
+    ويضعها في قائمة المراقبة عند بداية أي تزايد في الحجم
+
+    المنطق:
+    - FIO نزلت -98% من ATH ثم +92%
+    - PHA نزلت -97% من ATH ثم +60%
+    = عملات "ميتة" تنبعث من جديد 🎯
+    """
+    global ath_tracker, ath_alerted
+
+    if not all_tickers:
+        return
+
+    now = time.time()
+    gems = []  # العملات المكتشفة
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"): continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        if is_suspicious(sym, 0, 0, 0): continue
+
+        try:
+            price  = float(t["lastPrice"])
+            high   = float(t["highPrice"])   # أعلى سعر 24h
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < ATH_MIN_VOL: continue
+        if price <= 0: continue
+
+        # ── تحديث ATH المحلي ──────────────────────
+        # نبني ATH تراكمياً من أعلى سعر يومي
+        prev_ath = ath_tracker.get(sym, 0.0)
+        if high > prev_ath:
+            ath_tracker[sym] = high
+            prev_ath = high
+
+        if prev_ath <= 0: continue
+
+        # ── حساب الانخفاض من ATH ──────────────────
+        drop_pct = 1.0 - (price / prev_ath)
+
+        # يجب أن يكون الانخفاض 90%+ من ATH
+        if drop_pct < ATH_DROP_STRONG: continue
+
+        # ── حجم التاريخ لمعرفة التزايد ────────────
+        vh = bottom_vol_history.get(sym, [])
+        vol_ratio = 1.0
+        if len(vh) >= 3:
+            vol_avg   = sum(vh[:-1]) / len(vh[:-1])
+            vol_ratio = vol / vol_avg if vol_avg > 0 else 1.0
+
+        # ── تجنب التكرار ──────────────────────────
+        last_alert = ath_alerted.get(sym, 0)
+        if now - last_alert < ATH_COOLDOWN: continue
+
+        # ── حساب درجة الفرصة ──────────────────────
+        score = 0
+
+        # درجة الانهيار
+        if drop_pct >= ATH_DROP_EXTREME:  score += 4  # -95%+ نادر جداً
+        elif drop_pct >= ATH_DROP_STRONG: score += 2  # -90%+
+
+        # درجة الحجم
+        if vol_ratio >= 3.0:  score += 3  # حجم ضخم جداً
+        elif vol_ratio >= 2.0: score += 2  # حجم كبير
+        elif vol_ratio >= 1.3: score += 1  # حجم يتزايد
+
+        # درجة الحركة الحالية
+        if 0 < change <= 5:   score += 2  # صعود هادئ = تجميع
+        elif change > 5:      score += 1  # بدأ يتحرك
+        elif change < -5:     score -= 1  # لا يزال ينزل
+
+        if score < 5: continue  # حد عالٍ — فرص قوية فقط
+
+        gems.append({
+            "sym":       sym,
+            "price":     price,
+            "ath":       prev_ath,
+            "drop_pct":  drop_pct,
+            "vol":       vol,
+            "vol_ratio": vol_ratio,
+            "change":    change,
+            "score":     score,
+        })
+
+    if not gems:
+        return
+
+    gems.sort(key=lambda x: -x["score"])
+
+    for gem in gems[:3]:  # أفضل 3 فقط يومياً
+        sym  = gem["sym"]
+        base = sym.replace("USDT", "")
+
+        drop_str = str(round(gem["drop_pct"] * 100, 1))
+
+        # تحديد مستوى الفرصة
+        if gem["drop_pct"] >= ATH_DROP_EXTREME and gem["vol_ratio"] >= 2.0:
+            level = "💎🔥 EXTREME GEM"
+            icon  = "💎"
+        elif gem["drop_pct"] >= ATH_DROP_EXTREME:
+            level = "💎 RARE GEM -95%+"
+            icon  = "💎"
+        elif gem["vol_ratio"] >= 2.0:
+            level = "🔥 STRONG GEM -90%+"
+            icon  = "🔥"
+        else:
+            level = "📊 GEM WATCH -90%+"
+            icon  = "📊"
+
+        # حساب الهدف المحتمل (ارتداد 20-50% من ATH)
+        target_20 = round(gem["ath"] * 0.20, 8)
+        target_30 = round(gem["ath"] * 0.30, 8)
+        gain_20   = round((target_20 / gem["price"] - 1) * 100, 1)
+        gain_30   = round((target_30 / gem["price"] - 1) * 100, 1)
+
+        msg = (
+            icon + " *ATH DISTANCE ALERT* " + icon + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(gem["price"]) + "`\n"
+            + "  🏔️ ATH: `" + str(round(gem["ath"], 8)) + "`\n"
+            + "  📉 انخفاض من ATH: `" + drop_str + "%`\n"
+            + "  📦 حجم: `" + str(round(gem["vol"]/1e6, 2)) + "M` | تزايد: `"
+            + str(round(gem["vol_ratio"], 1)) + "×`\n"
+            + "  📅 تغيير 24h: `" + str(round(gem["change"], 2)) + "%`\n"
+            + "━" * 18 + "\n"
+            + "🎯 *" + level + "*\n"
+            + "  · درجة الفرصة: `" + str(gem["score"]) + "/9`\n"
+            + "  · هدف 20% من ATH: `" + str(target_20) + "` = `+" + str(gain_20) + "%`\n"
+            + "  · هدف 30% من ATH: `" + str(target_30) + "` = `+" + str(gain_30) + "%`\n"
+            + "━" * 18 + "\n"
+            + "🐍 _تجميع خفي محتمل — انتظر Bottom + Explosion_"
+        )
+
+        send(msg)
+        ath_alerted[sym] = now
+        # تسجيل في gem_watchlist للمراحل القادمة
+        gem_watchlist[sym] = {"stage": 1, "ath_drop": gem["drop_pct"],
+                              "since": now, "score": gem["score"]}
+        # عداد يومي
+        import datetime as _dt
+        _today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        if daily_gem_count["date"] != _today:
+            daily_gem_count["date"] = _today; daily_gem_count["count"] = 0
+        daily_gem_count["count"] += 1
+
+        # أضف لقائمة المراقبة
+        if sym not in watchlist:
+            watchlist[sym] = {
+                "since":    now,
+                "priority": "HIGH",
+                "reason":   "ath_gem_" + drop_str + "pct",
+                "sector":   "Unknown",
+            }
+        log.info("💎 ATH Gem | %s | drop=%.1f%% | vol_ratio=%.1fx | score=%d",
+                 sym, gem["drop_pct"]*100, gem["vol_ratio"], gem["score"])
+
+    log.info("💎 ATH Scan | gems=%d", len(gems))
+
+
 def scan_bottom_accumulation():
     # type: () -> None
     """
@@ -1680,6 +1860,9 @@ def scan_bottom_accumulation():
     for t in all_tickers:
         sym = t.get("symbol", "")
         if not sym.endswith("USDT"): continue
+        # المرحلة 2: فقط للعملات التي اجتازت المرحلة 1 (ATH alert)
+        if sym not in gem_watchlist: continue
+        if gem_watchlist[sym].get("stage", 0) < 1: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
         if is_suspicious(sym, 0, 0, 0): continue
 
@@ -1807,6 +1990,8 @@ def scan_bottom_accumulation():
 
         send(msg)
         bottom_alerted[sym] = now
+        # ترقية إلى المرحلة 2
+        if sym in gem_watchlist: gem_watchlist[sym]["stage"] = 2
 
         # أضف للـ candidates تلقائياً
         if sym not in candidates:
@@ -1841,6 +2026,9 @@ def scan_volume_explosion():
     for t in all_tickers:
         sym = t.get("symbol", "")
         if not sym.endswith("USDT"): continue
+        # المرحلة 3: فقط للعملات التي اجتازت المرحلتين 1+2
+        if sym not in gem_watchlist: continue
+        if gem_watchlist[sym].get("stage", 0) < 2: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
 
         try:
@@ -1953,6 +2141,8 @@ def scan_volume_explosion():
 
         send(msg)
         explosion_alerted[sym] = now
+        # المرحلة 3 مكتملة — تحديث stage
+        if sym in gem_watchlist: gem_watchlist[sym]["stage"] = 3
 
         # أضف للـ candidates بأولوية عالية
         if sym not in candidates:
@@ -4549,6 +4739,10 @@ def run():
             global last_bottom_scan
             if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
                 scan_bottom_accumulation()
+                # 🆕 ATH Distance Scan كل ساعتين
+                if now - last_ath_scan >= ATH_SCAN_EVERY:
+                    scan_ath_distance()
+                    last_ath_scan = now
                 scan_volume_explosion()     # 🆕 رصد انفجار الحجم بعد التجميع
                 last_bottom_scan = now
 
