@@ -89,6 +89,22 @@ HIGHER_LOWS_MIN    = 0.60
 # عملة حقيقية يجب أن يكون حجمها اليومي كافياً
 WHALE_MIN_VOL      = 1_000_000   # حجم أدنى 1M USDT للحيتان
 WHALE_MAX_CHANGE   = 25.0        # تجاهل إذا ارتفعت أكثر من 25% (Pump)
+
+# 🆕 Bottom Accumulation — رصد التجميع في القيعان
+BOTTOM_PRICE_RANGE   = 1.15   # السعر أقل من 15% فوق القاع
+BOTTOM_VOL_INCREASE  = 1.3    # الحجم أكبر من 1.3× المتوسط
+BOTTOM_MAX_CHANGE    = 5.0    # تغيير يومي أقل من 5%
+BOTTOM_MIN_DAYS      = 7      # أدنى عدد أيام لبناء التاريخ
+BOTTOM_COOLDOWN      = 21600  # 6 ساعات بين التنبيهات
+BOTTOM_SCAN_EVERY    = 3600    # فحص كل ساعة
+BOTTOM_MIN_VOL       = 1_000_000 # حجم 24h أدنى 1M USDT — عملات قوية فقط
+
+# 🆕 Volume Explosion — انفجار الحجم بعد التجميع
+EXPLOSION_VOL_MULT   = 3.0    # الحجم يتجاوز 3× المتوسط
+EXPLOSION_MIN_DAYS   = 5      # العملة في القاع 5+ أيام قبل الانفجار
+EXPLOSION_COOLDOWN   = 14400  # 4 ساعات بين التنبيهات
+EXPLOSION_MAX_CHANGE = 30.0   # لا نريد Pump مسبق أكثر من 30%
+EXPLOSION_MIN_VOL    = 1_000_000 # حجم انفجار أدنى 1M USDT — عملات قوية فقط
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
 # عملات مشبوهة بالاسم — يتم تجاهلها دائماً
 SUSPICIOUS_KEYWORDS = [
@@ -601,6 +617,13 @@ top10_alerted        = {}  # type: Dict[str, float]          {sector: last_top10
 
 # 🆕 V15: تاريخ حجم كل عملة للمقارنة التاريخية
 coin_vol_history     = {}  # type: Dict[str, List[float]]   {sym: [vol1, vol2, ...]}
+
+# 🆕 Bottom Accumulation State
+bottom_price_history = {}  # type: Dict[str, List[float]]  {sym: [price1, price2, ...]}
+bottom_vol_history   = {}  # type: Dict[str, List[float]]  {sym: [vol1, vol2, ...]}
+bottom_alerted       = {}  # type: Dict[str, float]        {sym: last_alert_time}
+explosion_alerted    = {}  # type: Dict[str, float]  {sym: last_alert_time}
+last_bottom_scan     = 0.0
 
 # 🆕 V15: Backtesting — تتبع إشارات Top10
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
@@ -1636,6 +1659,317 @@ def get_backtest_stats():
 # ═══════════════════════════════════════════════
 #   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
+
+def scan_bottom_accumulation():
+    # type: () -> None
+    """
+    يرصد التجميع الخفي في القيعان الممتدة:
+    - السعر قريب من أدنى مستوى تاريخي
+    - الحجم يتزايد بهدوء
+    - التغيير اليومي صغير (لا pump)
+    = الحيتان يشترون بهدوء قبل الصعود 🐋
+    """
+    global bottom_price_history, bottom_vol_history, bottom_alerted
+
+    if not all_tickers:
+        return
+
+    now = time.time()
+    found = []
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"): continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        if is_suspicious(sym, 0, 0, 0): continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = abs(float(t["priceChangePercent"]))
+        except (KeyError, ValueError):
+            continue
+
+        if vol < BOTTOM_MIN_VOL: continue
+
+        # ── تحديث تاريخ السعر والحجم ──────────
+        if sym not in bottom_price_history:
+            bottom_price_history[sym] = []
+            bottom_vol_history[sym]   = []
+
+        bottom_price_history[sym].append(price)
+        bottom_vol_history[sym].append(vol)
+
+        # احتفظ بآخر 30 قراءة فقط
+        if len(bottom_price_history[sym]) > 30:
+            bottom_price_history[sym].pop(0)
+            bottom_vol_history[sym].pop(0)
+
+        ph = bottom_price_history[sym]
+        vh = bottom_vol_history[sym]
+
+        # نحتاج على الأقل BOTTOM_MIN_DAYS قراءة
+        if len(ph) < BOTTOM_MIN_DAYS: continue
+
+        # ── شرط 1: السعر قريب من القاع ────────
+        price_low  = min(ph)
+        price_high = max(ph)
+        if price_high <= price_low: continue
+
+        # السعر يجب أن يكون في النطاق السفلي
+        price_position = (price - price_low) / (price_high - price_low)
+        if price_position > 0.25: continue  # فوق 25% من النطاق = ليس قاع
+
+        # ── شرط 2: الحجم يتزايد في القاع ──────
+        vol_avg   = sum(vh[:-3]) / len(vh[:-3]) if len(vh) > 3 else vol
+        vol_recent = sum(vh[-3:]) / 3
+        vol_ratio  = vol_recent / vol_avg if vol_avg > 0 else 1.0
+        if vol_ratio < BOTTOM_VOL_INCREASE: continue
+
+        # ── شرط 3: التغيير اليومي صغير ─────────
+        if change > BOTTOM_MAX_CHANGE: continue
+
+        # ── شرط 4: مدة في القاع كافية ──────────
+        # عدد الأيام التي كان السعر فيها < 120% من القاع
+        days_in_bottom = sum(1 for p in ph if p <= price_low * 1.20)
+        if days_in_bottom < BOTTOM_MIN_DAYS: continue
+
+        # ── شرط 5: تجنب التكرار ─────────────────
+        last_alert = bottom_alerted.get(sym, 0)
+        if now - last_alert < BOTTOM_COOLDOWN: continue
+
+        # ── حساب قوة الإشارة ────────────────────
+        strength = 0
+        if price_position <= 0.10: strength += 3   # قاع مباشر
+        elif price_position <= 0.20: strength += 2
+        else: strength += 1
+
+        if vol_ratio >= 2.0: strength += 3          # حجم ضخم
+        elif vol_ratio >= 1.5: strength += 2
+        else: strength += 1
+
+        if days_in_bottom >= 14: strength += 2      # قاع طويل
+        elif days_in_bottom >= 7: strength += 1
+
+        if change <= 1.0: strength += 1             # هدوء تام = تجميع خفي
+
+        found.append({
+            "sym":          sym,
+            "price":        price,
+            "vol":          vol,
+            "vol_ratio":    vol_ratio,
+            "price_low":    price_low,
+            "price_pos":    price_position,
+            "days_bottom":  days_in_bottom,
+            "change":       change,
+            "strength":     strength,
+        })
+
+    if not found:
+        return
+
+    # ترتيب حسب القوة
+    found.sort(key=lambda x: -x["strength"])
+
+    for coin in found[:5]:  # أفضل 5 فقط
+        sym = coin["sym"]
+        base = sym.replace("USDT", "")
+
+        # تحديد مستوى الإشارة
+        if coin["strength"] >= 7:
+            level = "🔥🐳 STRONG BOTTOM"
+            icon  = "🔥"
+        elif coin["strength"] >= 5:
+            level = "📊🐳 BOTTOM ACCUMULATION"
+            icon  = "📊"
+        else:
+            level = "👀 EARLY BOTTOM"
+            icon  = "👀"
+
+        # نسبة المسافة من القاع للهدف المحتمل
+        target_pct = round((1 - coin["price_pos"]) * 40 + 10, 1)
+
+        msg = (
+            icon + " *BOTTOM ACCUMULATION*\n"
+            "━" * 18 + "\n"
+            "📍 *" + base + "/USDT*\n"
+            "  💰 السعر: `" + str(price) + "`\n"
+            "  📉 قاع " + str(coin["days_bottom"]) + " يوم | أدنى: `" + str(round(coin["price_low"], 8)) + "`\n"
+            "  📊 موقع في النطاق: `" + str(round(coin["price_pos"] * 100, 1)) + "%` من القاع\n"
+            "  📦 حجم: `" + str(round(coin["vol"] / 1e6, 2)) + "M` | تزايد: `" + str(round(coin["vol_ratio"], 1)) + "×`\n"
+            "  📅 تغيير 24h: `" + str(round(coin["change"], 2)) + "%`\n"
+            "━" * 18 + "\n"
+            "🎯 *" + level + "*\n"
+            "  · قوة الإشارة: `" + str(coin["strength"]) + "/10`\n"
+            "  · هدف محتمل: `+" + str(target_pct) + "%`\n"
+            "⚡ _انتظر Momentum + Signal للدخول_"
+        )
+
+        send(msg)
+        bottom_alerted[sym] = now
+
+        # أضف للـ candidates تلقائياً
+        if sym not in candidates:
+            candidates.append(sym)
+            log.info("📊 Bottom Accumulation → candidates | %s | strength=%d | vol_ratio=%.1f×",
+                     sym, coin["strength"], coin["vol_ratio"])
+
+    log.info("📊 Bottom Scan | found=%d", len(found))
+
+
+
+def scan_volume_explosion():
+    # type: () -> None
+    """
+    يرصد انفجار الحجم في عملات كانت في القاع:
+    المرحلة 3 — بعد التجميع يأتي الانفجار
+
+    الشرط الذهبي:
+    ✅ العملة كانت في القاع (bottom_price_history موجود)
+    ✅ الحجم انفجر 3× فجأة
+    ✅ السعر بدأ يتحرك للأعلى
+    = الانطلاق بدأ — فرصة دخول فورية 🚀
+    """
+    global explosion_alerted
+
+    if not all_tickers:
+        return
+
+    now = time.time()
+    explosions = []
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"): continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < EXPLOSION_MIN_VOL: continue
+
+        # ── شرط أساسي: يجب أن تكون في قاع مرصود ──
+        ph = bottom_price_history.get(sym, [])
+        vh = bottom_vol_history.get(sym, [])
+        if len(ph) < EXPLOSION_MIN_DAYS: continue
+        if len(vh) < EXPLOSION_MIN_DAYS: continue
+
+        # ── حساب متوسط الحجم التاريخي ────────────
+        # نستثني آخر قراءة (الانفجار نفسه)
+        vol_history_avg = sum(vh[:-1]) / len(vh[:-1]) if len(vh) > 1 else vol
+        if vol_history_avg <= 0: continue
+
+        vol_mult = vol / vol_history_avg
+
+        # ── شرط الانفجار: 3× المتوسط ─────────────
+        if vol_mult < EXPLOSION_VOL_MULT: continue
+
+        # ── شرط الاتجاه: السعر يتحرك للأعلى ──────
+        if change <= 0: continue  # يجب أن يكون صاعداً
+        if change > EXPLOSION_MAX_CHANGE: continue  # Pump مسبق كثير
+
+        # ── شرط القاع: السعر كان في القاع ────────
+        price_low  = min(ph[:-1])  # القاع قبل الانفجار
+        price_high = max(ph[:-1])
+        if price_high <= price_low: continue
+
+        # السعر قبل الانفجار كان في النطاق السفلي
+        prev_price = ph[-2] if len(ph) >= 2 else ph[-1]
+        prev_position = (prev_price - price_low) / (price_high - price_low)
+        if prev_position > 0.30: continue  # لم يكن في القاع
+
+        # ── تجنب التكرار ─────────────────────────
+        last_alert = explosion_alerted.get(sym, 0)
+        if now - last_alert < EXPLOSION_COOLDOWN: continue
+
+        # ── حساب قوة الانفجار ────────────────────
+        power = 0
+        if vol_mult >= 8:  power += 4
+        elif vol_mult >= 5: power += 3
+        elif vol_mult >= 3: power += 2
+        else: power += 1
+
+        if prev_position <= 0.10: power += 3  # كان في قاع مباشر
+        elif prev_position <= 0.20: power += 2
+        else: power += 1
+
+        days_in_bottom = sum(1 for p in ph[:-1] if p <= price_low * 1.20)
+        if days_in_bottom >= 14: power += 2
+        elif days_in_bottom >= 7: power += 1
+
+        if change >= 10: power += 2   # صعود قوي مع الانفجار
+        elif change >= 5: power += 1
+
+        explosions.append({
+            "sym":         sym,
+            "price":       price,
+            "vol":         vol,
+            "vol_mult":    vol_mult,
+            "change":      change,
+            "price_low":   price_low,
+            "prev_pos":    prev_position,
+            "days_bottom": days_in_bottom,
+            "power":       power,
+        })
+
+    if not explosions:
+        return
+
+    explosions.sort(key=lambda x: -x["power"])
+
+    for coin in explosions[:3]:  # أفضل 3 فقط
+        sym  = coin["sym"]
+        base = sym.replace("USDT", "")
+
+        # مستوى الانفجار
+        if coin["power"] >= 8:
+            level = "🔥🔥 MEGA EXPLOSION"
+            icon  = "🚨"
+        elif coin["power"] >= 6:
+            level = "💥 STRONG EXPLOSION"
+            icon  = "🔥"
+        else:
+            level = "📈 VOLUME BREAKOUT"
+            icon  = "📊"
+
+        msg = (
+            icon + " *VOLUME EXPLOSION* " + icon + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر الآن: `" + str(price) + "` +" + str(round(coin["change"],1)) + "%\n"
+            + "  📉 كان في قاع " + str(coin["days_bottom"]) + " يوم | أدنى: `" + str(round(coin["price_low"],8)) + "`\n"
+            + "  📊 موقع قبل الانفجار: `" + str(round(coin["prev_pos"]*100,1)) + "%` من القاع\n"
+            + "━" * 18 + "\n"
+            + "  💥 حجم الانفجار: `" + str(round(coin["vol"]/1e6,2)) + "M` = `" + str(round(coin["vol_mult"],1)) + "× المتوسط`\n"
+            + "━" * 18 + "\n"
+            + "🎯 *" + level + "*\n"
+            + "  · قوة الانفجار: `" + str(coin["power"]) + "/12`\n"
+            + "🚀 _الانطلاق بدأ — فرصة دخول فورية!_"
+        )
+
+        send(msg)
+        explosion_alerted[sym] = now
+
+        # أضف للـ candidates بأولوية عالية
+        if sym not in candidates:
+            candidates.insert(0, sym)  # أولوية قصوى في المقدمة
+        if sym not in watchlist:
+            watchlist[sym] = {
+                "since":    now,
+                "priority": "HIGH",
+                "reason":   "volume_explosion",
+                "sector":   "Unknown",
+            }
+        log.info("💥 Volume Explosion | %s | mult=%.1fx | change=+%.1f%%",
+                 sym, coin["vol_mult"], coin["change"])
+
+    log.info("💥 Explosion Scan | found=%d", len(explosions))
+
+
 def analyze_smart_money(force_report=False):
     # type: (bool) -> None
     global stable_vol_history, smart_money_alert, smart_money_bonus, last_smart_money
@@ -3488,6 +3822,118 @@ def run_daily_liquidity_scan():
         )
 
 
+
+def analyze_market_history():
+    # type: () -> str
+    """
+    يحلل تاريخ 30 يوم ويعطي توقع ذكي:
+    - نمط السوق (صعود/هبوط/تحول)
+    - سلوك الحيتان (تجميع/دخول)
+    - توقع الاتجاه القادم
+    """
+    h = market_activity_history
+    if len(h) < 3:
+        return ""
+
+    recent   = h[-7:]  if len(h) >= 7  else h
+    all_days = h
+
+    # ── 1. نمط الأيام الأخيرة ──────────────────
+    red_days    = sum(1 for d in recent if d["buy_pct"] <= 45)
+    green_days  = sum(1 for d in recent if d["buy_pct"] >= 55)
+    neutral_days= len(recent) - red_days - green_days
+
+    # ── 2. اتجاه الحيتان ────────────────────────
+    stable_vals = [d.get("stable_pct", 0) for d in recent]
+    stable_now  = stable_vals[-1] if stable_vals else 0
+    stable_avg  = sum(stable_vals) / len(stable_vals) if stable_vals else 0
+    stable_trend = stable_vals[-1] - stable_vals[0] if len(stable_vals) >= 2 else 0
+
+    # ── 3. اتجاه الشراء ─────────────────────────
+    buy_vals    = [d["buy_pct"] for d in recent]
+    buy_now     = buy_vals[-1] if buy_vals else 50
+    buy_prev    = buy_vals[-2] if len(buy_vals) >= 2 else buy_now
+    buy_trend   = buy_vals[-1] - buy_vals[0] if len(buy_vals) >= 2 else 0
+
+    # ── 4. Sigma activity ───────────────────────
+    sigma_avg   = sum(d.get("sigma_count",0) for d in recent) / len(recent)
+    sigma_now   = recent[-1].get("sigma_count", 0) if recent else 0
+
+    # ── 5. تحديد النمط ──────────────────────────
+    lines_out = []
+    sep = "━" * 18
+
+    # نمط السوق
+    if red_days >= 5:
+        market_pattern = "🔴 سوق هابط (" + str(red_days) + " أيام حمراء)"
+    elif green_days >= 5:
+        market_pattern = "🟢 سوق صاعد (" + str(green_days) + " أيام خضراء)"
+    elif red_days >= 3 and buy_trend > 5:
+        market_pattern = "🟡 بداية تحول للصعود ⚠️"
+    elif green_days >= 3 and buy_trend < -5:
+        market_pattern = "🟡 بداية تحول للهبوط ⚠️"
+    else:
+        market_pattern = "🟡 سوق متذبذب"
+
+    # سلوك الحيتان
+    if stable_now >= 20 and stable_trend > 5:
+        whale_pattern = "🐳 تجميع قوي Stablecoins (" + str(round(stable_now,1)) + "%) ↑ ينتظرون قاع"
+    elif stable_now >= 20 and stable_trend <= 0:
+        whale_pattern = "🐳 🚨 الحيتان يدخلون السوق! (" + str(round(stable_now,1)) + "%) ↓"
+    elif stable_now >= 10:
+        whale_pattern = "👀 تجميع خفيف (" + str(round(stable_now,1)) + "%)"
+    else:
+        whale_pattern = "✅ الحيتان في السوق (" + str(round(stable_now,1)) + "%)"
+
+    # ── 6. التوقع الذكي ─────────────────────────
+    score = 0
+    reasons = []
+
+    # إشارات صعود
+    if red_days >= 4:       score += 2; reasons.append("تشبع بيع")
+    if stable_trend > 8:    score += 2; reasons.append("تجميع حيتان")
+    if stable_now >= 15 and stable_trend <= 0: score += 3; reasons.append("حيتان يدخلون")
+    if buy_trend > 8:       score += 2; reasons.append("زخم شراء متزايد")
+    if sigma_now > sigma_avg * 1.5: score += 1; reasons.append("نشاط Sigma غير عادي")
+
+    # إشارات هبوط
+    if green_days >= 4:     score -= 2; reasons.append("تشبع شراء")
+    if stable_trend < -8:   score -= 2; reasons.append("خروج Stablecoins")
+    if buy_trend < -8:      score -= 2; reasons.append("زخم بيع متزايد")
+
+    if score >= 5:
+        prediction = "🟢 📈 توقع انعكاس وصعود خلال 1-3 أيام"
+        action     = "✅ ابدأ المراقبة وانتظر Signal"
+    elif score >= 3:
+        prediction = "🔵 مؤشرات إيجابية لكن غير مؤكدة"
+        action     = "🔵 مراقب ولا تدخل بعد"
+    elif score <= -4:
+        prediction = "🔴 📉 ضغط بيع متوقع — ابتعد عن السوق"
+        action     = "🚫 لا تدخل الآن"
+    elif score <= -2:
+        prediction = "🟠 تحذير: ضغط بيع محتمل"
+        action     = "🟠 تراجع أهدافك"
+    else:
+        prediction = "⚪ السوق محايد — لا يوجد اتجاه واضح"
+        action     = "⚪ انتظر إشارة أوضح"
+
+    reasons_txt = " | ".join(reasons) if reasons else "لا إشارات واضحة"
+
+    result = (
+        sep + "\n"
+        + "🧠 *تحليل ذكي | آخر " + str(len(recent)) + " أيام*\n"
+        + "  📊 نمط: " + market_pattern + "\n"
+        + "  " + whale_pattern + "\n"
+        + "  📈 اتجاه الشراء: " + ("\u2191 +" if buy_trend>0 else "\u2193 ") + str(round(abs(buy_trend),1)) + "% عن البداية\n"
+        + sep + "\n"
+        + "🎯 *التوقع:* " + prediction + "\n"
+        + "📋 الأسباب: _" + reasons_txt + "_\n"
+        + "💡 *الإجراء:* " + action + "\n"
+        + sep
+    )
+    return result
+
+
 def send_daily_report():
     # type: () -> None
     global daily_report_sent_date, daily_market_vol_history
@@ -3731,14 +4177,64 @@ def send_daily_report():
         action=whale_action,
     )
 
-    send(msg)
-    log.info("📅 Daily Report أُرسل | rising=%.0f%% | whale_signals=%d | vol_ch=%.1f%%",
+    # ─── Breakout inline calc ───────────────────────────
+    _ALPHA=10
+    _STBL={"FDUSD","USDC","BUSD","DAI","TUSD","BFUSD","USDE","CRVUSD","USDD","XUSD"}
+    _bc=[]; _sh=[]; _bvt=0.0; _svt=0.0
+    for _t in all_tickers:
+        _sym=_t.get("symbol",""); _b=_sym.replace("USDT","")
+        if not _sym.endswith("USDT") or any(k in _sym for k in LEVERAGE_KEYWORDS): continue
+        try: _v=float(_t["quoteVolume"]); _c=float(_t["priceChangePercent"])
+        except: continue
+        if _v<100_000: continue
+        _h=coin_vol_history.get(_sym,[]); _ah=sum(_h)/len(_h) if len(_h)>=3 else _v
+        _sg=round(_v/_ah,1) if _ah>0 else 1.0
+        if _c>0: _bvt+=_v
+        else: _svt+=_v
+        _is=_b in _STBL or _b.startswith("USD") or _b.endswith("USD")
+        if _is and _v>=500_000: _sh.append({"base":_b,"vol":_v,"sigma":_sg})
+        if _sg>=_ALPHA and not _is: _bc.append({"base":_b,"sigma":_sg,"ch":_c})
+    _bc.sort(key=lambda x:-x["sigma"]); _sh.sort(key=lambda x:-x["vol"])
+    _tv=_bvt+_svt; _svp=_svt/_tv*100 if _tv>0 else 50
+    _ts=sum(s["vol"] for s in _sh); _stp=_ts/_tv*100 if _tv>0 else 0
+    market_activity_history.append({"date":today,"buy_vol":_bvt,"sell_vol":_svt,
+        "buy_pct":_bvt/_tv*100 if _tv>0 else 50,
+        "stable_pct":_stp,"sigma_count":len(_bc)})
+    if len(market_activity_history)>30: market_activity_history.pop(0)
+    breakout_report_sent["date"]=today
+    if _stp>=20 and _svp>=55: _ss="🚨 هروب ضخم Stablecoins"
+    elif _stp>=15: _ss="⚠️ حيتان يحتفظون Stablecoins"
+    elif _stp>=8: _ss="👀 تجميع خفيف"
+    else: _ss="✅ Stablecoins طبيعية"
+    _st=""
+    for _sx in _sh[:5]:
+        _wh=" 🐳" if _sx["sigma"]>=3.0 else ""
+        _st+="  💵 *"+_sx["base"]+"* | `"+str(round(_sx["vol"]/1e6,1))+"M` | σ`"+str(_sx["sigma"])+"`"+_wh+"\n"
+    if not _st: _st="  لا يوجد\n"
+    _ct=""
+    for _co in _bc[:8]:
+        _d2="🟢" if _co["ch"]>0 else "🔴"
+        _ct+="• *"+_co["base"]+"* "+_d2+" Sigma`"+str(int(_co["sigma"]))+"` (Alpha:10)\n"
+    if not _ct: _ct="• لا توجد عملات\n"
+    _SP="━"*18
+    _brk=(_SP+"\n"
+        +"🐳 *احتفاظ الحيتان Stablecoins:* `"
+        +str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
+        +_st+_ss+"\n"+_SP+"\n"
+        +"*"+str(len(_bc))+" عملة* Sigma>=10:\n"+_ct)
+    _trnd=""
+    if len(market_activity_history)>=2:
+        _trnd=_SP+"\n📊 *Market Activity Trend* (كل الأيام المتاحة)\n"
+        for _e in market_activity_history:
+            _bp2=_e["buy_pct"]; _stp2=_e.get("stable_pct",0); _sc=_e.get("sigma_count",0)
+            _ic="🟢" if _bp2>=55 else "🔴" if _bp2<=45 else "🟡"
+            _trnd+="`"+_e["date"][5:]+"` "+_ic+" "+str(round(_bp2,0))+"%B | 🐳"
+            _trnd+=str(round(_stp2,1))+"%S | σ"+str(_sc)+"\n"
+        _trnd+=_SP
+    _analysis = analyze_market_history()
+    send(msg+"\n"+_brk+"\n"+_trnd+"\n"+_analysis)
+    log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
              rising_pct, len(whale_signals), vol_change_pct)
-
-    send_breakout_report()
-    send_market_activity_trend()
-
-
 
 # ═══════════════════════════════════════════════════════
 #  🆕 FEATURE 1: Daily Breakout Report (Sigma)
@@ -4049,6 +4545,12 @@ def run():
             if now - last_sectors     >= SECTORS_EVERY:     analyze_sectors()
             if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
             refresh_sector_report()   # 🆕 تقرير القطاعات + تجميع الحيتان كل ساعة
+            # 🆕 Bottom Accumulation Scan كل ساعة
+            global last_bottom_scan
+            if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
+                scan_bottom_accumulation()
+                scan_volume_explosion()     # 🆕 رصد انفجار الحجم بعد التجميع
+                last_bottom_scan = now
 
             # 🆕 V15: تقرير يومي عند 00:00 UTC
             send_daily_report()
@@ -4183,4 +4685,59 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    run()    # ────────────────────────────────────────
+    # حساب Breakout + Stablecoins مباشرة
+    # ────────────────────────────────────────
+    _ALPHA=10; _STBL={"FDUSD","USDC","BUSD","DAI","TUSD","BFUSD","USDE","CRVUSD","USDD","XUSD"}
+    _bc=[]; _sh=[]; _bvt=0.0; _svt=0.0
+    for _t in all_tickers:
+        _sym=_t.get("symbol",""); _base=_sym.replace("USDT","")
+        if not _sym.endswith("USDT") or any(k in _sym for k in LEVERAGE_KEYWORDS): continue
+        try: _v=float(_t["quoteVolume"]); _c=float(_t["priceChangePercent"])
+        except: continue
+        if _v<100_000: continue
+        _h=coin_vol_history.get(_sym,[]); _ah=sum(_h)/len(_h) if len(_h)>=3 else _v
+        _sig=round(_v/_ah,1) if _ah>0 else 1.0
+        if _c>0: _bvt+=_v
+        else: _svt+=_v
+        _is_s=_base in _STBL or _base.startswith("USD") or _base.endswith("USD")
+        if _is_s and _v>=500_000: _sh.append({"base":_base,"vol":_v,"sigma":_sig})
+        if _sig>=_ALPHA and not _is_s: _bc.append({"base":_base,"sigma":_sig,"ch":_c})
+    _bc.sort(key=lambda x:-x["sigma"]); _sh.sort(key=lambda x:-x["vol"])
+    _tv=_bvt+_svt; _svp=_svt/_tv*100 if _tv>0 else 50
+    _ts=sum(s["vol"] for s in _sh); _stp=_ts/_tv*100 if _tv>0 else 0
+    market_activity_history.append({"date":today,"buy_vol":_bvt,"sell_vol":_svt,
+        "buy_pct":_bvt/_tv*100 if _tv>0 else 50,"stable_pct":_stp,"sigma_count":len(_bc)})
+    if len(market_activity_history)>30: market_activity_history.pop(0)
+    breakout_report_sent["date"] = today
+    if _stp>=20 and _svp>=55: _ssig="🚨 هروب ضخم Stablecoins"
+    elif _stp>=15: _ssig="⚠️ حيتان يحتفظون Stablecoins"
+    elif _stp>=8: _ssig="👀 تجميع خفيف"
+    else: _ssig="✅ Stablecoins طبيعية"
+    _stxt=""
+    for _sx in _sh[:5]:
+        _wh=" 🐳" if _sx["sigma"]>=3.0 else ""
+        _stxt+="  💵 *"+_sx["base"]+"* | `"+str(round(_sx["vol"]/1e6,1))+"M` | σ`"+str(_sx["sigma"])+"` "+_wh+"\n"
+    if not _stxt: _stxt="  لا يوجد\n"
+    _ctxt=""
+    for _co in _bc[:8]:
+        _d2="🟢" if _co["ch"]>0 else "🔴"
+        _ctxt+="• *"+_co["base"]+"* "+_d2+" Sigma`"+str(int(_co["sigma"]))+"` (Alpha:10)\n"
+    if not _ctxt: _ctxt="• لا توجد عملات\n"
+    _SEP="━"*18
+    _brk=(_SEP+"\n"
+        +"🐳 *احتفاظ الحيتان Stablecoins:* `"+str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
+        +_stxt+_ssig+"\n"
+        +_SEP+"\n"
+        +"*"+str(len(_bc))+" عملة* Sigma>=10:\n"+_ctxt)
+    _trnd=""
+    if len(market_activity_history)>=2:
+        _trnd=_SEP+"\n📊 *Market Activity Trend* (كل الأيام المتاحة)\n"
+        for _e in market_activity_history:
+            _bp2=_e["buy_pct"]; _stp2=_e.get("stable_pct",0); _sc=_e.get("sigma_count",0)
+            _ic="🟢" if _bp2>=55 else "🔴" if _bp2<=45 else "🟡"
+            _trnd+="`"+_e["date"][5:]+"` "+_ic+" "+str(round(_bp2,0))+"%B | 🐳"+str(round(_stp2,1))+"%S | σ"+str(_sc)+"\n"
+        _trnd+=_SEP
+    send(msg+"\n"+_brk+"\n"+_trnd)
+    log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
+             rising_pct, len(whale_signals), vol_change_pct)
