@@ -3311,8 +3311,21 @@ def run_daily_liquidity_scan():
             type_icon = "🔁"
 
         # حساب الهدف ووقف الخسارة
-        sl_pct     = round((daily_close - zone_low) / daily_close * 100, 2) if daily_close > 0 else 0
-        target_pct = round((zone_high / zone_low - 1) * 100, 1) if zone_low > 0 else 0
+        sl_pct = round((daily_close - zone_low) / daily_close * 100, 2) if daily_close > 0 else 0
+
+        # الهدف = zone_high إذا كان أعلى من الدخول، وإلا نحسب هدفاً واقعياً
+        if zone_high > daily_close:
+            target_price = zone_high
+            target_pct   = round((zone_high / daily_close - 1) * 100, 1)
+        else:
+            # الهدف = الدخول + نسبة المخاطرة × 1.5 (Risk:Reward 1:1.5)
+            target_pct   = round(sl_pct * 1.5, 1)
+            target_price = round(daily_close * (1 + target_pct / 100), 8)
+
+        # تحقق منطقي — إذا الهدف أقل من الدخول لا نرسل
+        if target_price <= daily_close:
+            log.info("⏭️ تخطي %s — الهدف أقل من الدخول", sym)
+            continue
 
         # القطاع
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
@@ -3338,7 +3351,7 @@ def run_daily_liquidity_scan():
             "━━━━━━━━━━━━━━━━━━\n"
             "🎯 *نقطة الدخول:*  `{close}`\n"
             "🛡️ *وقف الخسارة:* `{zl}` (-{sl_pct}%)\n"
-            "🚀 *الهدف:*        `{zh}` (+{tgt}%)\n"
+            "🚀 *الهدف:*        `{tp}` (+{tgt}%)\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "🏷️ القطاع: `{sector}` | السوق: `{mst}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -3354,6 +3367,7 @@ def run_daily_liquidity_scan():
             rare=rare_tag,
             close=round(daily_close, 8),
             sl_pct=sl_pct,
+            tp=target_price,
             tgt=target_pct,
             sector=sector,
             mst=market_state,
@@ -3437,11 +3451,11 @@ def send_daily_report():
             whale_signals.append((sym.replace("USDT",""), ratio))
 
     # ══════════════════════════════════════════
-    # 2. نسبة الشراء/البيع في السوق كله 📊
+    # 2. نسبة الشراء/البيع بالحجم الحقيقي 📊
     # ══════════════════════════════════════════
-    rising   = 0
-    falling  = 0
-    total_market_vol  = 0.0
+    buy_vol      = 0.0   # حجم العملات الصاعدة
+    sell_vol     = 0.0   # حجم العملات النازلة
+    total_market_vol = 0.0
     top_gainers  = []
     top_losers   = []
 
@@ -3457,19 +3471,29 @@ def send_daily_report():
             if vol < 100_000: continue   # تجاهل العملات الميتة
             total_market_vol += vol
             if ch > 0:
-                rising += 1
+                buy_vol += vol
                 if vol > 1_000_000:
                     top_gainers.append((base, ch, vol))
             else:
-                falling += 1
+                sell_vol += vol
                 if vol > 1_000_000:
                     top_losers.append((base, ch, vol))
         except (KeyError, ValueError):
             pass
 
-    total_coins  = rising + falling
-    rising_pct   = rising / total_coins * 100 if total_coins > 0 else 0
-    falling_pct  = 100 - rising_pct
+    total_trade_vol = buy_vol + sell_vol
+    buy_pct         = buy_vol  / total_trade_vol * 100 if total_trade_vol > 0 else 50
+    sell_pct        = sell_vol / total_trade_vol * 100 if total_trade_vol > 0 else 50
+
+    # للتوافق مع باقي الكود
+    rising_pct  = buy_pct
+    falling_pct = sell_pct
+    rising      = int(buy_pct)
+    falling     = int(sell_pct)
+    total_coins = int(total_trade_vol / 1_000_000)  # حجم بالمليون
+
+    log.info("📊 Buy/Sell | buy=%.1f%% (%.0fM) | sell=%.1f%% (%.0fM)",
+             buy_pct, buy_vol/1_000_000, sell_pct, sell_vol/1_000_000)
 
     top_gainers.sort(key=lambda x: -x[1])
     top_losers.sort(key=lambda x: x[1])
@@ -3576,10 +3600,10 @@ def send_daily_report():
         "━━━━━━━━━━━━━━━━━━\n"
         "₿ *BTC اليوم:* `{btc:+.2f}%`\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 *حالة السوق:*\n"
+        "📊 *نسبة الشراء/البيع (بالحجم):*\n"
         "{bar}\n"
-        "  🟢 صاعد: `{rp:.0f}%` ({rising} عملة)\n"
-        "  🔴 هابط: `{fp:.0f}%` ({falling} عملة)\n"
+        "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol:.0f}M USDT)\n"
+        "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol:.0f}M USDT)\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *تدفق رأس المال:*\n"
         "  {arrow} حجم السوق: `{vol_ch:+.1f}%` عن أمس\n"
@@ -3603,6 +3627,10 @@ def send_daily_report():
         bar=mkt_bar,
         rp=rising_pct,  fp=falling_pct,
         rising=rising,  falling=falling,
+        total=total_coins,
+        buy=buy_pct,    sell=sell_pct,
+        buy_vol=buy_vol/1_000_000,
+        sell_vol=sell_vol/1_000_000,
         arrow=vol_arrow,
         vol_ch=vol_change_pct,
         total_vol=total_market_vol / 1_000_000,
