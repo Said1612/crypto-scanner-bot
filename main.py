@@ -563,6 +563,11 @@ last_daily_report = 0.0    # 🆕 V15: آخر تقرير يومي عند 00:00 U
 
 # 🆕 V15: تاريخ حجم السوق اليومي للمقارنة
 daily_market_vol_history = []  # type: List[float]   [أمس, اليوم]
+
+# 🆕 FlowEntry Features
+market_activity_history = []   # type: List[Dict]  [{date, buy_vol, sell_vol, sigma_coins}]
+breakout_report_sent    = {}   # type: Dict[str,str]  {date: sent}
+tv_script_cache         = {}   # type: Dict[str,str]  {sym: script}
 daily_report_sent_date   = ""  # type: str            تاريخ آخر تقرير أُرسل
 
 # 🆕 V16: Liquidity Zones
@@ -582,6 +587,10 @@ momentum_stage     = {}   # type: Dict[str, Dict]
 
 # 🆕 قائمة المراقبة — قطاع ساخن + تجميع حيتان
 watchlist          = {}   # type: Dict[str, Dict]
+
+# 🆕 Snapshot أسعار كل ساعة — لحساب تغيير حقيقي
+price_snapshot     = {}   # type: Dict[str, float]  {sym: price_1h_ago}
+price_snapshot_time = 0.0
 
 # 🆕 Sector Flow Tracker State
 sector_vol_snapshots = {}  # type: Dict[str, List[float]]   {sector: [vol1, vol2, ...]}
@@ -2202,36 +2211,92 @@ last_sector_report  = 0.0
 
 def scan_sector_activity():
     # type: () -> None
-    global last_sector_report
+    global last_sector_report, price_snapshot, price_snapshot_time
 
     if not all_tickers:
         return
 
     ticker_map = {t["symbol"]: t for t in all_tickers}
 
-    # ═══ الخطوة 1: نشاط القطاعات ═══════════════
+    # ═══ تحديث Snapshot كل ساعة ══════════════════
+    now = time.time()
+    if now - price_snapshot_time >= 3600 or not price_snapshot:
+        price_snapshot = {
+            t["symbol"]: float(t["lastPrice"])
+            for t in all_tickers
+            if t.get("symbol","").endswith("USDT")
+        }
+        price_snapshot_time = now
+        log.info("📸 Price snapshot محدّث | %d عملة", len(price_snapshot))
+
+    def real_change(sym, t):
+        """التغيير الحقيقي من آخر snapshot (ساعة)"""
+        try:
+            cur  = float(t["lastPrice"])
+            prev = price_snapshot.get(sym, 0)
+            if prev > 0:
+                return (cur - prev) / prev * 100
+            return float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            return 0.0
+
+    # ═══ الخطوة 1: تصنيف كل عملات MEXC للقطاعات ═══
+    # نصنّف من السوق الكامل وليس القائمة فقط
     sector_stats = {}
-    for sector, coins in SECTORS.items():
-        changes, vols = [], []
-        for sym in coins:
-            if sym not in ticker_map: continue
-            try:
-                ch  = float(ticker_map[sym]["priceChangePercent"])
-                vol = float(ticker_map[sym]["quoteVolume"])
-                if vol < 50_000: continue
-                changes.append(ch)
-                vols.append(vol)
-            except (KeyError, ValueError):
-                pass
-        if len(changes) < 2: continue
-        avg_ch     = sum(changes) / len(changes)
-        total_vol  = sum(vols)
-        rising_pct = sum(1 for c in changes if c > 0) / len(changes) * 100
-        sector_stats[sector] = {
-            "avg":        avg_ch,
-            "vol":        total_vol,
-            "rising_pct": rising_pct,
-            "score":      total_vol / 1_000_000 * 0.5 + rising_pct * 0.3 + max(avg_ch,0) * 5,
+
+    # بناء خريطة ديناميكية: كل عملة → قطاعها
+    def get_sector_for(sym):
+        base = sym.replace("USDT","")
+        for sec, keywords in SECTOR_KEYWORDS.items():
+            if any(kw in base for kw in keywords):
+                return sec
+        # إذا في SECTORS الثابتة
+        for sec, coins in SECTORS.items():
+            if sym in coins:
+                return sec
+        return None
+
+    # تجميع البيانات من كل عملات MEXC
+    full_sector_data = {}   # {sector: {buy_vol, sell_vol, changes, vols}}
+
+    for t in all_tickers:
+        sym = t.get("symbol","")
+        if not sym.endswith("USDT"): continue
+        if is_suspicious(sym, 0, 0, 0): continue
+        try:
+            ch  = real_change(sym, t)          # ← تغيير حقيقي من آخر ساعة
+            vol = float(t["quoteVolume"])
+            if vol < 50_000: continue
+        except (KeyError, ValueError):
+            continue
+
+        sec = get_sector_for(sym)
+        if not sec: continue
+
+        if sec not in full_sector_data:
+            full_sector_data[sec] = {"buy":0.0,"sell":0.0,"changes":[],"vols":[]}
+
+        full_sector_data[sec]["changes"].append(ch)
+        full_sector_data[sec]["vols"].append(vol)
+        if ch > 0:
+            full_sector_data[sec]["buy"] += vol
+        else:
+            full_sector_data[sec]["sell"] += vol
+
+    for sec, d in full_sector_data.items():
+        if len(d["changes"]) < 2: continue
+        total_vol  = sum(d["vols"])
+        buy_vol    = d["buy"]
+        sell_vol   = d["sell"]
+        avg_ch     = sum(d["changes"]) / len(d["changes"])
+        sector_stats[sec] = {
+            "vol":      total_vol,
+            "buy_vol":  buy_vol,
+            "sell_vol": sell_vol,
+            "avg":      avg_ch,
+            "count":    len(d["changes"]),
+            # ترتيب حسب إجمالي السيولة الداخلة
+            "score":    total_vol / 1_000_000,
         }
 
     if not sector_stats:
@@ -2319,9 +2384,16 @@ def scan_sector_activity():
     icons = ["🔥","⚡","📈","📊","📊"]
     sector_lines = ""
     for i, (sec, st) in enumerate(sorted_sectors[:5]):
-        sector_lines += "{} *{}* — {}% صاعد | `{:.1f}M`\n".format(
-            icons[min(i,4)], sec,
-            int(st["rising_pct"]), st["vol"]/1_000_000,
+        buy_m  = st["buy_vol"]  / 1_000_000
+        sell_m = st["sell_vol"] / 1_000_000
+        total_m = st["vol"]    / 1_000_000
+        direction = "🟢" if st["buy_vol"] > st["sell_vol"] else "🔴"
+        sector_lines += (
+            "{icon} *{sec}* {dir}\n"
+            "   💰 إجمالي: `{tot:.1f}M` | 🟢 شراء: `{buy:.1f}M` | 🔴 بيع: `{sell:.1f}M`\n"
+        ).format(
+            icon=icons[min(i,4)], sec=sec, dir=direction,
+            tot=total_m, buy=buy_m, sell=sell_m,
         )
 
     whale_lines = ""
@@ -2338,12 +2410,26 @@ def scan_sector_activity():
     if not whale_lines:
         whale_lines = "  _لا يوجد تجميع واضح الآن_\n"
 
-    total    = sum(1 for t in all_tickers if t.get("symbol","").endswith("USDT"))
-    rising_n = sum(1 for t in all_tickers
-                   if t.get("symbol","").endswith("USDT")
-                   and float(t.get("priceChangePercent",0)) > 0)
-    rp       = rising_n / total * 100 if total > 0 else 0
-    mkt_icon = "🟢" if rp >= 55 else "🔴" if rp <= 40 else "🟡"
+    # حساب نسبة الشراء/البيع بالحجم الحقيقي
+    buy_vol_total  = 0.0
+    sell_vol_total = 0.0
+    for t in all_tickers:
+        sym = t.get("symbol","")
+        if not sym.endswith("USDT"): continue
+        if is_suspicious(sym, 0, 0, 0): continue
+        try:
+            ch  = real_change(sym, t)          # ← تغيير حقيقي
+            vol = float(t["quoteVolume"])
+            if vol < 100_000: continue
+            if ch > 0: buy_vol_total  += vol
+            else:      sell_vol_total += vol
+        except (KeyError, ValueError):
+            pass
+
+    total_vol_mkt = buy_vol_total + sell_vol_total
+    buy_pct_mkt   = buy_vol_total  / total_vol_mkt * 100 if total_vol_mkt > 0 else 50
+    sell_pct_mkt  = sell_vol_total / total_vol_mkt * 100 if total_vol_mkt > 0 else 50
+    mkt_icon      = "🟢" if buy_pct_mkt >= 55 else "🔴" if buy_pct_mkt <= 45 else "🟡"
 
     msg = (
         "🌊 *SECTOR ACTIVITY REPORT*\n"
@@ -2356,12 +2442,13 @@ def scan_sector_activity():
         "🔥قطاع ساخن | 🐋عادي\n"
         "{whales}\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "{mkt} `{rp:.0f}%` صاعد | ₿ `{btc:+.2f}%`\n"
+        "{mkt} شراء:`{buy:.1f}%` | بيع:`{sell:.1f}%` | ₿ `{btc:+.2f}%`\n"
         "⚡ _انتظر Momentum + Signal للدخول_"
     ).format(
         time=datetime.now().strftime("%H:%M:%S"),
         sectors=sector_lines, whales=whale_lines,
-        mkt=mkt_icon, rp=rp, btc=btc_change_24h,
+        mkt=mkt_icon, buy=buy_pct_mkt, sell=sell_pct_mkt,
+        btc=btc_change_24h,
     )
 
     send(msg)
@@ -3266,6 +3353,7 @@ def run_daily_liquidity_scan():
     log.info("🌊 V16: بدء الفحص اليومي للسيولة...")
 
     signals_found = 0
+    tv_signals    = []
 
     for sym in list(candidates):
         # تجنب التكرار
@@ -3374,6 +3462,7 @@ def run_daily_liquidity_scan():
         )
 
         send(msg)
+        tv_signals.append({"sym":sym,"zone_high":zone_high,"zone_low":zone_low,"sigma":sigma,"touches":sigma})
         lz_alerted[sym] = time.time()
         register_backtest(sym, daily_close, sector)
         signals_found += 1
@@ -3382,6 +3471,8 @@ def run_daily_liquidity_scan():
 
         time.sleep(1)  # لا نضغط على Telegram
 
+    if tv_signals:
+        send_tv_scripts(tv_signals)
     log.info("🌊 Daily Liquidity Scan انتهى | إشارات: %d", signals_found)
 
     if signals_found == 0:
@@ -3643,6 +3734,212 @@ def send_daily_report():
     send(msg)
     log.info("📅 Daily Report أُرسل | rising=%.0f%% | whale_signals=%d | vol_ch=%.1f%%",
              rising_pct, len(whale_signals), vol_change_pct)
+
+    send_breakout_report()
+    send_market_activity_trend()
+
+
+
+# ═══════════════════════════════════════════════════════
+#  🆕 FEATURE 1: Daily Breakout Report (Sigma)
+#  مثل FlowEntry — عملات دخلت سيولة غير عادية
+# ═══════════════════════════════════════════════════════
+def send_breakout_report():
+    global market_activity_history, breakout_report_sent
+    if not all_tickers: return
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    if breakout_report_sent.get('date') == today: return
+    ALPHA_MIN = 10
+    STABLES = {'FDUSD','USDC','BUSD','DAI','TUSD','BFUSD','USDE','CRVUSD','USDD','XUSD'}
+    bc=[]; sh=[]; bvt=0.0; svt=0.0
+    for t in all_tickers:
+        sym=t.get('symbol','')
+        if not sym.endswith('USDT'): continue
+        base=sym.replace('USDT','')
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        try:
+            vol=float(t['quoteVolume']); ch=float(t['priceChangePercent'])
+        except: continue
+        if vol<100_000: continue
+        hist=coin_vol_history.get(sym,[])
+        ah=sum(hist)/len(hist) if len(hist)>=3 else vol
+        sigma=round(vol/ah,1) if ah>0 else 1.0
+        if ch>0: bvt+=vol
+        else: svt+=vol
+        is_s=(base in STABLES or base.startswith('USD') or base.endswith('USD'))
+        if is_s and vol>=500_000: sh.append({'base':base,'vol':vol,'sigma':sigma,'ch':ch})
+        if sigma>=ALPHA_MIN and not is_s: bc.append({'base':base,'sigma':sigma,'vol':vol,'ch':ch})
+    bc.sort(key=lambda x:-x['sigma']); sh.sort(key=lambda x:-x['vol'])
+    tv=bvt+svt
+    bp=bvt/tv*100 if tv>0 else 50
+    sp=svt/tv*100 if tv>0 else 50
+    ts=sum(s['vol'] for s in sh)
+    stp=ts/tv*100 if tv>0 else 0
+    market_activity_history.append({'date':today,'buy_vol':bvt,'sell_vol':svt,
+        'buy_pct':bp,'stable_pct':stp,'sigma_count':len(bc)})
+    if len(market_activity_history)>30: market_activity_history.pop(0)
+    if bp>=55: mkt='🟢 شراء'
+    elif bp<=45: mkt='🔴 بيع'
+    else: mkt='🟡 محايد'
+    if stp>=20 and sp>=55: sig='🚨 هروب ضخم Stablecoins'
+    elif stp>=15: sig='⚠️ حيتان يحتفظون Stablecoins'
+    elif stp>=8: sig='👀 تجميع خفيف'
+    else: sig='✅ طبيعي'
+    stxt=''
+    for s in sh[:6]:
+        wh=' 🐳' if s['sigma']>=3.0 else ''
+        stxt+='  💵 *'+s['base']+'* | `'+str(round(s['vol']/1e6,1))+'M` USDT | σ`'+str(s['sigma'])+'`'+wh+'\n'
+    if not stxt: stxt='  --\n'
+    ctxt=''
+    for co in bc[:10]:
+        d='🟢' if co['ch']>0 else '🔴'
+        ctxt+='• *'+co['base']+'* '+d+' Sigma`'+str(int(co['sigma']))+'`\n'
+    if not ctxt: ctxt='• --\n'
+    sep='━'*18
+    msg='\n'.join([
+        '🚨 *Daily Breakout Report*',
+        '📅 `'+today+'`',
+        sep,
+        '📊 *حالة السوق:* '+mkt,
+        '  🟢 شراء:`'+str(round(bp,1))+'%` | 🔴 بيع:`'+str(round(sp,1))+'%` | 📦`'+str(int(tv/1e6))+'M`',
+        sep,
+        '🐳 *احتفاظ الحيتان Stablecoins:* `'+str(round(stp,1))+'%` = `'+str(int(ts/1e6))+'M` USDT',
+        stxt+sig,
+        sep,
+        '*'+str(len(bc))+' عملة* Sigma>=10:\n'+ctxt,
+        sep,
+        '💡 Sigma=حجم/متوسط | 🐳=غير عادي',
+    ])
+    send(msg)
+    breakout_report_sent['date']=today
+    log.info('Breakout %d stable=%.1f%% buy=%.0f%%',len(bc),stp,bp)
+
+
+
+def send_market_activity_trend():
+    # type: () -> None
+    """
+    يرسل مؤشر بياني نصي لنشاط السوق
+    يُظهر توزيع الشراء/البيع على مدى الأيام الماضية
+    """
+    if len(market_activity_history) < 3:
+        return
+
+    BARS = 10   # عدد الأعمدة في المؤشر
+    msg  = "📊 *Market Activity Trend*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+
+    # آخر 10 أيام
+    recent = market_activity_history[-BARS:]
+    max_vol = max(d["buy_vol"] + d["sell_vol"] for d in recent) or 1
+
+    for d in recent:
+        total   = d["buy_vol"] + d["sell_vol"]
+        buy_b   = int(d["buy_pct"] / 10)       # عدد أعمدة الشراء
+        sell_b  = 10 - buy_b
+        bar     = "🟢" * buy_b + "🔴" * sell_b
+        vol_m   = total / 1_000_000
+        sigma_c = d.get("sigma_count", 0)
+        trend   = "🟢" if d["buy_pct"] >= 55 else "🔴" if d["buy_pct"] <= 45 else "🟡"
+
+        msg += "`{}` {} {:.0f}%B | {}M | {}σ\n".format(
+            d["date"][5:],   # MM-DD
+            trend,
+            d["buy_pct"],
+            int(vol_m),
+            sigma_c,
+        )
+
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+    msg += "🟢=شراء | 🔴=بيع | σ=عدد Sigma coins"
+
+    send(msg)
+    log.info("📊 Market Activity Trend | %d days", len(recent))
+
+
+# ═══════════════════════════════════════════════════════
+#  🆕 FEATURE 3: TradingView Script Generator
+#  يولّد سكريبت Pine Script لرسم مناطق السيولة
+# ═══════════════════════════════════════════════════════
+def generate_tv_script(sym, zone_high, zone_low, sigma, touches):
+    # type: (str, float, float, int, int) -> str
+    """
+    يولّد Pine Script جاهز للـ TradingView
+    يرسم منطقة السيولة بالألوان + ملاحظات
+    """
+    base  = sym.replace("USDT","")
+    color = "color.red" if sigma >= 8 else "color.orange" if sigma >= 5 else "color.yellow"
+    label = "RARE 🔥" if sigma >= 8 else "HOT" if sigma >= 5 else "ZONE"
+
+    script = """//@version=5
+indicator("Liquidity Zone — {base}", overlay=true)
+
+// Zone: {base} | Sigma: {sigma} | Touches: {touches}
+zone_high = {zh}
+zone_low  = {zl}
+zone_mid  = (zone_high + zone_low) / 2
+
+// رسم المنطقة
+var box liq_box = na
+if barstate.islast
+    liq_box := box.new(
+        bar_index - 50, zone_high,
+        bar_index + 10, zone_low,
+        border_color={color},
+        bgcolor=color.new({color}, 85),
+        border_width=2
+    )
+    label.new(bar_index, zone_high,
+        "{label} | Sigma:{sigma}",
+        style=label.style_label_down,
+        color={color},
+        textcolor=color.white,
+        size=size.small
+    )
+
+// خط المنتصف
+plot(zone_mid, "Zone Mid", color={color}, linewidth=1, style=plot.style_circles)
+hline(zone_high, "Zone High", color={color}, linestyle=hline.style_dashed)
+hline(zone_low,  "Zone Low",  color={color}, linestyle=hline.style_dashed)
+""".format(
+        base=base,
+        sigma=sigma,
+        touches=touches,
+        zh=round(zone_high, 8),
+        zl=round(zone_low, 8),
+        color=color,
+        label=label,
+    )
+    return script
+
+
+def send_tv_scripts(signals):
+    # type: (List[Dict]) -> None
+    """
+    يرسل سكريبتات TradingView للعملات التي أعطت إشارة سيولة
+    signals = [{sym, zone_high, zone_low, sigma, touches}, ...]
+    """
+    if not signals:
+        return
+
+    for s in signals[:5]:   # أقصى 5 سكريبتات
+        script = generate_tv_script(
+            s["sym"], s["zone_high"], s["zone_low"],
+            s.get("sigma", 1), s.get("touches", 1)
+        )
+        base = s["sym"].replace("USDT","")
+
+        # إرسال كملف نصي
+        send(
+            "📄 *TradingView Script — {}*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📋 انسخ الكود وأضفه في:\n"
+            "Pine Editor → Add to chart\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "```\n{}\n```".format(base, script[:3000])
+        )
+        log.info("📄 TV Script → %s", s["sym"])
+
 
 
 def send_report():
