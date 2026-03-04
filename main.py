@@ -114,16 +114,24 @@ ATH_COOLDOWN     = 86400  # 24 ساعة — مرة واحدة يومياً لك�
 ATH_SCAN_EVERY   = 7200   # فحص كل ساعتين — أفضل 3 فقط يومياً
 
 # 🆕 Hot Market Scanner — يعمل فوراً بدون تاريخ
-HOT_MIN_CHANGE   = 8.0    # تغيير 8%+ في 24h
-HOT_MIN_VOL      = 500_000   # حجم 500K+
+HOT_MIN_CHANGE   = 12.0   # تغيير 12%+ في 24h — جودة أعلى
+HOT_MIN_VOL      = 1_000_000 # حجم 1M+ — عملات قوية فقط
 HOT_COOLDOWN     = 14400  # 4 ساعات بين التنبيهات
-HOT_SCAN_EVERY   = 1800   # فحص كل 30 دقيقة
+HOT_SCAN_EVERY   = 3600   # فحص كل ساعة
 
 # 🆕 Realtime Liquidity Scanner — الأسرع والأهم
-RT_SCAN_EVERY    = 300    # كل 5 دقائق — فوري
+RT_SCAN_EVERY    = 900    # كل 15 دقيقة
 RT_VOL_SPIKE     = 2.0    # حجم 2× المتوسط = سيولة غير عادية
-RT_MIN_VOL       = 500_000   # 500K+ فقط
-RT_COOLDOWN      = 3600   # ساعة بين تنبيهات نفس العملة
+RT_MIN_VOL       = 1_000_000 # 1M+ فقط — جودة أعلى
+RT_COOLDOWN      = 21600  # 6 ساعات بين تنبيهات نفس العملة
+
+# 🆕 Liquidity Watchlist — مراقبة السيولة للدخول
+WL_ENTRY_MOVE    = 3.0    # تحرك 3%+ = إشعار دخول
+WL_ENTRY_VOL     = 1.5    # حجم 1.5× baseline = تأكيد
+WL_MAX_SIZE      = 30     # أقصى 30 عملة في القائمة
+WL_EXPIRY        = 86400  # عملة تبقى 24 ساعة بدون تحرك ثم تُحذف
+WL_ENTRY_COOL    = 14400  # 4 ساعات بين إشعارات الدخول لنفس العملة
+WL_CHECK_EVERY   = 60     # فحص الـ watchlist كل دقيقة
 RT_PRICE_MOVE    = 2.0    # حركة سعر 2%+ مع السيولة
 HOT_MAX_CHANGE   = 50.0   # تجاهل Pump أكثر من 50%
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
@@ -653,6 +661,9 @@ hot_alerted      = {}  # type: Dict[str, float]  {sym: last_alert_time}
 last_hot_scan    = 0.0
 rt_vol_baseline  = {}  # type: Dict[str, float]  {sym: avg_vol} متوسط الحجم
 rt_alerted       = {}  # type: Dict[str, float]  {sym: last_alert_time}
+wl_entry_alerted = {}  # type: Dict[str, float]  {sym: last_entry_alert_time}
+wl_price_snapshot= {}  # type: Dict[str, float]  {sym: price_when_added}
+last_wl_check    = 0.0
 last_rt_scan     = 0.0
 last_bottom_scan     = 0.0
 
@@ -1758,6 +1769,125 @@ def get_backtest_stats():
 #   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════
+# LIQUIDITY WATCHLIST SYSTEM
+# ═══════════════════════════════════════════════
+
+def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
+    # type: (str, str, float, float, str) -> None
+    """يضيف عملة لقائمة المراقبة عند رصد سيولة غير عادية"""
+    global watchlist, wl_price_snapshot
+
+    # لا تجاوز الحد الأقصى
+    if len(watchlist) >= WL_MAX_SIZE:
+        # احذف الأقدم
+        oldest = min(watchlist, key=lambda s: watchlist[s].get("since", 0))
+        del watchlist[oldest]
+        wl_price_snapshot.pop(oldest, None)
+
+    now = time.time()
+    if sym not in watchlist:
+        watchlist[sym] = {
+            "since":    now,
+            "reason":   reason,
+            "vol":      vol,
+            "sector":   sector,
+            "priority": "HIGH" if vol >= 3_000_000 else "NORMAL",
+        }
+        wl_price_snapshot[sym] = price
+        log.info("👀 WL Added | %s | reason=%s | vol=%.1fM | price=%s",
+                 sym, reason, vol/1e6, price)
+
+
+def check_watchlist_entries():
+    # type: () -> None
+    """يراقب عملات الـ watchlist ويرسل إشعار الدخول عند التحرك"""
+    global watchlist, wl_entry_alerted, wl_price_snapshot
+
+    if not watchlist or not all_tickers:
+        return
+
+    now        = time.time()
+    ticker_map = {t["symbol"]: t for t in all_tickers}
+    to_remove  = []
+
+    for sym, info in list(watchlist.items()):
+        # ── انتهت صلاحية العملة (24h بدون تحرك) ──
+        if now - info.get("since", now) > WL_EXPIRY:
+            to_remove.append(sym)
+            log.info("👀 WL Expired | %s", sym)
+            continue
+
+        t = ticker_map.get(sym)
+        if not t: continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except: continue
+
+        entry_price = wl_price_snapshot.get(sym, price)
+        if entry_price <= 0: continue
+
+        # ── حساب التحرك منذ الإضافة ────────────
+        move_since_add = (price - entry_price) / entry_price * 100
+
+        # ── شرط الدخول ──────────────────────────
+        # تحرك 3%+ للأعلى منذ الإضافة
+        if move_since_add < WL_ENTRY_MOVE: continue
+
+        # cooldown لنفس العملة
+        if now - wl_entry_alerted.get(sym, 0) < WL_ENTRY_COOL: continue
+
+        # ── تأكيد الحجم ─────────────────────────
+        wl_vol     = info.get("vol", vol)
+        vol_confirm = vol >= wl_vol * WL_ENTRY_VOL or vol >= 2_000_000
+
+        sector = info.get("sector", "Unknown")
+        reason = info.get("reason", "liquidity")
+        priority = info.get("priority", "NORMAL")
+
+        # ── إشعار الدخول ────────────────────────
+        if priority == "HIGH":
+            icon = "🚨🟢"
+            lvl  = "HIGH PRIORITY ENTRY"
+        else:
+            icon = "🟢⚡"
+            lvl  = "ENTRY SIGNAL"
+
+        vol_confirm_str = " ✅ حجم مؤكد" if vol_confirm else " ⚠️ حجم خفيف"
+
+        msg = (
+            icon + " *" + lvl + "* " + icon + "\n"
+            + "━" * 18 + "\n"
+            + "👀 كنا نراقبها — تحركت الآن!\n"
+            + "📍 *" + sym.replace("USDT","") + "/USDT*\n"
+            + "  💰 السعر: `" + str(price) + "`\n"
+            + "  📈 تحرك منذ الرصد: `+" + str(round(move_since_add,1)) + "%`\n"
+            + "  📈 تغيير 24h: `+" + str(round(change,1)) + "%`\n"
+            + "  📦 حجم: `" + str(round(vol/1e6,2)) + "M`" + vol_confirm_str + "\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "  🔍 سبب الرصد: `" + reason + "`\n"
+            + "━" * 18 + "\n"
+            + "🎯 سعر الرصد: `" + str(entry_price) + "`\n"
+            + "🚀 _العملة تتحرك — فرصة دخول الآن!_"
+        )
+
+        send(msg)
+        wl_entry_alerted[sym] = now
+        log.info("🟢 WL Entry | %s | move=+%.1f%% | vol=%.1fM",
+                 sym, move_since_add, vol/1e6)
+
+    # حذف العملات المنتهية
+    for sym in to_remove:
+        watchlist.pop(sym, None)
+        wl_price_snapshot.pop(sym, None)
+
+    if watchlist:
+        log.info("👀 WL Check | watching=%d | expired=%d", len(watchlist), len(to_remove))
+
+
 def scan_instant_movers():
     # type: () -> None
     """
@@ -1792,7 +1922,7 @@ def scan_instant_movers():
         if change > 60.0:   continue  # pump واضح
 
         # cooldown ساعة
-        if now - hot_alerted.get(sym, 0) < 3600: continue
+        if now - hot_alerted.get(sym, 0) < 21600: continue  # 6 ساعات
 
         sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
 
@@ -1813,7 +1943,7 @@ def scan_instant_movers():
     if not movers: return
     movers.sort(key=lambda x: -x["score"])
 
-    for m in movers[:5]:
+    for m in movers[:3]:  # أفضل 3 فقط
         sym  = m["sym"]
         base = sym.replace("USDT","")
 
@@ -1843,6 +1973,8 @@ def scan_instant_movers():
         send(msg)
         hot_alerted[sym] = now
         if sym not in candidates: candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "move_"+str(round(m["change"],0))+"%",
+                                   m["vol"], m["price"], m["sector"])
         log.info("⚡ Instant Mover | %s | +%.1f%% | vol=%s | score=%d",
                  sym, m["change"], vol_str, m["score"])
 
@@ -1982,6 +2114,8 @@ def scan_realtime_liquidity():
         rt_alerted[sym] = now
         if sym not in candidates:
             candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "liq_spike_"+str(round(a["vol_spike"],1))+"x",
+                                   a["vol"], a["price"], a["sector"])
 
         log.info("💧 RT Liquidity | %s | spike=%.1fx | change=%.1f%% | strength=%d",
                  sym, a["vol_spike"], a["change"], a["strength"])
@@ -5120,6 +5254,7 @@ def run():
     global hidden_accum_alerted
     global last_sector_report        # 🆕
     global last_rt_scan, last_hot_scan, last_bottom_scan
+    global wl_entry_alerted, wl_price_snapshot, last_wl_check
     global last_ath_scan, last_expand
     global rt_vol_baseline, rt_alerted
     global hot_alerted, bottom_alerted
@@ -5185,6 +5320,11 @@ def run():
 
             # 🚨 أولوية قصوى — Realtime Liquidity كل 5 دقائق
             # ⚡ Instant Movers — كل 5 دقائق بدون تاريخ
+
+            # 👁️ Watchlist Entry Check — كل دقيقة
+            if now - last_wl_check >= WL_CHECK_EVERY:
+                check_watchlist_entries()
+                last_wl_check = now
             if now - last_rt_scan >= RT_SCAN_EVERY:
                 scan_instant_movers()
             if now - last_rt_scan >= RT_SCAN_EVERY:
