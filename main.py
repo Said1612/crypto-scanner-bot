@@ -112,6 +112,20 @@ ATH_DROP_EXTREME = 0.95   # نزلت 95%+ من ATH = فرصة نادرة
 ATH_MIN_VOL      = 1_000_000  # حجم أدنى 1M USDT
 ATH_COOLDOWN     = 86400  # 24 ساعة — مرة واحدة يومياً لكل عملة
 ATH_SCAN_EVERY   = 7200   # فحص كل ساعتين — أفضل 3 فقط يومياً
+
+# 🆕 Hot Market Scanner — يعمل فوراً بدون تاريخ
+HOT_MIN_CHANGE   = 10.0   # تغيير 10%+ في 24h
+HOT_MIN_VOL      = 1_000_000  # حجم 1M+
+HOT_COOLDOWN     = 14400  # 4 ساعات بين التنبيهات
+HOT_SCAN_EVERY   = 1800   # فحص كل 30 دقيقة
+
+# 🆕 Realtime Liquidity Scanner — الأسرع والأهم
+RT_SCAN_EVERY    = 300    # كل 5 دقائق — فوري
+RT_VOL_SPIKE     = 2.0    # حجم 2× المتوسط = سيولة غير عادية
+RT_MIN_VOL       = 1_000_000  # 1M+ فقط
+RT_COOLDOWN      = 7200   # ساعتان بين تنبيهات نفس العملة
+RT_PRICE_MOVE    = 3.0    # حركة سعر 3%+ مع السيولة
+HOT_MAX_CHANGE   = 50.0   # تجاهل Pump أكثر من 50%
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
 # عملات مشبوهة بالاسم — يتم تجاهلها دائماً
 SUSPICIOUS_KEYWORDS = [
@@ -635,6 +649,11 @@ ath_alerted      = {}  # type: Dict[str, float]  {sym: last_alert_time}
 gem_watchlist    = {}  # type: Dict[str, Dict]  {sym: {stage, ath_drop, since}} المراحل
 daily_gem_count  = {"date": "", "count": 0}  # عداد يومي — حد 10 عملات
 last_ath_scan    = 0.0
+hot_alerted      = {}  # type: Dict[str, float]  {sym: last_alert_time}
+last_hot_scan    = 0.0
+rt_vol_baseline  = {}  # type: Dict[str, float]  {sym: avg_vol} متوسط الحجم
+rt_alerted       = {}  # type: Dict[str, float]  {sym: last_alert_time}
+last_rt_scan     = 0.0
 last_bottom_scan     = 0.0
 
 # 🆕 V15: Backtesting — تتبع إشارات Top10
@@ -1738,6 +1757,274 @@ def get_backtest_stats():
 # ═══════════════════════════════════════════════
 #   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
+
+def scan_realtime_liquidity():
+    # type: () -> None
+    """
+    الأهم والأسرع — يعمل كل 5 دقائق
+    يرصد السيولة غير العادية فوراً:
+
+    1. حجم يرتفع 2× فجأة
+    2. سعر يتحرك 3%+ معه
+    3. على كل السوق مباشرة
+    = لا يحتاج تاريخ — يعمل من الدقيقة الأولى 🎯
+    """
+    global rt_vol_baseline, rt_alerted
+
+    if not all_tickers:
+        return
+
+    now = time.time()
+
+    # بناء قائمة عملات SECTORS
+    all_sector_coins = set()
+    for sc in SECTORS.values():
+        all_sector_coins.update(sc)
+
+    alerts = []
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if sym not in all_sector_coins: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < RT_MIN_VOL: continue
+
+        # ── بناء الـ Baseline تراكمياً ─────────────
+        if sym not in rt_vol_baseline:
+            rt_vol_baseline[sym] = vol  # أول قراءة
+            continue
+
+        baseline = rt_vol_baseline[sym]
+
+        # تحديث الـ baseline ببطء (exponential moving average)
+        rt_vol_baseline[sym] = baseline * 0.85 + vol * 0.15
+
+        if baseline <= 0: continue
+
+        vol_spike = vol / baseline
+
+        # ── شرط 1: ارتفاع حجم مفاجئ ───────────────
+        if vol_spike < RT_VOL_SPIKE: continue
+
+        # ── شرط 2: حركة سعر مصاحبة ────────────────
+        if abs(change) < RT_PRICE_MOVE: continue
+
+        # ── تجنب التكرار ────────────────────────────
+        if now - rt_alerted.get(sym, 0) < RT_COOLDOWN: continue
+
+        # ── إيجاد القطاع ────────────────────────────
+        sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
+
+        # ── حساب القوة ──────────────────────────────
+        strength = 0
+        if vol_spike >= 5:    strength += 4
+        elif vol_spike >= 3:  strength += 3
+        else:                 strength += 2
+
+        if abs(change) >= 15: strength += 3
+        elif abs(change) >= 8: strength += 2
+        else:                  strength += 1
+
+        if vol >= 10_000_000: strength += 2
+        elif vol >= 3_000_000: strength += 1
+
+        direction = "🟢 شراء" if change > 0 else "🔴 بيع"
+
+        alerts.append({
+            "sym":       sym,
+            "price":     price,
+            "vol":       vol,
+            "vol_spike": vol_spike,
+            "change":    change,
+            "sector":    sector,
+            "strength":  strength,
+            "direction": direction,
+        })
+
+    if not alerts:
+        return
+
+    alerts.sort(key=lambda x: -x["strength"])
+
+    for a in alerts[:3]:  # أفضل 3 فقط
+        sym  = a["sym"]
+        base = sym.replace("USDT", "")
+
+        if a["strength"] >= 8:
+            icon = "🚨🔥"
+            lvl  = "MEGA LIQUIDITY"
+        elif a["strength"] >= 6:
+            icon = "🔥"
+            lvl  = "STRONG LIQUIDITY"
+        else:
+            icon = "💧"
+            lvl  = "LIQUIDITY SPIKE"
+
+        gem_tag = ""
+        if sym in gem_watchlist:
+            gem_tag = "  💎 مرصودة من المرحلة " + str(gem_watchlist[sym].get("stage",1)) + "\n"
+
+        msg = (
+            icon + " *" + lvl + "* " + icon + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT* " + a["direction"] + "\n"
+            + "  💰 السعر: `" + str(a["price"]) + "`\n"
+            + "  📈 تغيير: `" + str(round(a["change"],1)) + "%`\n"
+            + "  💧 سيولة: `" + str(round(a["vol"]/1e6,2)) + "M` = `"
+            + str(round(a["vol_spike"],1)) + "× المتوسط`\n"
+            + "  🏷️ قطاع: `" + a["sector"] + "`\n"
+            + gem_tag
+            + "━" * 18 + "\n"
+            + "🎯 *" + lvl + "* | قوة: `" + str(a["strength"]) + "/9`\n"
+            + "⚡ _سيولة غير عادية — ادرس الدخول_"
+        )
+
+        send(msg)
+        rt_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+
+        log.info("💧 RT Liquidity | %s | spike=%.1fx | change=%.1f%% | strength=%d",
+                 sym, a["vol_spike"], a["change"], a["strength"])
+
+    log.info("💧 RT Scan done | alerts=%d", len(alerts))
+
+
+def scan_hot_market():
+    # type: () -> None
+    """
+    يعمل فوراً بدون تاريخ
+    يرصد العملات الساخنة الآن:
+    - تغيير 10%+ في 24h
+    - حجم 1M+ USDT
+    - موجودة في SECTORS
+    = يرسل تنبيه فوري 🔥
+    """
+    global hot_alerted
+
+    if not all_tickers:
+        return
+
+    now  = time.time()
+    hot  = []
+
+    # بناء قائمة كل العملات في SECTORS
+    all_sector_coins = set()
+    for sector_coins in SECTORS.values():
+        all_sector_coins.update(sector_coins)
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if sym not in all_sector_coins: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+            high   = float(t["highPrice"])
+            low    = float(t["lowPrice"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < HOT_MIN_VOL: continue
+        if change < HOT_MIN_CHANGE: continue
+        if change > HOT_MAX_CHANGE: continue
+
+        # تجنب التكرار
+        last_alert = hot_alerted.get(sym, 0)
+        if now - last_alert < HOT_COOLDOWN: continue
+
+        # إيجاد القطاع
+        sector = "Unknown"
+        for sec, coins in SECTORS.items():
+            if sym in coins:
+                sector = sec
+                break
+
+        # قوة الإشارة
+        strength = 0
+        if change >= 30:     strength += 4
+        elif change >= 20:   strength += 3
+        elif change >= 15:   strength += 2
+        else:                strength += 1
+
+        if vol >= 10_000_000: strength += 3
+        elif vol >= 5_000_000: strength += 2
+        elif vol >= 2_000_000: strength += 1
+
+        # هل هي في gem_watchlist؟ (مرت بمراحل)
+        if sym in gem_watchlist: strength += 2
+
+        hot.append({
+            "sym":      sym,
+            "price":    price,
+            "vol":      vol,
+            "change":   change,
+            "sector":   sector,
+            "strength": strength,
+            "high":     high,
+            "low":      low,
+        })
+
+    if not hot:
+        return
+
+    hot.sort(key=lambda x: -x["strength"])
+
+    for coin in hot[:5]:  # أفضل 5
+        sym  = coin["sym"]
+        base = sym.replace("USDT", "")
+
+        if coin["strength"] >= 7:
+            icon = "🔥🔥"
+            lvl  = "EXPLOSIVE"
+        elif coin["strength"] >= 5:
+            icon = "🔥"
+            lvl  = "STRONG"
+        else:
+            icon = "⚡"
+            lvl  = "ACTIVE"
+
+        # هل في gem_watchlist؟
+        gem_tag = ""
+        if sym in gem_watchlist:
+            stage = gem_watchlist[sym].get("stage", 1)
+            gem_tag = "\n  💎 مرصودة من المرحلة " + str(stage)
+
+        msg = (
+            icon + " *HOT MARKET ALERT* " + icon + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(price) + "`\n"
+            + "  📈 تغيير 24h: `+" + str(round(coin["change"], 1)) + "%`\n"
+            + "  📦 حجم: `" + str(round(coin["vol"]/1e6, 2)) + "M USDT`\n"
+            + "  🏷️ قطاع: `" + coin["sector"] + "`\n"
+            + gem_tag + "\n"
+            + "━" * 18 + "\n"
+            + "🎯 *" + lvl + "* | قوة: `" + str(coin["strength"]) + "/9`\n"
+            + "⚡ _حركة قوية — ادرس فرصة الدخول_"
+        )
+
+        send(msg)
+        hot_alerted[sym] = now
+
+        # إضافة للـ candidates
+        if sym not in candidates:
+            candidates.append(sym)
+        log.info("🔥 Hot Market | %s | +%.1f%% | vol=%.1fM | strength=%d",
+                 sym, coin["change"], coin["vol"]/1e6, coin["strength"])
+
+    log.info("🔥 Hot Scan | found=%d", len(hot))
+
 
 def scan_ath_distance():
     # type: () -> None
@@ -4797,6 +5084,11 @@ def run():
     while True:
         try:
             now = time.time()
+
+            # 🚨 أولوية قصوى — Realtime Liquidity كل 5 دقائق
+            if now - last_rt_scan >= RT_SCAN_EVERY:
+                scan_realtime_liquidity()
+                last_rt_scan = now
             poll_commands()  # استماع لأوامر Telegram
 
             # تحديثات دورية
@@ -4807,6 +5099,10 @@ def run():
             # 🆕 Bottom Accumulation Scan كل ساعة
             global last_bottom_scan
             if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
+                # 🆕 Hot Market Scanner — كل 30 دقيقة فوري
+                if now - last_hot_scan >= HOT_SCAN_EVERY:
+                    scan_hot_market()
+                    last_hot_scan = now
                 scan_bottom_accumulation()
                 # 🆕 ATH Distance Scan كل ساعتين
                 if now - last_ath_scan >= ATH_SCAN_EVERY:
