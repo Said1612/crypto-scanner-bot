@@ -114,17 +114,17 @@ ATH_COOLDOWN     = 86400  # 24 ساعة — مرة واحدة يومياً لك�
 ATH_SCAN_EVERY   = 7200   # فحص كل ساعتين — أفضل 3 فقط يومياً
 
 # 🆕 Hot Market Scanner — يعمل فوراً بدون تاريخ
-HOT_MIN_CHANGE   = 10.0   # تغيير 10%+ في 24h
-HOT_MIN_VOL      = 1_000_000  # حجم 1M+
+HOT_MIN_CHANGE   = 8.0    # تغيير 8%+ في 24h
+HOT_MIN_VOL      = 500_000   # حجم 500K+
 HOT_COOLDOWN     = 14400  # 4 ساعات بين التنبيهات
 HOT_SCAN_EVERY   = 1800   # فحص كل 30 دقيقة
 
 # 🆕 Realtime Liquidity Scanner — الأسرع والأهم
 RT_SCAN_EVERY    = 300    # كل 5 دقائق — فوري
 RT_VOL_SPIKE     = 2.0    # حجم 2× المتوسط = سيولة غير عادية
-RT_MIN_VOL       = 1_000_000  # 1M+ فقط
-RT_COOLDOWN      = 7200   # ساعتان بين تنبيهات نفس العملة
-RT_PRICE_MOVE    = 3.0    # حركة سعر 3%+ مع السيولة
+RT_MIN_VOL       = 500_000   # 500K+ فقط
+RT_COOLDOWN      = 3600   # ساعة بين تنبيهات نفس العملة
+RT_PRICE_MOVE    = 2.0    # حركة سعر 2%+ مع السيولة
 HOT_MAX_CHANGE   = 50.0   # تجاهل Pump أكثر من 50%
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
 # عملات مشبوهة بالاسم — يتم تجاهلها دائماً
@@ -1757,6 +1757,97 @@ def get_backtest_stats():
 # ═══════════════════════════════════════════════
 #   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
+
+def scan_instant_movers():
+    # type: () -> None
+    """
+    يعمل من الدقيقة الأولى — بدون أي تاريخ
+    يرصد العملات التي تتحرك الآن بقوة:
+    - تغيير 24h >= 8%
+    - حجم >= 500K
+    - في SECTORS فقط
+    """
+    global hot_alerted
+
+    if not all_tickers: return
+    now = time.time()
+
+    all_sector_coins = set()
+    for sc in SECTORS.values():
+        all_sector_coins.update(sc)
+
+    movers = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if sym not in all_sector_coins: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except: continue
+
+        if vol   < 500_000: continue
+        if change < 8.0:    continue
+        if change > 60.0:   continue  # pump واضح
+
+        # cooldown ساعة
+        if now - hot_alerted.get(sym, 0) < 3600: continue
+
+        sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
+
+        # قوة الإشارة
+        score = 0
+        if change >= 30:      score += 4
+        elif change >= 20:    score += 3
+        elif change >= 15:    score += 2
+        else:                 score += 1
+        if vol >= 5_000_000:  score += 3
+        elif vol >= 2_000_000: score += 2
+        elif vol >= 1_000_000: score += 1
+        if sym in gem_watchlist: score += 2
+
+        movers.append({"sym":sym,"price":price,"vol":vol,
+                       "change":change,"sector":sector,"score":score})
+
+    if not movers: return
+    movers.sort(key=lambda x: -x["score"])
+
+    for m in movers[:5]:
+        sym  = m["sym"]
+        base = sym.replace("USDT","")
+
+        if m["score"] >= 6:   icon = "🔥🔥"; lvl = "EXPLOSIVE MOVE"
+        elif m["score"] >= 4: icon = "🔥";   lvl = "STRONG MOVE"
+        else:                 icon = "⚡";        lvl = "ACTIVE MOVE"
+
+        gem_tag = ""
+        if sym in gem_watchlist:
+            gem_tag = "  💎 مرصودة من المرحلة "+str(gem_watchlist[sym].get("stage",1))+"\n"
+
+        vol_str = str(round(m["vol"]/1e6,2))+"M" if m["vol"]>=1e6 else str(round(m["vol"]/1e3,0))+"K"
+
+        msg = (
+            icon+" *"+lvl+"* "+icon+"\n"
+            +"━"*18+"\n"
+            +"📍 *"+base+"/USDT*\n"
+            +"  💰 `"+str(m["price"])+"`\n"
+            +"  📈 تغيير 24h: `+"+str(round(m["change"],1))+"%`\n"
+            +"  📦 حجم: `"+vol_str+"`\n"
+            +"  🏷️ قطاع: `"+m["sector"]+"`\n"
+            +gem_tag
+            +"━"*18+"\n"
+            +"🎯 *"+lvl+"* | قوة: `"+str(m["score"])+"/9`\n"
+            +"⚡ _حركة قوية — ادرس فرصة الدخول_"
+        )
+        send(msg)
+        hot_alerted[sym] = now
+        if sym not in candidates: candidates.append(sym)
+        log.info("⚡ Instant Mover | %s | +%.1f%% | vol=%s | score=%d",
+                 sym, m["change"], vol_str, m["score"])
+
+    log.info("⚡ Instant Scan | movers=%d", len(movers))
+
 
 def scan_realtime_liquidity():
     # type: () -> None
@@ -5028,6 +5119,13 @@ def run():
     global lz_daily_sent_date, lz_alerted
     global hidden_accum_alerted
     global last_sector_report        # 🆕
+    global last_rt_scan, last_hot_scan, last_bottom_scan
+    global last_ath_scan, last_expand
+    global rt_vol_baseline, rt_alerted
+    global hot_alerted, bottom_alerted
+    global ath_alerted, ath_tracker
+    global gem_watchlist, daily_gem_count
+    global explosion_alerted, bottom_price_history, bottom_vol_history
 
     log.info("🚀 MAFIO BOT V16 يبدأ...")
 
@@ -5086,6 +5184,9 @@ def run():
             now = time.time()
 
             # 🚨 أولوية قصوى — Realtime Liquidity كل 5 دقائق
+            # ⚡ Instant Movers — كل 5 دقائق بدون تاريخ
+            if now - last_rt_scan >= RT_SCAN_EVERY:
+                scan_instant_movers()
             if now - last_rt_scan >= RT_SCAN_EVERY:
                 scan_realtime_liquidity()
                 last_rt_scan = now
