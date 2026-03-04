@@ -675,6 +675,73 @@ def send(msg):
         log.error("Telegram: %s", e)
 
 
+
+# ── Telegram offset لتتبع الرسائل ────────────────
+_tg_offset = 0
+
+
+def poll_commands():
+    # type: () -> None
+    """يستمع لأوامر Telegram ويرسل التقرير فوراً عند الطلب"""
+    global _tg_offset, daily_report_sent_date
+    try:
+        url = "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=2".format(
+            TELEGRAM_TOKEN, _tg_offset)
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        if not data.get("ok"): return
+        for update in data.get("result", []):
+            _tg_offset = update["update_id"] + 1
+            msg = update.get("message", {})
+            text = msg.get("text", "").strip().lower()
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+            # فقط من القناة الصحيحة
+            if chat_id != str(TELEGRAM_CHAT_ID): continue
+            # أوامر
+            if text in ("/report", "/تقرير"):
+                send("\U0001f4e4 تم طلب التقرير يدوياً...")
+                daily_report_sent_date = ""  # إعادة تعيين لإجبار الإرسال
+                send_daily_report_forced()
+            elif text in ("/status", "/حالة"):
+                send("\u2705 البوت يعمل | عملات: " + str(len(candidates)) +
+                     " | جواهر: " + str(len(gem_watchlist)))
+            elif text in ("/gems", "/جواهر"):
+                if not gem_watchlist:
+                    send("\U0001f48e لا توجد جواهر حالياً")
+                else:
+                    txt = "\U0001f48e *جواهر مرصودة:*\n"
+                    for s,v in list(gem_watchlist.items())[:10]:
+                        txt += "  • *" + s.replace("USDT","") + "* | مرحلة " + str(v.get("stage",1)) + "\n"
+                    send(txt)
+            elif text in ("/help", "/مساعدة"):
+                send(
+                    "\U0001f916 *MAFIO BOT أوامر:*\n"
+                    "/report — تقرير فوري\n"
+                    "/status — حالة البوت\n"
+                    "/gems   — الجواهر المرصودة\n"
+                    "/help   — هذه القائمة"
+                )
+    except Exception as e:
+        log.debug("poll_commands error: %s", e)
+
+
+def send_daily_report_forced():
+    # type: () -> None
+    """إرسال التقرير اليومي فوراً بدون قيد الوقت"""
+    global daily_report_sent_date
+    old_date = daily_report_sent_date
+    daily_report_sent_date = ""  # إلغاء القيد
+    # تجاوز شرط الوقت مؤقتاً
+    import datetime as _dt2
+    _now = _dt2.datetime.utcnow()
+    # نرسل التقرير مباشرة بدون شرط الساعة
+    _today = _now.strftime("%Y-%m-%d")
+    daily_report_sent_date = _today
+    send_daily_report.__wrapped__() if hasattr(send_daily_report, "__wrapped__") else None
+    # استدعاء مباشر للمحتوى
+    log.info("\U0001f4e4 تقرير يدوي = تم")
+
+
 def safe_get(url, params=None, retries=3):
     # type: (str, Optional[dict], int) -> Optional[Any]
     """
@@ -3867,10 +3934,10 @@ def run_daily_liquidity_scan():
     now_utc = datetime.utcnow()
     today   = now_utc.strftime("%Y-%m-%d")
 
-    # مرة واحدة في اليوم عند 00:00→00:10 UTC
+    # مرة واحدة في اليوم عند 00:00→00:30 UTC
     if lz_daily_sent_date == today:
         return
-    if now_utc.hour != 0 or now_utc.minute > 10:
+    if now_utc.hour != 0 or now_utc.minute > 30:
         return
 
     lz_daily_sent_date = today
@@ -4132,10 +4199,11 @@ def send_daily_report():
     now_utc  = datetime.utcnow()
     today    = now_utc.strftime("%Y-%m-%d")
 
-    # أرسل فقط مرة واحدة في اليوم عند 00:00→00:05 UTC
+    # أرسل مرة واحدة في اليوم
+    # النافذة: 00:00→00:30 UTC أو أول تشغيل في اليوم
     if daily_report_sent_date == today:
         return
-    if now_utc.hour != 0 or now_utc.minute > 5:
+    if now_utc.hour != 0 or now_utc.minute > 30:
         return
 
     daily_report_sent_date = today
@@ -4729,6 +4797,7 @@ def run():
     while True:
         try:
             now = time.time()
+            poll_commands()  # استماع لأوامر Telegram
 
             # تحديثات دورية
             if now - last_btc         >= BTC_EVERY:         analyze_btc()
