@@ -5198,7 +5198,6 @@ def run():
             if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
             refresh_sector_report()   # 🆕 تقرير القطاعات + تجميع الحيتان كل ساعة
             # 🆕 Bottom Accumulation Scan كل ساعة
-            global last_bottom_scan
             if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
                 # 🆕 Hot Market Scanner — كل 30 دقيقة فوري
                 if now - last_hot_scan >= HOT_SCAN_EVERY:
