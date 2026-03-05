@@ -1976,8 +1976,8 @@ def scan_early_detection():
             icon + " *" + lvl + "* " + icon + "\n"
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
-            + "  💰 السعر: `" + str(sig["price"]) + "`\n"
-            + "  📉 أدنى سعر: `" + str(sig["low24"]) + "`\n"
+            + "  💰 السعر: `" + fmt_price(sig["price"]) + "`\n"
+            + "  📉 أدنى سعر: `" + fmt_price(sig["low24"]) + "`\n"
             + "  📊 فوق القاع بـ: `+" + str(sig["vs_low"]) + "%`\n"
             + "  📦 الحجم: `" + str(round(sig["vol"]/1e6, 2)) + "M`\n"
             + "  📅 تغيير: `" + str(round(sig["change"], 1)) + "%`\n"
@@ -1985,8 +1985,8 @@ def scan_early_detection():
             + "🔍 *ما رصدناه:*\n"
             + types_str + "\n"
             + "━" * 18 + "\n"
-            + "🎯 هدف +10%: `" + str(target_10) + "` = `+" + str(gain_10) + "%`\n"
-            + "🎯 هدف +20%: `" + str(target_20) + "` = `+" + str(gain_20) + "%`\n"
+            + "🎯 هدف +10%: `" + fmt_price(target_10) + "` = `+" + str(gain_10) + "%`\n"
+            + "🎯 هدف +20%: `" + fmt_price(target_20) + "` = `+" + str(gain_20) + "%`\n"
             + "━" * 18 + "\n"
             + "⚡ _رصد مبكر — أضيفت للمراقبة_"
         )
@@ -2118,14 +2118,14 @@ def check_watchlist_entries():
             + "━" * 18 + "\n"
             + "👀 كنا نراقبها — تحركت الآن!\n"
             + "📍 *" + sym.replace("USDT","") + "/USDT*\n"
-            + "  💰 السعر: `" + str(price) + "`\n"
+            + "  💰 السعر: `" + fmt_price(price) + "`\n"
             + "  📈 تحرك منذ الرصد: `+" + str(round(move_since_add,1)) + "%`\n"
             + "  📈 تغيير 24h: `+" + str(round(change,1)) + "%`\n"
             + "  📦 حجم: `" + str(round(vol/1e6,2)) + "M`" + vol_confirm_str + "\n"
             + "  🏷️ قطاع: `" + sector + "`\n"
             + "  🔍 سبب الرصد: `" + reason + "`\n"
             + "━" * 18 + "\n"
-            + "🎯 سعر الرصد: `" + str(entry_price) + "`\n"
+            + "🎯 سعر الرصد: `" + fmt_price(entry_price) + "`\n"
             + "🚀 _العملة تتحرك — فرصة دخول الآن!_"
         )
 
@@ -5579,6 +5579,19 @@ def send_report():
 # STATE PERSISTENCE — حفظ واستعادة البيانات
 # ═══════════════════════════════════════════════
 
+def fmt_price(p):
+    # type: (float) -> str
+    """تنسيق السعر بدون scientific notation"""
+    if p == 0: return "0"
+    if p >= 1:
+        return "{:.4f}".format(p).rstrip('0').rstrip('.')
+    elif p >= 0.0001:
+        return "{:.8f}".format(p).rstrip('0').rstrip('.')
+    else:
+        # عملات صغيرة جداً مثل PEPE SHIB
+        return "{:.10f}".format(p).rstrip('0').rstrip('.')
+
+
 # ═══════════════════════════════════════════════
 # REDIS PERSISTENCE — حفظ دائم عبر Upstash
 # ═══════════════════════════════════════════════
@@ -5853,7 +5866,9 @@ def init_static_watchlist():
         ("ZROUSDT", "DeFi", "Bridge رائد"),
         ("PYTHUSDT", "DeFi", "Oracle منافس LINK"),
         ("COOKIEUSDT", "AI", "AI Agent ساخن"),
-        ("ROSEUSDT", "Privacy", "Privacy L1"),
+        ("ROSEUSDT",  "Privacy", "Privacy L1"),
+        ("PEPEUSDT",  "Meme",    "Meme coin — سيولة ضخمة"),
+        ("SHIBUSDT",  "Meme",    "Meme coin — سيولة ضخمة"),
     ]
 
     for sym, sector, reason in _static:
