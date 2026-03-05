@@ -1052,6 +1052,7 @@ def pre_filter(sym, change, vol, price=0.0):
 def analyze_btc():
     # type: () -> None
     global btc_change_24h, btc_trend_1h, market_state, last_btc
+    global last_market_report
 
     # ✅ الإصلاح: نجلب بيانات BTC بالـ symbol param وليس بـ endpoint مختلف
     data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
@@ -1135,7 +1136,6 @@ def analyze_btc():
 
     if old != market_state:
         # ── cooldown 4 ساعات ──
-        global last_market_report
         if time.time() - last_market_report < MARKET_REPORT_EVERY:
             log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
             return
@@ -5837,8 +5837,9 @@ def init_static_watchlist():
 
     ticker_map = {t["symbol"]: t for t in all_tickers}
     added = 0
+    _static = STATIC_WATCHLIST  # مرجع محلي
 
-    for sym, sector, reason in STATIC_WATCHLIST:
+    for sym, sector, reason in _static:
         if sym in watchlist:
             continue  # موجودة مسبقاً
 
