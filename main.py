@@ -35,6 +35,17 @@ from typing import Optional, Dict, List, Tuple, Any, Set
 # ═══════════════════════════════════════════════
 STATE_FILE = "/app/mafio_state.json"
 
+# ── Upstash Redis ────────────────────────────
+REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
+REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+REDIS_KEY   = "mafio_bot_state_v16"
+
+
+# ── Redis (Upstash) ───────────────────────────
+REDIS_URL  = os.environ.get("REDIS_URL",  "redis://default:Ac91AAIncDE0YmJiZTY2NjFlYzU0YTgxYTQ0MzhiMzZiMjVkYzIxYnAxNTMxMDk@one-chicken-53109.upstash.io:6379")
+REDIS_KEY  = "mafio_state_v16"  # مفتاح الحفظ في Redis
+
+
 # عملات محظورة — لا تدخل Watchlist أبداً
 BLOCKED_WATCHLIST = {
     "CULTUSDT",   # حجم ضعيف + ترند هابط
@@ -5560,6 +5571,122 @@ def send_report():
 # STATE PERSISTENCE — حفظ واستعادة البيانات
 # ═══════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════
+# REDIS PERSISTENCE — حفظ دائم عبر Upstash
+# ═══════════════════════════════════════════════
+
+def redis_save(data_json):
+    # type: (str) -> bool
+    """حفظ البيانات في Redis عبر HTTP"""
+    try:
+        import base64
+        # Upstash REST API
+        host = "one-chicken-53109.upstash.io"
+        token = "Ac91AAIncDE0YmJiZTY2NjFlYzU0YTgxYTQ0MzhiMzZiMjVkYzIxYnAxNTMxMDk"
+        url   = "https://{}/set/{}/{}".format(
+            host, REDIS_KEY,
+            requests.utils.quote(data_json, safe="")
+        )
+        resp = requests.get(
+            url,
+            headers={"Authorization": "Bearer " + token},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            log.info("☁️ Redis saved OK")
+            return True
+        else:
+            log.error("❌ Redis save failed: %s", resp.text[:100])
+            return False
+    except Exception as e:
+        log.error("❌ redis_save error: %s", e)
+        return False
+
+
+def redis_load():
+    # type: () -> str
+    """تحميل البيانات من Redis"""
+    try:
+        host  = "one-chicken-53109.upstash.io"
+        token = "Ac91AAIncDE0YmJiZTY2NjFlYzU0YTgxYTQ0MzhiMzZiMjVkYzIxYnAxNTMxMDk"
+        url   = "https://{}/get/{}".format(host, REDIS_KEY)
+        resp  = requests.get(
+            url,
+            headers={"Authorization": "Bearer " + token},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            result = resp.json().get("result")
+            if result:
+                log.info("☁️ Redis loaded OK")
+                return result
+        return ""
+    except Exception as e:
+        log.error("❌ redis_load error: %s", e)
+        return ""
+
+
+# ═══════════════════════════════════════════════
+# REDIS PERSISTENCE — حفظ دائم عبر Upstash
+# ═══════════════════════════════════════════════
+
+def redis_save(data):
+    # type: (dict) -> bool
+    """حفظ البيانات في Upstash Redis"""
+    if not REDIS_URL or not REDIS_TOKEN:
+        return False
+    try:
+        import json as _json
+        payload = _json.dumps(data, default=str)
+        # Upstash REST API — SET
+        resp = requests.post(
+            REDIS_URL + "/set/" + REDIS_KEY,
+            headers={
+                "Authorization": "Bearer " + REDIS_TOKEN,
+                "Content-Type": "application/json",
+            },
+            json={"value": payload},
+            timeout=10,
+        )
+        ok = resp.status_code == 200
+        if ok:
+            log.info("☁️ Redis saved — %d bytes", len(payload))
+        else:
+            log.warning("⚠️ Redis save failed: %s", resp.text[:100])
+        return ok
+    except Exception as e:
+        log.error("❌ redis_save error: %s", e)
+        return False
+
+
+def redis_load():
+    # type: () -> dict
+    """تحميل البيانات من Upstash Redis"""
+    if not REDIS_URL or not REDIS_TOKEN:
+        return {}
+    try:
+        import json as _json
+        resp = requests.get(
+            REDIS_URL + "/get/" + REDIS_KEY,
+            headers={"Authorization": "Bearer " + REDIS_TOKEN},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            log.info("📂 Redis: لا توجد بيانات محفوظة")
+            return {}
+        result = resp.json()
+        raw = result.get("result")
+        if not raw:
+            return {}
+        data = _json.loads(raw)
+        log.info("☁️ Redis loaded — %d bytes", len(raw))
+        return data
+    except Exception as e:
+        log.error("❌ redis_load error: %s", e)
+        return {}
+
+
+
 def save_state():
     # type: () -> None
     """حفظ كل البيانات المهمة في ملف JSON"""
@@ -5596,8 +5723,11 @@ def save_state():
             "stable_vol_history":       stable_vol_history,
             "daily_market_vol_history": daily_market_vol_history,
         }
+        # حفظ محلي
         with open(STATE_FILE, "w") as f:
             json.dump(state, f)
+        # حفظ في Redis
+        redis_save(state)
         log.info("💾 State saved — %d gems | %d watchlist | %d BT",
                  len(gem_watchlist), len(watchlist), len(backtest_signals))
     except Exception as e:
@@ -5606,7 +5736,7 @@ def save_state():
 
 def load_state():
     # type: () -> None
-    """استعادة البيانات من آخر حفظ"""
+    """استعادة البيانات — Redis أولاً ثم ملف محلي"""
     global bottom_price_history, bottom_vol_history, ath_tracker
     global rt_vol_baseline, early_vol_ref
     global gem_watchlist, watchlist, wl_price_snapshot, candidates
@@ -5615,93 +5745,77 @@ def load_state():
     global hot_alerted, rt_alerted, early_alerted, wl_entry_alerted
     global daily_report_sent_date, lz_daily_sent_date
     global daily_gem_count, stable_vol_history, daily_market_vol_history
+    global daily_signals
 
-    if not os.path.exists(STATE_FILE):
-        log.info("📂 لا يوجد ملف حفظ — بداية جديدة")
+    # أولاً: Redis
+    state = redis_load()
+    log.info("☁️ Redis state: %d keys", len(state))
+
+    # ثانياً: ملف محلي إذا Redis فارغ
+    if not state:
+        if not os.path.exists(STATE_FILE):
+            log.info("📂 لا يوجد حفظ — بداية جديدة")
+            return
+        try:
+            with open(STATE_FILE, "r") as f:
+                state = json.load(f)
+            log.info("📂 State loaded from local file")
+        except Exception as e:
+            log.error("❌ load local error: %s", e)
+            return
+
+    if not state:
         return
 
     try:
-        with open(STATE_FILE, "r") as f:
-            state = json.load(f)
-
-        saved_at = state.get("saved_at", 0)
-        age_hours = (time.time() - saved_at) / 3600
+        saved_at   = state.get("saved_at", 0)
+        age_hours  = (time.time() - saved_at) / 3600
         log.info("📂 تحميل State — عمره: %.1f ساعة", age_hours)
 
-        # تاريخ الأسعار
         bottom_price_history.update(state.get("bottom_price_history", {}))
         bottom_vol_history.update(state.get("bottom_vol_history", {}))
         ath_tracker.update(state.get("ath_tracker", {}))
         rt_vol_baseline.update(state.get("rt_vol_baseline", {}))
         early_vol_ref.update(state.get("early_vol_ref", {}))
 
-        # القوائم
         gem_watchlist.update(state.get("gem_watchlist", {}))
         watchlist.update(state.get("watchlist", {}))
         wl_price_snapshot.update(state.get("wl_price_snapshot", {}))
-        saved_cands = state.get("candidates", [])
-        for c in saved_cands:
+        for c in state.get("candidates", []):
             if c not in candidates:
                 candidates.append(c)
 
-        # Backtest
         backtest_signals.update(state.get("backtest_signals", {}))
 
-        # cooldowns
         bottom_alerted.update(state.get("bottom_alerted", {}))
         explosion_alerted.update(state.get("explosion_alerted", {}))
         ath_alerted.update(state.get("ath_alerted", {}))
         hot_alerted.update(state.get("hot_alerted", {}))
         rt_alerted.update(state.get("rt_alerted", {}))
         early_alerted.update(state.get("early_alerted", {}))
-        daily_signals = state.get("daily_signals", {"date": "", "count": 0})
         wl_entry_alerted.update(state.get("wl_entry_alerted", {}))
 
-        # تقارير
-        daily_report_sent_date   = state.get("daily_report_sent_date", "")
-        lz_daily_sent_date       = state.get("lz_daily_sent_date", "")
-        daily_gem_count          = state.get("daily_gem_count", {"date": "", "count": 0})
-        stable_vol_history.update(state.get("stable_vol_history", {}))
+        daily_report_sent_date = state.get("daily_report_sent_date", "")
+        lz_daily_sent_date     = state.get("lz_daily_sent_date", "")
+        daily_gem_count        = state.get("daily_gem_count", {"date": "", "count": 0})
+        daily_signals          = state.get("daily_signals", {"date": "", "count": 0})
+
         _dmv = state.get("daily_market_vol_history", [])
         if isinstance(_dmv, list):
             daily_market_vol_history.extend(_dmv)
-        log.info("📊 Market vol history loaded: %d entries", len(daily_market_vol_history))
+        stable_vol_history.update(state.get("stable_vol_history", {}))
 
         log.info("✅ State loaded | gems=%d | watchlist=%d | ath=%d | BT=%d",
                  len(gem_watchlist), len(watchlist), len(ath_tracker), len(backtest_signals))
 
-        send("♻️ *Bot Restarted* — تم استعادة البيانات السابقة\n"
+        send("♻️ *Bot Restarted* — تم استعادة البيانات\n"
              "💎 Gems: `{}` | 👁️ Watchlist: `{}` | 📊 BT: `{}`\n"
-             "⏱️ آخر حفظ: `{:.1f}` ساعة".format(
+             "⏱️ آخر حفظ: `{:.1f}h` | ☁️ Redis".format(
                  len(gem_watchlist), len(watchlist),
                  len(backtest_signals), age_hours))
 
     except Exception as e:
         log.error("❌ load_state error: %s", e)
-
-
-# ═══════════════════════════════════════════════
-# STATIC WATCHLIST — عملات مراقبة ثابتة
-# تُضاف عند بداية البوت وتبقى دائماً
-# ═══════════════════════════════════════════════
-STATIC_WATCHLIST = [
-    ("AVAXUSDT", "Layer1", "L1 قوي — انخفض 90%+ من ATH"),
-    ("LINKUSDT", "DeFi", "Oracle رائد — تجميع دائم"),
-    ("LTCUSDT", "Layer1", "عملة قديمة — دورات قوية"),
-    ("ADAUSDT", "Layer1", "L1 كبير — انخفض كثيراً"),
-    ("VAIUSDT", "DeFi", "DeFi صغير — إمكانية كبيرة"),
-    ("AIXBTUSDT", "AI", "AI Agent — قطاع ساخن"),
-    ("CGPTUSDT", "AI", "AI رائد — انخفض 95%+"),
-    ("SOLUSDT", "Layer1", "L1 الأقوى — دعم قوي"),
-    ("SEIUSDT", "Layer1", "L1 جديد — إمكانية كبيرة"),
-    ("CFXUSDT", "Layer1", "L1 صيني — انخفض كثيراً"),
-    ("APTUSDT", "Layer1", "L1 — انخفض 95% من ATH"),
-    ("WLDUSDT", "AI", "AI + Worldcoin — مشروع كبير"),
-    ("ZROUSDT", "DeFi", "ZRO — Bridge رائد"),
-    ("PYTHUSDT", "DeFi", "Oracle — منافس LINK"),
-    ("COOKIEUSDT", "AI", "AI Agent — قطاع ساخن"),
-    ("ROSEUSDT", "Privacy", "Privacy L1 — انخفض 95%+"),
-]
 
 
 def init_static_watchlist():
