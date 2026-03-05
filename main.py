@@ -35,6 +35,11 @@ from typing import Optional, Dict, List, Tuple, Any, Set
 # ═══════════════════════════════════════════════
 STATE_FILE = "/app/mafio_state.json"
 
+# عملات محظورة — لا تدخل Watchlist أبداً
+BLOCKED_WATCHLIST = {
+    "CULTUSDT",   # حجم ضعيف + ترند هابط
+}
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
 CHAT_ID        = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
 
