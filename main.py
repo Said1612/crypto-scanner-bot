@@ -2002,7 +2002,8 @@ def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
     global watchlist, wl_price_snapshot
 
     # تحقق من القائمة المحظورة
-    if sym in BLOCKED_WATCHLIST:
+    _blocked = {"CULTUSDT"}  # عملات محظورة
+    if sym in _blocked:
         log.debug("🚫 WL Blocked | %s", sym)
         return
 
