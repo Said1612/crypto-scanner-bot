@@ -608,7 +608,9 @@ discovered     = {}   # {sym: {price, time, score}}
 
 btc_change_24h = 0.0
 btc_trend_1h   = 0.0
-market_state   = "SAFE"
+market_state        = "SAFE"
+last_market_report  = 0.0    # آخر إرسال تقرير السوق
+MARKET_REPORT_EVERY = 14400  # كل 4 ساعات فقط
 
 # 🆕 V15: Buffer counters — عداد التأكيد قبل تغيير الحالة
 _btc_danger_count  = 0   # عدد المرات المتتالية تحت DANGER
@@ -1132,6 +1134,12 @@ def analyze_btc():
     last_btc = time.time()
 
     if old != market_state:
+        # ── cooldown 4 ساعات ──
+        global last_market_report
+        if time.time() - last_market_report < MARKET_REPORT_EVERY:
+            log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
+            return
+        last_market_report = _t.time()
         icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
         notes = {
             "SAFE":    "✅ كل الإشارات مفعّلة",
