@@ -1803,21 +1803,15 @@ def register_signal():
 def scan_early_detection():
     # type: () -> None
     """
-    الرصد المبكر — يعمل بدون تاريخ من اليوم الأول
+    رصد مبكر — يرصد نوعين:
 
-    يرصد 3 أنواع من الفرص المبكرة:
-
-    1️⃣ Near Low Alert:
-       السعر قريب من 24h Low + حجم يتزايد
-       = تجميع في القاع الآن
-
-    2️⃣ Volume Awakening:
-       حجم يقفز فجأة + سعر هادئ
+    1️⃣ تجميع في القاع:
+       حجم يتزايد + سعر مستقر أو صاعد قليلاً
        = الحيتان يشترون بصمت
 
-    3️⃣ Trend Reversal:
-       أيام حمراء متتالية + حجم اليوم أكبر
-       = بداية الانعكاس
+    2️⃣ دخول سيولة ضخمة:
+       حجم يقفز فجأة + تغيير هادئ
+       = مال جديد يدخل العملة
     """
     global early_alerted, early_vol_ref
 
@@ -1844,21 +1838,7 @@ def scan_early_detection():
         except: continue
 
         if vol < EARLY_MIN_VOL: continue
-
-        # استخدام القاع التاريخي إذا كان متوفراً
-        hist_low = bottom_price_history.get(sym, {})
-        if hist_low and isinstance(hist_low, dict):
-            _prices = [v for v in hist_low.values() if isinstance(v, (int,float)) and v > 0]
-            if _prices:
-                low24 = min(min(_prices), low24)  # الأدنى تاريخياً
-        elif isinstance(hist_low, (int, float)) and hist_low > 0:
-            low24 = min(hist_low, low24)
-        # يجب أن يكون هناك ازدياد في الحجم (ليس فقط حجم كبير)
-        _vol_ref = early_vol_ref.get(sym, vol)
-        if sym in early_vol_ref and vol < _vol_ref * 0.8:
-            early_vol_ref[sym] = _vol_ref * 0.9 + vol * 0.1
-            continue  # الحجم ينخفض = لا اهتمام
-        if price <= 0 or low24 <= 0: continue
+        if price <= 0: continue
 
         # cooldown
         if now - early_alerted.get(sym, 0) < EARLY_COOLDOWN: continue
@@ -1868,152 +1848,133 @@ def scan_early_detection():
         types  = []
 
         # ══════════════════════════════════════════
-        # 1️⃣ Near Low — السعر قريب من القاع اليومي
+        # 1️⃣ دخول السيولة — الحجم يقفز فجأة
         # ══════════════════════════════════════════
-        price_vs_low = price / low24
-        if price_vs_low <= EARLY_LOW_PCT:
-            # السعر أقل من 15% فوق أدنى مستوى اليوم
+        _vol_ref = early_vol_ref.get(sym, vol)
+        vol_ratio = vol / _vol_ref if _vol_ref > 0 else 1.0
+
+        if vol_ratio >= 3.0:
+            score += 5
+            types.append("💥 سيولة انفجرت {:.1f}×".format(vol_ratio))
+        elif vol_ratio >= 2.0:
+            score += 4
+            types.append("🔥 سيولة ضخمة {:.1f}×".format(vol_ratio))
+        elif vol_ratio >= EARLY_VOL_RISE:
+            score += 2
+            types.append("📈 سيولة تتزايد {:.1f}×".format(vol_ratio))
+
+        # تحديث المرجع ببطء
+        early_vol_ref[sym] = _vol_ref * 0.85 + vol * 0.15
+
+        # ══════════════════════════════════════════
+        # 2️⃣ تجميع هادئ — سعر مستقر + حجم قوي
+        # ══════════════════════════════════════════
+        if abs(change) <= 2.0:
             score += 3
-            types.append("📍 قريب من القاع اليومي")
-
-            # مكافأة: قريب جداً من القاع
-            if price_vs_low <= 1.05:
-                score += 2
-                types.append("🎯 على القاع مباشرة")
-
-        elif price_vs_low <= EARLY_HIGH_PCT:
-            score += 1
-            types.append("📊 في النطاق السفلي")
-        else:
-            continue  # بعيد عن القاع — لا يهمنا
-
-        # ══════════════════════════════════════════
-        # 2️⃣ Volume Awakening — الحجم يصحى
-        # ══════════════════════════════════════════
-        # بناء vol reference تراكمياً
-        if sym not in early_vol_ref:
-            early_vol_ref[sym] = vol
-        else:
-            ref = early_vol_ref[sym]
-            vol_ratio = vol / ref if ref > 0 else 1.0
-
-            if vol_ratio >= 2.0:
-                score += 3
-                types.append("💥 حجم انفجر {:.1f}×".format(vol_ratio))
-            elif vol_ratio >= EARLY_VOL_RISE:
-                score += 2
-                types.append("📈 حجم يتزايد {:.1f}×".format(vol_ratio))
-
-            # تحديث الـ reference ببطء
-            early_vol_ref[sym] = ref * 0.8 + vol * 0.2
-
-        # ══════════════════════════════════════════
-        # 3️⃣ تغيير هادئ = تجميع بصمت
-        # ══════════════════════════════════════════
-        if abs(change) <= 3.0:
-            score += 2
             types.append("🤫 تجميع هادئ ({:+.1f}%)".format(change))
-        elif abs(change) <= EARLY_MAX_CHANGE:
+        elif abs(change) <= 5.0:
             score += 1
-        else:
-            score -= 1  # تحرك كبير = ربما متأخر
+            types.append("📊 حركة معتدلة ({:+.1f}%)".format(change))
+        elif change > 5.0:
+            # صعود قوي = دخول سيولة شرائية
+            score += 2
+            types.append("🚀 صعود مع سيولة ({:+.1f}%)".format(change))
 
         # ══════════════════════════════════════════
-        # 4️⃣ حجم قوي = سيولة حقيقية
+        # 3️⃣ حجم مطلق قوي = سيولة حقيقية
         # ══════════════════════════════════════════
-        if vol >= 5_000_000:
+        if vol >= 10_000_000:
+            score += 3
+            types.append("🐋 سيولة ضخمة جداً {:.0f}M".format(vol/1e6))
+        elif vol >= 5_000_000:
             score += 2
-            types.append("🐋 سيولة ضخمة {:.1f}M".format(vol/1e6))
+            types.append("💰 سيولة قوية {:.1f}M".format(vol/1e6))
         elif vol >= 2_000_000:
             score += 1
 
-        if score < 6: continue  # حد أدنى للجودة — صارم
+        # ══════════════════════════════════════════
+        # 4️⃣ السعر قريب من قاع اليوم = فرصة أفضل
+        # ══════════════════════════════════════════
+        if low24 > 0:
+            price_vs_low = (price / low24 - 1) * 100
+            if price_vs_low <= 5.0:
+                score += 2
+                types.append("📍 قريب من قاع اليوم")
+            elif price_vs_low <= 15.0:
+                score += 1
+
+        if score < 6: continue  # حد أدنى للجودة
 
         signals.append({
-            "sym":       sym,
-            "price":     price,
-            "low24":     low24,
-            "high24":    high24,
-            "vol":       vol,
-            "change":    change,
-            "sector":    sector,
-            "score":     score,
-            "types":     types,
-            "vs_low":    round((price_vs_low - 1) * 100, 1),
+            "sym":    sym,
+            "price":  price,
+            "low24":  low24,
+            "high24": high24,
+            "vol":    vol,
+            "change": change,
+            "sector": sector,
+            "score":  score,
+            "types":  types,
+            "vol_ratio": vol_ratio,
         })
 
     if not signals: return
-
     signals.sort(key=lambda x: -x["score"])
 
-    for sig in signals[:1]:  # أفضل 1 فقط كل 15 دقيقة
+    for sig in signals[:1]:
         sym  = sig["sym"]
         base = sym.replace("USDT", "")
 
-        if sig["score"] >= 8:
+        if sig["score"] >= 10:
             icon = "🚨🎯"
-            lvl  = "EARLY STRONG SIGNAL"
-        elif sig["score"] >= 6:
+            lvl  = "STRONG LIQUIDITY SIGNAL"
+        elif sig["score"] >= 8:
             icon = "🎯"
-            lvl  = "EARLY SIGNAL"
+            lvl  = "LIQUIDITY SIGNAL"
         else:
             icon = "👁️"
             lvl  = "EARLY WATCH"
 
         types_str = "\n".join("  · " + t for t in sig["types"])
+        target_10 = round(sig["price"] * 1.10, 8)
+        target_20 = round(sig["price"] * 1.20, 8)
 
-        # حساب الهدف من القاع
-        target_10 = round(sig["low24"] * 1.10, 8)
-        target_20 = round(sig["low24"] * 1.20, 8)
-        gain_10   = round((target_10 / sig["price"] - 1) * 100, 1)
-        gain_20   = round((target_20 / sig["price"] - 1) * 100, 1)
-
-
-        # حساب Risk:Reward بناءً على vs_low و gain_20
-        _risk   = sig["vs_low"] if sig["vs_low"] > 0 else 1
-        _rr     = round(gain_20 / _risk, 1) if _risk > 0 else 1
         msg = (
             icon + " *" + lvl + "* " + icon + "\n"
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + fmt_price(sig["price"]) + "`\n"
-            + "  📉 أدنى سعر: `" + fmt_price(sig["low24"]) + "`\n"
-            + "  📊 فوق القاع بـ: `+" + str(sig["vs_low"]) + "%`\n"
             + "  📦 الحجم: `" + str(round(sig["vol"]/1e6, 2)) + "M`\n"
-            + "  📅 تغيير: `" + str(round(sig["change"], 1)) + "%`\n"
+            + "  📅 تغيير 24h: `" + str(round(sig["change"], 1)) + "%`\n"
+            + "  🔄 الحجم مقارنة بالأمس: `" + str(round(sig["vol_ratio"], 1)) + "×`\n"
             + "━" * 18 + "\n"
             + "🔍 *ما رصدناه:*\n"
             + types_str + "\n"
             + "━" * 18 + "\n"
-            + "🎯 هدف +10%: `" + fmt_price(target_10) + "` = `+" + str(gain_10) + "%`\n"
-            + "🎯 هدف +20%: `" + fmt_price(target_20) + "` = `+" + str(gain_20) + "%`\n"
+            + "🎯 هدف +10%: `" + fmt_price(target_10) + "`\n"
+            + "🎯 هدف +20%: `" + fmt_price(target_20) + "`\n"
             + "━" * 18 + "\n"
             + "⚡ _رصد مبكر — أضيفت للمراقبة_"
         )
 
-        if not can_send_signal(): 
+        if not can_send_signal():
             log.info("🔕 حد يومي 10 إشارات — توقف")
             break
+
         send(msg)
         early_alerted[sym] = now
         register_signal()
 
-        # أضف للـ Watchlist فوراً
         add_to_liquidity_watchlist(
-            sym, "early_detection_score" + str(sig["score"]),
+            sym, "early_vol_{:.1f}x".format(sig["vol_ratio"]),
             sig["vol"], sig["price"], sig["sector"]
         )
 
-        log.info("🎯 Early Detection | %s | score=%d | vs_low=+%.1f%% | vol=%.1fM",
-                 sym, sig["score"], sig["vs_low"], sig["vol"]/1e6)
+        log.info("🎯 Early Detection | %s | score=%d | vol_ratio=%.1fx | vol=%.1fM",
+                 sym, sig["score"], sig["vol_ratio"], sig["vol"]/1e6)
 
     log.info("🎯 Early Scan | signals=%d", len(signals))
 
-
-
-# ═══════════════════════════════════════════════
-# LIQUIDITY WATCHLIST SYSTEM
-# ═══════════════════════════════════════════════
 
 def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
     # type: (str, str, float, float, str) -> None
