@@ -5837,7 +5837,24 @@ def init_static_watchlist():
 
     ticker_map = {t["symbol"]: t for t in all_tickers}
     added = 0
-    _static = STATIC_WATCHLIST  # مرجع محلي
+    _static = [
+        ("AVAXUSDT", "Layer1", "L1 قوي"),
+        ("LINKUSDT", "DeFi", "Oracle رائد"),
+        ("LTCUSDT", "Layer1", "عملة قديمة"),
+        ("ADAUSDT", "Layer1", "L1 كبير"),
+        ("VAIUSDT", "DeFi", "DeFi صغير"),
+        ("AIXBTUSDT", "AI", "AI Agent"),
+        ("CGPTUSDT", "AI", "AI رائد"),
+        ("SOLUSDT", "Layer1", "L1 الأقوى"),
+        ("SEIUSDT", "Layer1", "L1 جديد"),
+        ("CFXUSDT", "Layer1", "L1 صيني"),
+        ("APTUSDT", "Layer1", "L1 انخفض 95%"),
+        ("WLDUSDT", "AI", "AI + Worldcoin"),
+        ("ZROUSDT", "DeFi", "Bridge رائد"),
+        ("PYTHUSDT", "DeFi", "Oracle منافس LINK"),
+        ("COOKIEUSDT", "AI", "AI Agent ساخن"),
+        ("ROSEUSDT", "Privacy", "Privacy L1"),
+    ]
 
     for sym, sector, reason in _static:
         if sym in watchlist:
