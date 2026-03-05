@@ -1139,7 +1139,7 @@ def analyze_btc():
         if time.time() - last_market_report < MARKET_REPORT_EVERY:
             log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
             return
-        last_market_report = _t.time()
+        last_market_report = time.time()
         icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
         notes = {
             "SAFE":    "✅ كل الإشارات مفعّلة",
