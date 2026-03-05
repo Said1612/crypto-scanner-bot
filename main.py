@@ -5544,13 +5544,20 @@ def fmt_price(p):
     # type: (float) -> str
     """تنسيق السعر بدون scientific notation"""
     if p == 0: return "0"
-    if p >= 1:
+    if p >= 1000:
+        return "{:,.2f}".format(p)
+    elif p >= 1:
         return "{:.4f}".format(p).rstrip('0').rstrip('.')
+    elif p >= 0.01:
+        return "{:.6f}".format(p).rstrip('0').rstrip('.')
     elif p >= 0.0001:
         return "{:.8f}".format(p).rstrip('0').rstrip('.')
+    elif p >= 0.000001:
+        # PEPE, SHIB: 0.0000035
+        return "{:.9f}".format(p).rstrip('0').rstrip('.')
     else:
-        # عملات صغيرة جداً مثل PEPE SHIB
-        return "{:.10f}".format(p).rstrip('0').rstrip('.')
+        # عملات صغيرة جداً
+        return "{:.12f}".format(p).rstrip('0').rstrip('.')
 
 
 # ═══════════════════════════════════════════════
