@@ -24,6 +24,7 @@
 import os
 import sys
 import time
+import json
 import logging
 import requests
 from datetime import datetime
@@ -32,6 +33,8 @@ from typing import Optional, Dict, List, Tuple, Any, Set
 # ═══════════════════════════════════════════════
 #                    CONFIG
 # ═══════════════════════════════════════════════
+STATE_FILE = "/app/mafio_state.json"
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
 CHAT_ID        = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
 
@@ -132,6 +135,15 @@ WL_MAX_SIZE      = 30     # أقصى 30 عملة في القائمة
 WL_EXPIRY        = 86400  # عملة تبقى 24 ساعة بدون تحرك ثم تُحذف
 WL_ENTRY_COOL    = 14400  # 4 ساعات بين إشعارات الدخول لنفس العملة
 WL_CHECK_EVERY   = 60     # فحص الـ watchlist كل دقيقة
+
+# 🆕 Early Detection — رصد مبكر قبل الانفجار
+EARLY_LOW_PCT    = 1.15   # السعر < 115% من 24h Low
+EARLY_HIGH_PCT   = 1.35   # السعر < 135% من 24h Low (لا يزال قريب)
+EARLY_MIN_VOL    = 1_000_000  # حجم 1M+
+EARLY_VOL_RISE   = 1.3    # الحجم يتزايد 1.3× من المتوسط
+EARLY_COOLDOWN   = 21600  # 6 ساعات بين التنبيهات
+EARLY_SCAN_EVERY = 900    # فحص كل 15 دقيقة
+EARLY_MAX_CHANGE = 8.0    # تغيير أقل من 8% (لم ينفجر بعد)
 RT_PRICE_MOVE    = 2.0    # حركة سعر 2%+ مع السيولة
 HOT_MAX_CHANGE   = 50.0   # تجاهل Pump أكثر من 50%
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
@@ -664,6 +676,9 @@ rt_alerted       = {}  # type: Dict[str, float]  {sym: last_alert_time}
 wl_entry_alerted = {}  # type: Dict[str, float]  {sym: last_entry_alert_time}
 wl_price_snapshot= {}  # type: Dict[str, float]  {sym: price_when_added}
 last_wl_check    = 0.0
+early_alerted    = {}  # type: Dict[str, float]  {sym: last_alert_time}
+early_vol_ref    = {}  # type: Dict[str, float]  {sym: vol_reference}
+last_early_scan  = 0.0
 last_rt_scan     = 0.0
 last_bottom_scan     = 0.0
 
@@ -735,6 +750,25 @@ def poll_commands():
             elif text in ("/status", "/حالة"):
                 send("\u2705 البوت يعمل | عملات: " + str(len(candidates)) +
                      " | جواهر: " + str(len(gem_watchlist)))
+            elif text in ("/watchlist", "/مراقبة"):
+                if not watchlist:
+                    send("👁️ قائمة المراقبة فارغة")
+                else:
+                    _static = [(s,v) for s,v in watchlist.items() if v.get("priority")=="STATIC"]
+                    _dynamic= [(s,v) for s,v in watchlist.items() if v.get("priority")!="STATIC"]
+                    txt = "👁️ *قائمة المراقبة:*\n"
+                    if _static:
+                        txt += "\n📌 *ثابتة (" + str(len(_static)) + "):*\n"
+                        for s,v in _static:
+                            base = s.replace("USDT","")
+                            ep   = wl_price_snapshot.get(s,0)
+                            txt += "  · *" + base + "* | دخول: `" + str(ep) + "`\n"
+                    if _dynamic:
+                        txt += "\n⚡ *ديناميكية (" + str(len(_dynamic)) + "):*\n"
+                        for s,v in _dynamic[:5]:
+                            base = s.replace("USDT","")
+                            txt += "  · *" + base + "* | " + v.get("reason","")[:30] + "\n"
+                    send(txt)
             elif text in ("/gems", "/جواهر"):
                 if not gem_watchlist:
                     send("\U0001f48e لا توجد جواهر حالياً")
@@ -749,7 +783,8 @@ def poll_commands():
                     "/report — تقرير فوري\n"
                     "/status — حالة البوت\n"
                     "/gems   — الجواهر المرصودة\n"
-                    "/help   — هذه القائمة"
+                    "/watchlist — قائمة المراقبة\n"
+                    "/help      — هذه القائمة"
                 )
     except Exception as e:
         log.debug("poll_commands error: %s", e)
@@ -1716,6 +1751,200 @@ def get_backtest_stats():
 #   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
 
+def scan_early_detection():
+    # type: () -> None
+    """
+    الرصد المبكر — يعمل بدون تاريخ من اليوم الأول
+
+    يرصد 3 أنواع من الفرص المبكرة:
+
+    1️⃣ Near Low Alert:
+       السعر قريب من 24h Low + حجم يتزايد
+       = تجميع في القاع الآن
+
+    2️⃣ Volume Awakening:
+       حجم يقفز فجأة + سعر هادئ
+       = الحيتان يشترون بصمت
+
+    3️⃣ Trend Reversal:
+       أيام حمراء متتالية + حجم اليوم أكبر
+       = بداية الانعكاس
+    """
+    global early_alerted, early_vol_ref
+
+    if not all_tickers: return
+    now = time.time()
+
+    all_sector_coins = set()
+    for sc in SECTORS.values():
+        all_sector_coins.update(sc)
+
+    signals = []
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if sym not in all_sector_coins: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+            high24 = float(t["highPrice"])
+            low24  = float(t["lowPrice"])
+        except: continue
+
+        if vol < EARLY_MIN_VOL: continue
+        if price <= 0 or low24 <= 0: continue
+
+        # cooldown
+        if now - early_alerted.get(sym, 0) < EARLY_COOLDOWN: continue
+
+        sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
+        score  = 0
+        types  = []
+
+        # ══════════════════════════════════════════
+        # 1️⃣ Near Low — السعر قريب من القاع اليومي
+        # ══════════════════════════════════════════
+        price_vs_low = price / low24
+        if price_vs_low <= EARLY_LOW_PCT:
+            # السعر أقل من 15% فوق أدنى مستوى اليوم
+            score += 3
+            types.append("📍 قريب من القاع اليومي")
+
+            # مكافأة: قريب جداً من القاع
+            if price_vs_low <= 1.05:
+                score += 2
+                types.append("🎯 على القاع مباشرة")
+
+        elif price_vs_low <= EARLY_HIGH_PCT:
+            score += 1
+            types.append("📊 في النطاق السفلي")
+        else:
+            continue  # بعيد عن القاع — لا يهمنا
+
+        # ══════════════════════════════════════════
+        # 2️⃣ Volume Awakening — الحجم يصحى
+        # ══════════════════════════════════════════
+        # بناء vol reference تراكمياً
+        if sym not in early_vol_ref:
+            early_vol_ref[sym] = vol
+        else:
+            ref = early_vol_ref[sym]
+            vol_ratio = vol / ref if ref > 0 else 1.0
+
+            if vol_ratio >= 2.0:
+                score += 3
+                types.append("💥 حجم انفجر {:.1f}×".format(vol_ratio))
+            elif vol_ratio >= EARLY_VOL_RISE:
+                score += 2
+                types.append("📈 حجم يتزايد {:.1f}×".format(vol_ratio))
+
+            # تحديث الـ reference ببطء
+            early_vol_ref[sym] = ref * 0.8 + vol * 0.2
+
+        # ══════════════════════════════════════════
+        # 3️⃣ تغيير هادئ = تجميع بصمت
+        # ══════════════════════════════════════════
+        if abs(change) <= 3.0:
+            score += 2
+            types.append("🤫 تجميع هادئ ({:+.1f}%)".format(change))
+        elif abs(change) <= EARLY_MAX_CHANGE:
+            score += 1
+        else:
+            score -= 1  # تحرك كبير = ربما متأخر
+
+        # ══════════════════════════════════════════
+        # 4️⃣ حجم قوي = سيولة حقيقية
+        # ══════════════════════════════════════════
+        if vol >= 5_000_000:
+            score += 2
+            types.append("🐋 سيولة ضخمة {:.1f}M".format(vol/1e6))
+        elif vol >= 2_000_000:
+            score += 1
+
+        if score < 4: continue  # حد أدنى للجودة
+
+        signals.append({
+            "sym":       sym,
+            "price":     price,
+            "low24":     low24,
+            "high24":    high24,
+            "vol":       vol,
+            "change":    change,
+            "sector":    sector,
+            "score":     score,
+            "types":     types,
+            "vs_low":    round((price_vs_low - 1) * 100, 1),
+        })
+
+    if not signals: return
+
+    signals.sort(key=lambda x: -x["score"])
+
+    for sig in signals[:3]:  # أفضل 3 فقط
+        sym  = sig["sym"]
+        base = sym.replace("USDT", "")
+
+        if sig["score"] >= 8:
+            icon = "🚨🎯"
+            lvl  = "EARLY STRONG SIGNAL"
+        elif sig["score"] >= 6:
+            icon = "🎯"
+            lvl  = "EARLY SIGNAL"
+        else:
+            icon = "👁️"
+            lvl  = "EARLY WATCH"
+
+        types_str = "\n".join("  · " + t for t in sig["types"])
+
+        # حساب الهدف من القاع
+        target_10 = round(sig["low24"] * 1.10, 8)
+        target_20 = round(sig["low24"] * 1.20, 8)
+        gain_10   = round((target_10 / sig["price"] - 1) * 100, 1)
+        gain_20   = round((target_20 / sig["price"] - 1) * 100, 1)
+
+
+        # حساب Risk:Reward
+        _risk   = sl_pct if sl_pct > 0 else 1
+        _reward = target_pct if target_pct > 0 else 1
+        _rr     = round(_reward / _risk, 1)
+        msg = (
+            icon + " *" + lvl + "* " + icon + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(sig["price"]) + "`\n"
+            + "  📉 24h Low: `" + str(sig["low24"]) + "`\n"
+            + "  📊 فوق القاع بـ: `+" + str(sig["vs_low"]) + "%`\n"
+            + "  📦 الحجم: `" + str(round(sig["vol"]/1e6, 2)) + "M`\n"
+            + "  📅 تغيير: `" + str(round(sig["change"], 1)) + "%`\n"
+            + "━" * 18 + "\n"
+            + "🔍 *ما رصدناه:*\n"
+            + types_str + "\n"
+            + "━" * 18 + "\n"
+            + "🎯 هدف +10%: `" + str(target_10) + "` = `+" + str(gain_10) + "%`\n"
+            + "🎯 هدف +20%: `" + str(target_20) + "` = `+" + str(gain_20) + "%`\n"
+            + "━" * 18 + "\n"
+            + "⚡ _رصد مبكر — أضيفت للمراقبة_"
+        )
+
+        send(msg)
+        early_alerted[sym] = now
+
+        # أضف للـ Watchlist فوراً
+        add_to_liquidity_watchlist(
+            sym, "early_detection_score" + str(sig["score"]),
+            sig["vol"], sig["price"], sig["sector"]
+        )
+
+        log.info("🎯 Early Detection | %s | score=%d | vs_low=+%.1f%% | vol=%.1fM",
+                 sym, sig["score"], sig["vs_low"], sig["vol"]/1e6)
+
+    log.info("🎯 Early Scan | signals=%d", len(signals))
+
+
+
 # ═══════════════════════════════════════════════
 # LIQUIDITY WATCHLIST SYSTEM
 # ═══════════════════════════════════════════════
@@ -1724,6 +1953,11 @@ def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
     # type: (str, str, float, float, str) -> None
     """يضيف عملة لقائمة المراقبة عند رصد سيولة غير عادية"""
     global watchlist, wl_price_snapshot
+
+    # تحقق من القائمة المحظورة
+    if sym in BLOCKED_WATCHLIST:
+        log.debug("🚫 WL Blocked | %s", sym)
+        return
 
     # لا تجاوز الحد الأقصى
     if len(watchlist) >= WL_MAX_SIZE:
@@ -1760,7 +1994,9 @@ def check_watchlist_entries():
 
     for sym, info in list(watchlist.items()):
         # ── انتهت صلاحية العملة (24h بدون تحرك) ──
-        if now - info.get("since", now) > WL_EXPIRY:
+        if info.get("priority") == "STATIC":
+            pass  # الثابتة لا تنتهي أبداً
+        elif now - info.get("since", now) > WL_EXPIRY:
             to_remove.append(sym)
             log.info("👀 WL Expired | %s", sym)
             continue
@@ -1782,7 +2018,9 @@ def check_watchlist_entries():
 
         # ── شرط الدخول ──────────────────────────
         # تحرك 3%+ للأعلى منذ الإضافة
-        if move_since_add < WL_ENTRY_MOVE: continue
+        # STATIC تحتاج تحرك أقل للتنبيه (2% بدل 3%)
+        _min_move = 2.0 if info.get("priority") == "STATIC" else WL_ENTRY_MOVE
+        if move_since_add < _min_move: continue
 
         # cooldown لنفس العملة
         if now - wl_entry_alerted.get(sym, 0) < WL_ENTRY_COOL: continue
@@ -1796,7 +2034,10 @@ def check_watchlist_entries():
         priority = info.get("priority", "NORMAL")
 
         # ── إشعار الدخول ────────────────────────
-        if priority == "HIGH":
+        if priority == "STATIC":
+            icon = "🎯🟢"
+            lvl  = "WATCHLIST ENTRY"
+        elif priority == "HIGH":
             icon = "🚨🟢"
             lvl  = "HIGH PRIORITY ENTRY"
         else:
@@ -4351,9 +4592,23 @@ def check_liquidity_breakout(sym, price, daily_close, zones):
         # هامش الاختراق
         margin = LZ_ZONE_MARGIN * (0.3 if zone_type == "FRESH" else 0.5)
 
-        # إغلاق فوق المنطقة = سيولة شرائية
+        target_pct = round((zone_high / zone_low - 1) * 100, 1) if zone_low > 0 else 0
+
+        # 🆕 مرحلة 1: السعر داخل المنطقة = تجميع مبكر
+        if zone_low <= daily_close <= zone_high:
+            return {
+                "type":       "WATCH",   # راقب — لم يخترق بعد
+                "zone_type":  zone_type,
+                "zone_high":  zone_high,
+                "zone_low":   zone_low,
+                "sigma":      sigma,
+                "vol_ratio":  vol_ratio,
+                "close":      daily_close,
+                "target_pct": target_pct,
+            }
+
+        # مرحلة 2: إغلاق فوق المنطقة = اختراق مؤكد
         if daily_close > zone_high * (1 + margin):
-            target_pct = round((zone_high / zone_low - 1) * 100, 1) if zone_low > 0 else 0
             return {
                 "type":       "BUY",
                 "zone_type":  zone_type,
@@ -4452,8 +4707,10 @@ def run_daily_liquidity_scan():
             type_tag = "🔁 *منطقة متكررة* — دعم مؤكد بالحجم"
             type_icon = "🔁"
 
-        # حساب الهدف ووقف الخسارة
-        sl_pct = round((daily_close - zone_low) / daily_close * 100, 2) if daily_close > 0 else 0
+        # حساب وقف الخسارة — بحد أقصى 5%
+        sl_raw   = round((daily_close - zone_low) / daily_close * 100, 2) if daily_close > 0 else 5.0
+        sl_pct   = min(sl_raw, 5.0)   # لا يتجاوز 5% أبداً
+        sl_price = round(daily_close * (1 - sl_pct / 100), 8)
 
         # الهدف = zone_high إذا كان أعلى من الدخول، وإلا نحسب هدفاً واقعياً
         if zone_high > daily_close:
@@ -4475,15 +4732,28 @@ def run_daily_liquidity_scan():
         # إشارة نادرة؟
         rare_tag = "\n🐋🔥 *RARE — نادر جداً!*" if sigma >= LZ_TOUCHES_RARE else ""
 
+        # تمييز WATCH vs BUY
+        sig_type = sig.get("type", "BUY")
+        if sig_type == "WATCH":
+            sig_icon  = "👁️"
+            sig_title = "LIQUIDITY WATCH"
+            sig_desc  = "السعر داخل منطقة السيولة — تجميع مبكر"
+            action_txt = "⏳ _راقب — انتظر الإغلاق فوق {:.5f}_".format(sig["zone_high"])
+        else:
+            sig_icon  = "🌊"
+            sig_title = "DAILY LIQUIDITY SIGNAL V16"
+            sig_desc  = "سيولة شرائية — اختراق مؤكد"
+            action_txt = "⚡ _إشارة يومية — دخول عند الإغلاق_"
+
         msg = (
-            "🌊 *DAILY LIQUIDITY SIGNAL V16*\n"
-            "━━━━━━━━━━━━━━━━━━\n"
+            "{icon} *{title}*\n".format(icon=sig_icon, title=sig_title)
+            + "━━━━━━━━━━━━━━━━━━\n"
             "🟢 *{sym}* — سيولة شرائية\n"
             "{type_tag}\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "📊 *منطقة السيولة:*\n"
-            "  🔼 Zone High: `{zh}`\n"
-            "  🔽 Zone Low:  `{zl}`\n"
+            "  🔼 Zone High: `{zh}` ← مقاومة\n"
+            "  🔽 Zone Low:  `{zl}` ← دعم قوي\n"
             "  💧 Sigma: {sl}\n"
             "  📦 حجم المنطقة: `{vr}×` المعدل\n"
             "{rare}"
@@ -4492,8 +4762,8 @@ def run_daily_liquidity_scan():
             "✅ أغلق فوق المنطقة\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "🎯 *نقطة الدخول:*  `{close}`\n"
-            "🛡️ *وقف الخسارة:* `{zl}` (-{sl_pct}%)\n"
-            "🚀 *الهدف:*        `{tp}` (+{tgt}%)\n"
+            "🛡️ *وقف الخسارة:* `{stop}` (-{sl_pct}%)\n"
+            "🚀 *الهدف:*        `{tp}` (+{tgt}%)  | R:R `1:{rr}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "🏷️ القطاع: `{sector}` | السوق: `{mst}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -4509,6 +4779,8 @@ def run_daily_liquidity_scan():
             rare=rare_tag,
             close=round(daily_close, 8),
             sl_pct=sl_pct,
+            stop=sl_price,
+            rr=_rr,
             tp=target_price,
             tgt=target_pct,
             sector=sector,
@@ -4796,7 +5068,7 @@ def send_daily_report():
     if len(daily_market_vol_history) > 7:
         daily_market_vol_history.pop(0)
 
-    vol_change_pct = 0.0
+    vol_change_pct = None  # None = لا يوجد بيانات بعد
     vol_arrow      = "➡️"
     if len(daily_market_vol_history) >= 2:
         prev_vol = daily_market_vol_history[-2]
@@ -4923,8 +5195,11 @@ def send_daily_report():
         buy_vol=buy_vol/1_000_000,
         sell_vol=sell_vol/1_000_000,
         arrow=vol_arrow,
-        vol_ch=vol_change_pct,
+        vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "اول يوم 📊"),
+        
         total_vol=total_market_vol / 1_000_000,
+        vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "أول يوم"),
+
         whale=whale_txt,
         stables=stable_txt,
         flow=flow_sum,
@@ -5228,6 +5503,194 @@ def send_report():
 # ═══════════════════════════════════════════════
 #   MAIN LOOP
 # ═══════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════
+# STATE PERSISTENCE — حفظ واستعادة البيانات
+# ═══════════════════════════════════════════════
+
+def save_state():
+    # type: () -> None
+    """حفظ كل البيانات المهمة في ملف JSON"""
+    try:
+        state = {
+            "version":             "V16",
+            "saved_at":            time.time(),
+            # تاريخ الأسعار والأحجام
+            "bottom_price_history": bottom_price_history,
+            "bottom_vol_history":   bottom_vol_history,
+            "ath_tracker":          ath_tracker,
+            "rt_vol_baseline":      rt_vol_baseline,
+            "early_vol_ref":        early_vol_ref,
+            # القوائم
+            "gem_watchlist":        gem_watchlist,
+            "watchlist":            watchlist,
+            "wl_price_snapshot":    wl_price_snapshot,
+            "candidates":           list(candidates),
+            # Backtest
+            "backtest_signals":     backtest_signals,
+            # cooldowns
+            "bottom_alerted":       bottom_alerted,
+            "explosion_alerted":    explosion_alerted,
+            "ath_alerted":          ath_alerted,
+            "hot_alerted":          hot_alerted,
+            "rt_alerted":           rt_alerted,
+            "early_alerted":        early_alerted,
+            "wl_entry_alerted":     wl_entry_alerted,
+            # تقارير
+            "daily_report_sent_date":   daily_report_sent_date,
+            "lz_daily_sent_date":       lz_daily_sent_date,
+            "daily_gem_count":          daily_gem_count,
+            "stable_vol_history":       stable_vol_history,
+            "daily_market_vol_history": daily_market_vol_history,
+        }
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+        log.info("💾 State saved — %d gems | %d watchlist | %d BT",
+                 len(gem_watchlist), len(watchlist), len(backtest_signals))
+    except Exception as e:
+        log.error("❌ save_state error: %s", e)
+
+
+def load_state():
+    # type: () -> None
+    """استعادة البيانات من آخر حفظ"""
+    global bottom_price_history, bottom_vol_history, ath_tracker
+    global rt_vol_baseline, early_vol_ref
+    global gem_watchlist, watchlist, wl_price_snapshot, candidates
+    global backtest_signals
+    global bottom_alerted, explosion_alerted, ath_alerted
+    global hot_alerted, rt_alerted, early_alerted, wl_entry_alerted
+    global daily_report_sent_date, lz_daily_sent_date
+    global daily_gem_count, stable_vol_history, daily_market_vol_history
+
+    if not os.path.exists(STATE_FILE):
+        log.info("📂 لا يوجد ملف حفظ — بداية جديدة")
+        return
+
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+
+        saved_at = state.get("saved_at", 0)
+        age_hours = (time.time() - saved_at) / 3600
+        log.info("📂 تحميل State — عمره: %.1f ساعة", age_hours)
+
+        # تاريخ الأسعار
+        bottom_price_history.update(state.get("bottom_price_history", {}))
+        bottom_vol_history.update(state.get("bottom_vol_history", {}))
+        ath_tracker.update(state.get("ath_tracker", {}))
+        rt_vol_baseline.update(state.get("rt_vol_baseline", {}))
+        early_vol_ref.update(state.get("early_vol_ref", {}))
+
+        # القوائم
+        gem_watchlist.update(state.get("gem_watchlist", {}))
+        watchlist.update(state.get("watchlist", {}))
+        wl_price_snapshot.update(state.get("wl_price_snapshot", {}))
+        saved_cands = state.get("candidates", [])
+        for c in saved_cands:
+            if c not in candidates:
+                candidates.append(c)
+
+        # Backtest
+        backtest_signals.update(state.get("backtest_signals", {}))
+
+        # cooldowns
+        bottom_alerted.update(state.get("bottom_alerted", {}))
+        explosion_alerted.update(state.get("explosion_alerted", {}))
+        ath_alerted.update(state.get("ath_alerted", {}))
+        hot_alerted.update(state.get("hot_alerted", {}))
+        rt_alerted.update(state.get("rt_alerted", {}))
+        early_alerted.update(state.get("early_alerted", {}))
+        wl_entry_alerted.update(state.get("wl_entry_alerted", {}))
+
+        # تقارير
+        daily_report_sent_date   = state.get("daily_report_sent_date", "")
+        lz_daily_sent_date       = state.get("lz_daily_sent_date", "")
+        daily_gem_count          = state.get("daily_gem_count", {"date": "", "count": 0})
+        stable_vol_history.update(state.get("stable_vol_history", {}))
+        _dmv = state.get("daily_market_vol_history", [])
+        if isinstance(_dmv, list):
+            daily_market_vol_history.extend(_dmv)
+        log.info("📊 Market vol history loaded: %d entries", len(daily_market_vol_history))
+
+        log.info("✅ State loaded | gems=%d | watchlist=%d | ath=%d | BT=%d",
+                 len(gem_watchlist), len(watchlist), len(ath_tracker), len(backtest_signals))
+
+        send("♻️ *Bot Restarted* — تم استعادة البيانات السابقة\n"
+             "💎 Gems: `{}` | 👁️ Watchlist: `{}` | 📊 BT: `{}`\n"
+             "⏱️ آخر حفظ: `{:.1f}` ساعة".format(
+                 len(gem_watchlist), len(watchlist),
+                 len(backtest_signals), age_hours))
+
+    except Exception as e:
+        log.error("❌ load_state error: %s", e)
+
+
+# ═══════════════════════════════════════════════
+# STATIC WATCHLIST — عملات مراقبة ثابتة
+# تُضاف عند بداية البوت وتبقى دائماً
+# ═══════════════════════════════════════════════
+STATIC_WATCHLIST = [
+    ("AVAXUSDT", "Layer1", "L1 قوي — انخفض 90%+ من ATH"),
+    ("LINKUSDT", "DeFi", "Oracle رائد — تجميع دائم"),
+    ("LTCUSDT", "Layer1", "عملة قديمة — دورات قوية"),
+    ("ADAUSDT", "Layer1", "L1 كبير — انخفض كثيراً"),
+    ("VAIUSDT", "DeFi", "DeFi صغير — إمكانية كبيرة"),
+    ("AIXBTUSDT", "AI", "AI Agent — قطاع ساخن"),
+    ("CGPTUSDT", "AI", "AI رائد — انخفض 95%+"),
+    ("SOLUSDT", "Layer1", "L1 الأقوى — دعم قوي"),
+    ("SEIUSDT", "Layer1", "L1 جديد — إمكانية كبيرة"),
+    ("CFXUSDT", "Layer1", "L1 صيني — انخفض كثيراً"),
+    ("APTUSDT", "Layer1", "L1 — انخفض 95% من ATH"),
+    ("WLDUSDT", "AI", "AI + Worldcoin — مشروع كبير"),
+    ("ZROUSDT", "DeFi", "ZRO — Bridge رائد"),
+    ("PYTHUSDT", "DeFi", "Oracle — منافس LINK"),
+    ("COOKIEUSDT", "AI", "AI Agent — قطاع ساخن"),
+    ("ROSEUSDT", "Privacy", "Privacy L1 — انخفض 95%+"),
+]
+
+
+def init_static_watchlist():
+    # type: () -> None
+    """تهيئة قائمة المراقبة الثابتة عند بدء البوت"""
+    global watchlist, wl_price_snapshot
+
+    if not all_tickers:
+        log.warning("⚠️ init_static_watchlist: all_tickers فارغ")
+        return
+
+    ticker_map = {t["symbol"]: t for t in all_tickers}
+    added = 0
+
+    for sym, sector, reason in STATIC_WATCHLIST:
+        if sym in watchlist:
+            continue  # موجودة مسبقاً
+
+        t = ticker_map.get(sym)
+        if not t:
+            log.warning("⚠️ Static WL: %s غير موجودة في السوق", sym)
+            continue
+
+        try:
+            price = float(t["lastPrice"])
+            vol   = float(t["quoteVolume"])
+        except:
+            continue
+
+        watchlist[sym] = {
+            "since":    time.time(),
+            "reason":   reason,
+            "vol":      vol,
+            "sector":   sector,
+            "priority": "STATIC",  # ثابتة لا تنتهي صلاحيتها
+        }
+        wl_price_snapshot[sym] = price
+        added += 1
+
+    log.info("👁️ Static Watchlist: أضفنا %d عملة | إجمالي: %d", added, len(watchlist))
+
+
+
 def run():
     # type: () -> None
     global all_tickers   # ✅ إصلاح V11: تأكيد أن all_tickers global
@@ -5239,6 +5702,7 @@ def run():
     global last_sector_report        # 🆕
     global last_rt_scan, last_hot_scan, last_bottom_scan
     global wl_entry_alerted, wl_price_snapshot, last_wl_check
+    global early_alerted, early_vol_ref, last_early_scan
     global last_ath_scan, last_expand
     global rt_vol_baseline, rt_alerted
     global hot_alerted, bottom_alerted
@@ -5247,6 +5711,8 @@ def run():
     global explosion_alerted, bottom_price_history, bottom_vol_history
 
     log.info("🚀 MAFIO BOT V16 يبدأ...")
+    load_state()  # استعادة البيانات من آخر تشغيل
+    init_static_watchlist()  # تهيئة قائمة المراقبة الثابتة
 
     log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
@@ -5304,6 +5770,15 @@ def run():
 
             # 🚨 أولوية قصوى — Realtime Liquidity كل 5 دقائق
             # ⚡ Instant Movers — كل 5 دقائق بدون تاريخ
+
+            # 🎯 Early Detection — كل 15 دقيقة
+            if now - last_early_scan >= EARLY_SCAN_EVERY:
+                scan_early_detection()
+                last_early_scan = now
+
+            # 💾 حفظ الحالة كل 30 دقيقة
+            if int(now) % 1800 < 12:  # كل 30 دقيقة
+                save_state()
 
             # 👁️ Watchlist Entry Check — كل دقيقة
             if now - last_wl_check >= WL_CHECK_EVERY:
