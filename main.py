@@ -1655,91 +1655,38 @@ def register_backtest(sym, price, sector):
 
 def check_backtest(price_map):
     # type: (Dict[str, float]) -> None
-    """
-    يُستدعى من run() كل دورة.
-    يتحقق من الإشارات المسجلة ويرسل نتائجها عند الوقت المحدد.
-    """
+    """يحفظ نتائج Backtest — التقرير في send_daily_report يومياً"""
     global backtest_signals
     now = time.time()
 
     for sym, data in list(backtest_signals.items()):
         price = price_map.get(sym, 0)
-        if price <= 0:
-            continue
-
+        if price <= 0: continue
         entry = data["entry_price"]
-        if entry <= 0:
-            continue
+        if entry <= 0: continue
 
-        elapsed = now - data["entry_time"]
-        # 🆕 V15: خصم رسوم التداول الواقعية (0.1% دخول + 0.1% خروج = 0.2%)
+        elapsed  = now - data["entry_time"]
         gain_raw = (price - entry) / entry * 100
         gain     = round(gain_raw - BACKTEST_FEE, 2)
-        emoji    = "✅" if gain > 0 else "🔴"
-        fee_note = "_(بعد خصم {:.1f}% رسوم)_".format(BACKTEST_FEE)
 
-        # ── تحقق 1 ساعة ──────────────────────────
+        # حفظ النتائج فقط — بدون إرسال فردي
         if not data["checked_1h"] and elapsed >= BACKTEST_CHECK_1H:
-            data["checked_1h"]  = True
-            data["result_1h"]   = gain
-            send(
-                "📊 *BACKTEST 1H* | `{sym}`\n"
-                "{em} الربح الصافي: `{gain:+.2f}%` {fee}\n"
-                "📈 قبل الرسوم: `{raw:+.2f}%`\n"
-                "💵 دخول: `{entry}` ← الآن: `{now_p}`\n"
-                "🏷️ قطاع: `{sector}`".format(
-                    sym=sym.replace("USDT",""), em=emoji,
-                    gain=gain, fee=fee_note, raw=gain_raw,
-                    entry=entry, now_p=round(price, 6),
-                    sector=data["sector"],
-                )
-            )
-            log.info("📊 Backtest 1H | %s | صافي=%+.2f%% | خام=%+.2f%%",
-                     sym, gain, gain_raw)
+            data["checked_1h"] = True
+            data["result_1h"]  = gain
+            data["price_now"]  = price
+            log.info("📊 BT-1H | %s | %+.2f%%", sym, gain)
 
-        # ── تحقق 4 ساعات ─────────────────────────
         elif not data["checked_4h"] and elapsed >= BACKTEST_CHECK_4H:
-            data["checked_4h"]  = True
-            data["result_4h"]   = gain
-            send(
-                "📊 *BACKTEST 4H* | `{sym}`\n"
-                "{em} الربح الصافي: `{gain:+.2f}%` {fee}\n"
-                "📈 قبل الرسوم: `{raw:+.2f}%`\n"
-                "💵 دخول: `{entry}` ← الآن: `{now_p}`\n"
-                "1H كان: `{r1h}%` | 4H الآن: `{gain:+.2f}%`".format(
-                    sym=sym.replace("USDT",""), em=emoji,
-                    gain=gain, fee=fee_note, raw=gain_raw,
-                    entry=entry, now_p=round(price, 6),
-                    r1h=data.get("result_1h","N/A"),
-                )
-            )
-            log.info("📊 Backtest 4H | %s | صافي=%+.2f%%", sym, gain)
+            data["checked_4h"] = True
+            data["result_4h"]  = gain
+            data["price_now"]  = price
+            log.info("📊 BT-4H | %s | %+.2f%%", sym, gain)
 
-        # ── تحقق 24 ساعة ─────────────────────────
         elif not data["checked_24h"] and elapsed >= BACKTEST_CHECK_24H:
             data["checked_24h"] = True
             data["result_24h"]  = gain
-            r1h  = data.get("result_1h")
-            r4h  = data.get("result_4h")
-            best = max(x for x in [r1h, r4h, gain] if x is not None)
-            send(
-                "🏁 *BACKTEST 24H — نهائي* | `{sym}`\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "{em} صافي 24H: `{gain:+.2f}%` {fee}\n"
-                "📈 أفضل نقطة: `+{best:.2f}%`\n"
-                "⏱️ 1H: `{r1h}%` | 4H: `{r4h}%`\n"
-                "💵 دخول: `{entry}`\n"
-                "🏷️ قطاع: `{sector}`".format(
-                    sym=sym.replace("USDT",""), em=emoji,
-                    gain=gain, fee=fee_note,
-                    best=best,
-                    r1h=r1h if r1h is not None else "N/A",
-                    r4h=r4h if r4h is not None else "N/A",
-                    entry=entry, sector=data["sector"],
-                )
-            )
-            log.info("🏁 Backtest 24H | %s | صافي=%+.2f%%", sym, gain)
-            del backtest_signals[sym]
+            data["price_now"]   = price
+            log.info("🏁 BT-24H | %s | %+.2f%%", sym, gain)
 
 
 def get_backtest_stats():
@@ -4458,7 +4405,11 @@ def run_daily_liquidity_scan():
     signals_found = 0
     tv_signals    = []
 
-    for sym in list(candidates):
+    # أفضل 5 عملات حسب الحجم فقط
+    _vmap = {t["symbol"]: float(t.get("quoteVolume",0)) for t in all_tickers}
+    _cands_sorted = sorted(candidates, key=lambda s: -_vmap.get(s,0))
+    _lz_count = 0
+    for sym in _cands_sorted:
         # تجنب التكرار
         last_alert = lz_alerted.get(sym, 0)
         if time.time() - last_alert < LZ_COOLDOWN:
@@ -4569,6 +4520,8 @@ def run_daily_liquidity_scan():
         lz_alerted[sym] = time.time()
         register_backtest(sym, daily_close, sector)
         signals_found += 1
+        _lz_count += 1
+        if _lz_count >= 5: break  # أفضل 5 فقط
         log.info("🌊 Daily LZ Signal | %s | sigma=%d | close=%.8f",
                  sym, sigma, daily_close)
 
@@ -4719,6 +4672,37 @@ def send_daily_report():
         return
 
     daily_report_sent_date = today
+
+    # ── تقرير Backtest اليومي ──────────────────
+    if backtest_signals:
+        bt_results = []
+        _pm = {t["symbol"]: float(t["lastPrice"]) for t in all_tickers}
+        for _sym, _data in list(backtest_signals.items()):
+            _entry = _data.get("entry_price", 0)
+            _cur   = _pm.get(_sym, 0)
+            if _entry <= 0 or _cur <= 0: continue
+            _gain  = round((_cur - _entry) / _entry * 100 - BACKTEST_FEE, 2)
+            bt_results.append((_sym.replace("USDT",""), _gain, _entry, _cur))
+
+        if bt_results:
+            bt_results.sort(key=lambda x: -x[1])
+            wins  = [r for r in bt_results if r[1] > 0]
+            loses = [r for r in bt_results if r[1] <= 0]
+            bt_msg  = "━" * 18 + "\n"
+            bt_msg += "📊 *BACKTEST REPORT*\n"
+            bt_msg += "✅ رابح: `{}` | ❌ خاسر: `{}`\n".format(len(wins), len(loses))
+            if bt_results:
+                wr = round(len(wins)/len(bt_results)*100)
+                bt_msg += "🎯 نسبة النجاح: `{}%`\n".format(wr)
+            if wins:
+                bt_msg += "\n🏆 *أفضل:*\n"
+                for s,g,e,c in wins[:3]:
+                    bt_msg += "  ✅ *{}* `{}→{}` `+{}%`\n".format(s,e,round(c,6),g)
+            if loses:
+                bt_msg += "\n📉 *يحتاج مراجعة:*\n"
+                for s,g,e,c in loses[:3]:
+                    bt_msg += "  ❌ *{}* `{}→{}` `{}%`\n".format(s,e,round(c,6),g)
+            send(bt_msg)
     log.info("📅 Daily Report — إرسال تقرير إغلاق اليوم...")
 
     if not all_tickers:
