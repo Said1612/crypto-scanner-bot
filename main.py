@@ -1906,10 +1906,9 @@ def scan_early_detection():
         gain_20   = round((target_20 / sig["price"] - 1) * 100, 1)
 
 
-        # حساب Risk:Reward
-        _risk   = sl_pct if sl_pct > 0 else 1
-        _reward = target_pct if target_pct > 0 else 1
-        _rr     = round(_reward / _risk, 1)
+        # حساب Risk:Reward بناءً على vs_low و gain_20
+        _risk   = sig["vs_low"] if sig["vs_low"] > 0 else 1
+        _rr     = round(gain_20 / _risk, 1) if _risk > 0 else 1
         msg = (
             icon + " *" + lvl + "* " + icon + "\n"
             + "━" * 18 + "\n"
@@ -5712,7 +5711,6 @@ def run():
 
     log.info("🚀 MAFIO BOT V16 يبدأ...")
     load_state()  # استعادة البيانات من آخر تشغيل
-    init_static_watchlist()  # تهيئة قائمة المراقبة الثابتة
 
     log.info("⏳ تحميل بيانات السوق...")
     analyze_btc()
@@ -5720,6 +5718,7 @@ def run():
     refresh_tickers()
     time.sleep(2)
     refresh_tickers()
+    init_static_watchlist()  # all_tickers جاهز الآن
 
     log.info("🔍 تشغيل Auto Expand Sectors...")
     auto_expand_sectors()
