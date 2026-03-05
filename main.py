@@ -137,13 +137,13 @@ WL_ENTRY_COOL    = 14400  # 4 ساعات بين إشعارات الدخول لن
 WL_CHECK_EVERY   = 60     # فحص الـ watchlist كل دقيقة
 
 # 🆕 Early Detection — رصد مبكر قبل الانفجار
-EARLY_LOW_PCT    = 1.15   # السعر < 115% من 24h Low
-EARLY_HIGH_PCT   = 1.35   # السعر < 135% من 24h Low (لا يزال قريب)
-EARLY_MIN_VOL    = 1_000_000  # حجم 1M+
+EARLY_LOW_PCT    = 1.10   # السعر < 110% من القاع التاريخي
+EARLY_HIGH_PCT   = 1.30   # السعر < 130% من القاع (قريب فقط)
+EARLY_MIN_VOL    = 2_000_000  # حجم 2M+ — عملات ذات سيولة حقيقية
 EARLY_VOL_RISE   = 1.3    # الحجم يتزايد 1.3× من المتوسط
-EARLY_COOLDOWN   = 21600  # 6 ساعات بين التنبيهات
+EARLY_COOLDOWN   = 86400  # 24 ساعة بين التنبيهات لنفس العملة
 EARLY_SCAN_EVERY = 900    # فحص كل 15 دقيقة
-EARLY_MAX_CHANGE = 8.0    # تغيير أقل من 8% (لم ينفجر بعد)
+EARLY_MAX_CHANGE = 5.0    # تغيير أقل من 5% فقط
 RT_PRICE_MOVE    = 2.0    # حركة سعر 2%+ مع السيولة
 HOT_MAX_CHANGE   = 50.0   # تجاهل Pump أكثر من 50%
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
@@ -677,6 +677,7 @@ wl_entry_alerted = {}  # type: Dict[str, float]  {sym: last_entry_alert_time}
 wl_price_snapshot= {}  # type: Dict[str, float]  {sym: price_when_added}
 last_wl_check    = 0.0
 early_alerted    = {}  # type: Dict[str, float]  {sym: last_alert_time}
+daily_signals    = {"date": "", "count": 0}  # عداد يومي شامل
 early_vol_ref    = {}  # type: Dict[str, float]  {sym: vol_reference}
 last_early_scan  = 0.0
 last_rt_scan     = 0.0
@@ -1751,6 +1752,30 @@ def get_backtest_stats():
 #   SMART MONEY DETECTION
 # ═══════════════════════════════════════════════
 
+MAX_DAILY_SIGNALS = 10  # الحد الأقصى للإشارات يومياً
+
+
+def can_send_signal():
+    # type: () -> bool
+    """هل يمكن إرسال إشارة اليوم؟ الحد الأقصى 10"""
+    global daily_signals
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if daily_signals["date"] != today:
+        daily_signals = {"date": today, "count": 0}
+    return daily_signals["count"] < MAX_DAILY_SIGNALS
+
+
+def register_signal():
+    # type: () -> None
+    """تسجيل إشارة جديدة في العداد اليومي"""
+    global daily_signals
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if daily_signals["date"] != today:
+        daily_signals = {"date": today, "count": 0}
+    daily_signals["count"] += 1
+    log.info("📊 إشارات اليوم: %d/%d", daily_signals["count"], MAX_DAILY_SIGNALS)
+
+
 def scan_early_detection():
     # type: () -> None
     """
@@ -1795,6 +1820,20 @@ def scan_early_detection():
         except: continue
 
         if vol < EARLY_MIN_VOL: continue
+
+        # استخدام القاع التاريخي إذا كان متوفراً
+        hist_low = bottom_price_history.get(sym, {})
+        if hist_low and isinstance(hist_low, dict):
+            _prices = [v for v in hist_low.values() if isinstance(v, (int,float)) and v > 0]
+            if _prices:
+                low24 = min(min(_prices), low24)  # الأدنى تاريخياً
+        elif isinstance(hist_low, (int, float)) and hist_low > 0:
+            low24 = min(hist_low, low24)
+        # يجب أن يكون هناك ازدياد في الحجم (ليس فقط حجم كبير)
+        _vol_ref = early_vol_ref.get(sym, vol)
+        if sym in early_vol_ref and vol < _vol_ref * 0.8:
+            early_vol_ref[sym] = _vol_ref * 0.9 + vol * 0.1
+            continue  # الحجم ينخفض = لا اهتمام
         if price <= 0 or low24 <= 0: continue
 
         # cooldown
@@ -1864,7 +1903,7 @@ def scan_early_detection():
         elif vol >= 2_000_000:
             score += 1
 
-        if score < 4: continue  # حد أدنى للجودة
+        if score < 6: continue  # حد أدنى للجودة — صارم
 
         signals.append({
             "sym":       sym,
@@ -1883,7 +1922,7 @@ def scan_early_detection():
 
     signals.sort(key=lambda x: -x["score"])
 
-    for sig in signals[:3]:  # أفضل 3 فقط
+    for sig in signals[:1]:  # أفضل 1 فقط كل 15 دقيقة
         sym  = sig["sym"]
         base = sym.replace("USDT", "")
 
@@ -1914,7 +1953,7 @@ def scan_early_detection():
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + str(sig["price"]) + "`\n"
-            + "  📉 24h Low: `" + str(sig["low24"]) + "`\n"
+            + "  📉 أدنى سعر: `" + str(sig["low24"]) + "`\n"
             + "  📊 فوق القاع بـ: `+" + str(sig["vs_low"]) + "%`\n"
             + "  📦 الحجم: `" + str(round(sig["vol"]/1e6, 2)) + "M`\n"
             + "  📅 تغيير: `" + str(round(sig["change"], 1)) + "%`\n"
@@ -1928,8 +1967,12 @@ def scan_early_detection():
             + "⚡ _رصد مبكر — أضيفت للمراقبة_"
         )
 
+        if not can_send_signal(): 
+            log.info("🔕 حد يومي 10 إشارات — توقف")
+            break
         send(msg)
         early_alerted[sym] = now
+        register_signal()
 
         # أضف للـ Watchlist فوراً
         add_to_liquidity_watchlist(
@@ -2061,8 +2104,10 @@ def check_watchlist_entries():
             + "🚀 _العملة تتحرك — فرصة دخول الآن!_"
         )
 
+        if not can_send_signal(): break
         send(msg)
         wl_entry_alerted[sym] = now
+        register_signal()
         log.info("🟢 WL Entry | %s | move=+%.1f%% | vol=%.1fM",
                  sym, move_since_add, vol/1e6)
 
@@ -2157,8 +2202,10 @@ def scan_instant_movers():
             +"🎯 *"+lvl+"* | قوة: `"+str(m["score"])+"/9`\n"
             +"⚡ _حركة قوية — ادرس فرصة الدخول_"
         )
+        if not can_send_signal(): break
         send(msg)
         hot_alerted[sym] = now
+        register_signal()
         if sym not in candidates: candidates.append(sym)
         add_to_liquidity_watchlist(sym, "move_"+str(round(m["change"],0))+"%",
                                    m["vol"], m["price"], m["sector"])
@@ -5534,6 +5581,7 @@ def save_state():
             "hot_alerted":          hot_alerted,
             "rt_alerted":           rt_alerted,
             "early_alerted":        early_alerted,
+            "daily_signals":        daily_signals,
             "wl_entry_alerted":     wl_entry_alerted,
             # تقارير
             "daily_report_sent_date":   daily_report_sent_date,
@@ -5600,6 +5648,7 @@ def load_state():
         hot_alerted.update(state.get("hot_alerted", {}))
         rt_alerted.update(state.get("rt_alerted", {}))
         early_alerted.update(state.get("early_alerted", {}))
+        daily_signals = state.get("daily_signals", {"date": "", "count": 0})
         wl_entry_alerted.update(state.get("wl_entry_alerted", {}))
 
         # تقارير
@@ -5702,6 +5751,7 @@ def run():
     global last_rt_scan, last_hot_scan, last_bottom_scan
     global wl_entry_alerted, wl_price_snapshot, last_wl_check
     global early_alerted, early_vol_ref, last_early_scan
+    global daily_signals
     global last_ath_scan, last_expand
     global rt_vol_baseline, rt_alerted
     global hot_alerted, bottom_alerted
