@@ -769,6 +769,10 @@ def poll_commands():
             elif text in ("/status", "/حالة"):
                 send("\u2705 البوت يعمل | عملات: " + str(len(candidates)) +
                      " | جواهر: " + str(len(gem_watchlist)))
+            elif text in ("/report", "/تقرير"):
+                send_daily_report_forced()
+                run_daily_liquidity_scan()
+
             elif text in ("/watchlist", "/مراقبة"):
                 if not watchlist:
                     send("👁️ قائمة المراقبة فارغة")
@@ -802,6 +806,7 @@ def poll_commands():
                     "/report — تقرير فوري\n"
                     "/status — حالة البوت\n"
                     "/gems   — الجواهر المرصودة\n"
+                    "/report    — تقرير يومي \u0641وري\n"
                     "/watchlist — قائمة المراقبة\n"
                     "/help      — هذه القائمة"
                 )
@@ -4680,10 +4685,10 @@ def run_daily_liquidity_scan():
     now_utc = datetime.utcnow()
     today   = now_utc.strftime("%Y-%m-%d")
 
-    # مرة واحدة في اليوم عند 00:00→00:30 UTC
+    # مرة واحدة في اليوم عند 00:00→00:59 UTC
     if lz_daily_sent_date == today:
         return
-    if now_utc.hour != 0 or now_utc.minute > 30:
+    if now_utc.hour != 0:
         return
 
     lz_daily_sent_date = today
@@ -4969,10 +4974,10 @@ def send_daily_report():
     today    = now_utc.strftime("%Y-%m-%d")
 
     # أرسل مرة واحدة في اليوم
-    # النافذة: 00:00→00:30 UTC أو أول تشغيل في اليوم
+    # النافذة: 00:00→00:59 UTC
     if daily_report_sent_date == today:
         return
-    if now_utc.hour != 0 or now_utc.minute > 30:
+    if now_utc.hour != 0:
         return
 
     daily_report_sent_date = today
