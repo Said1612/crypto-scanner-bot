@@ -1177,7 +1177,7 @@ def analyze_btc():
             "₿ BTC 1h:  `{h:+.2f}%`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "_{note}_\n"
-            "🔄 _تأكيد بعد {confirm} قراءات متتالية_".format(
+            "📡 _قوة الإشارة: {confirm}/3_".format(
                 icon=icons[market_state], state=market_state,
                 ch=btc_change_24h, h=btc_trend_1h, eth=eth_change_24h,
                 note=notes[market_state],
@@ -2077,14 +2077,14 @@ def scan_early_detection():
         # ══════════════════════════════════════════
         if abs(change) <= 2.0:
             score += 3
-            types.append("🤫 تجميع هادئ ({:+.1f}%)".format(change))
+            types.append("🤫 تجميع هادئ (" + fmt_change(change) + ")"),
         elif abs(change) <= 5.0:
             score += 1
-            types.append("📊 حركة معتدلة ({:+.1f}%)".format(change))
+            types.append("📊 حركة معتدلة (" + fmt_change(change) + ")"),
         elif change > 5.0:
             # صعود قوي = دخول سيولة شرائية
             score += 2
-            types.append("🚀 صعود مع سيولة ({:+.1f}%)".format(change))
+            types.append("🚀 صعود مع سيولة (" + fmt_change(change) + ")"),
 
         # ══════════════════════════════════════════
         # 3️⃣ حجم مطلق قوي = سيولة حقيقية
@@ -2151,7 +2151,7 @@ def scan_early_detection():
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + fmt_price(sig["price"]) + "`\n"
             + "  📦 الحجم: `" + str(round(sig["vol"]/1e6, 2)) + "M`\n"
-            + "  📅 تغيير 24h: `" + "{:+.1f}%".format(sig["change"]) + "`\n"
+            + "  " + ("🟢" if sig["change"] >= 0 else "🔴") + " تغيير 24h: `" + fmt_change(sig["change"]) + "`\n"
             + "  🔄 الحجم مقارنة بالأمس: `" + str(round(sig["vol_ratio"], 1)) + "×`\n"
             + "━" * 18 + "\n"
             + "🔍 *ما رصدناه:*\n"
@@ -2291,7 +2291,7 @@ def check_watchlist_entries():
             + "📍 *" + sym.replace("USDT","") + "/USDT*\n"
             + "  💰 السعر: `" + fmt_price(price) + "`\n"
             + "  📈 تحرك منذ الرصد: `+" + str(round(move_since_add,1)) + "%`\n"
-            + "  📈 تغيير 24h: `" + "{:+.1f}%".format(change) + "`\n"
+            + "  📈 تغيير 24h: `" + fmt_change(change) + "`\n"
             + "  📦 حجم: `" + str(round(vol/1e6,2)) + "M`" + vol_confirm_str + "\n"
             + "  🏷️ قطاع: `" + sector + "`\n"
             + "  🔍 سبب الرصد: `" + reason + "`\n"
@@ -2815,7 +2815,7 @@ def scan_ath_distance():
             + "  📉 انخفاض من ATH: `" + drop_str + "%`\n"
             + "  📦 حجم: `" + str(round(gem["vol"]/1e6, 2)) + "M` | تزايد: `"
             + str(round(gem["vol_ratio"], 1)) + "×`\n"
-            + "  📅 تغيير 24h: `" + str(round(gem["change"], 2)) + "%`\n"
+            + "  📊 تغيير 24h: `" + str(round(gem["change"], 2)) + "%`\n"
             + "━" * 18 + "\n"
             + "🎯 *" + level + "*\n"
             + "  · درجة الفرصة: `" + str(gem["score"]) + "/9`\n"
@@ -2991,7 +2991,7 @@ def scan_bottom_accumulation():
             "  📉 قاع " + str(coin["days_bottom"]) + " يوم | أدنى: `" + str(round(coin["price_low"], 8)) + "`\n"
             "  📊 موقع في النطاق: `" + str(round(coin["price_pos"] * 100, 1)) + "%` من القاع\n"
             "  📦 حجم: `" + str(round(coin["vol"] / 1e6, 2)) + "M` | تزايد: `" + str(round(coin["vol_ratio"], 1)) + "×`\n"
-            "  📅 تغيير 24h: `" + str(round(coin["change"], 2)) + "%`\n"
+            "  📊 تغيير 24h: `" + str(round(coin["change"], 2)) + "%`\n"
             "━" * 18 + "\n"
             "🎯 *" + level + "*\n"
             "  · قوة الإشارة: `" + str(coin["strength"]) + "/10`\n"
@@ -5751,6 +5751,12 @@ def send_report():
 # ═══════════════════════════════════════════════
 # STATE PERSISTENCE — حفظ واستعادة البيانات
 # ═══════════════════════════════════════════════
+
+def fmt_change(c):
+    # type: (float) -> str
+    """تنسيق نسبة التغيير — يتجنب -0.0%"""
+    if abs(c) < 0.05: return "0.0%"
+    return "{:+.1f}%".format(c)
 
 def fmt_price(p):
     # type: (float) -> str
