@@ -152,6 +152,18 @@ WL_EXPIRY        = 86400  # عملة تبقى 24 ساعة بدون تحرك ثم
 WL_ENTRY_COOL    = 14400  # 4 ساعات بين إشعارات الدخول لنفس العملة
 WL_CHECK_EVERY   = 60     # فحص الـ watchlist كل دقيقة
 
+# 🆕 Trailing Stop — حماية الأرباح
+TS_TRAIL_PCT     = 15.0   # إذا نزل 15% من القمة = بيع
+TS_MIN_PROFIT    = 10.0   # لا نفعّل الـ trailing إلا بعد +10%
+TS_BREAKEVEN     = 10.0   # عند +10% → نحرك الستوب لنقطة الدخول
+TS_LOCK_20       = 20.0   # عند +20% → نقفل ربح 10%
+TS_LOCK_50       = 50.0   # عند +50% → نقفل ربح 35%
+TS_SCAN_EVERY    = 300    # فحص كل 5 دقائق
+TS_DANGER_VOL    = 0.5    # الحجم نزل لأقل من 50% = خروج سيولة
+TS_DANGER_CLOSE  = -3.0   # السوق DANGER + العملة نازلة -3%
+
+TS_SELL_COOL     = 3600   # ساعة بين إشعارات البيع لنفس العملة
+
 # 🆕 Early Detection — رصد مبكر قبل الانفجار
 EARLY_LOW_PCT    = 1.10   # السعر < 110% من القاع التاريخي
 EARLY_HIGH_PCT   = 1.30   # السعر < 130% من القاع (قريب فقط)
@@ -608,6 +620,7 @@ discovered     = {}   # {sym: {price, time, score}}
 
 btc_change_24h = 0.0
 btc_trend_1h   = 0.0
+eth_change_24h = 0.0
 market_state        = "SAFE"
 last_market_report  = 0.0    # آخر إرسال تقرير السوق
 MARKET_REPORT_EVERY = 14400  # كل 4 ساعات فقط
@@ -695,6 +708,10 @@ wl_entry_alerted = {}  # type: Dict[str, float]  {sym: last_entry_alert_time}
 wl_price_snapshot= {}  # type: Dict[str, float]  {sym: price_when_added}
 last_wl_check    = 0.0
 early_alerted    = {}  # type: Dict[str, float]  {sym: last_alert_time}
+# Trailing Stop state
+ts_positions     = {}  # type: Dict[str, Dict]  {sym: {entry, peak, stop, locked}}
+ts_sell_alerted  = {}  # type: Dict[str, float] {sym: last_sell_time}
+last_ts_scan     = 0.0
 daily_signals    = {"date": "", "count": 0}  # عداد يومي شامل
 early_vol_ref    = {}  # type: Dict[str, float]  {sym: vol_reference}
 last_early_scan  = 0.0
@@ -1058,6 +1075,7 @@ def analyze_btc():
     # type: () -> None
     global btc_change_24h, btc_trend_1h, market_state, last_btc
     global last_market_report
+    global eth_change_24h
 
     # ✅ الإصلاح: نجلب بيانات BTC بالـ symbol param وليس بـ endpoint مختلف
     data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
@@ -1161,7 +1179,7 @@ def analyze_btc():
             "_{note}_\n"
             "🔄 _تأكيد بعد {confirm} قراءات متتالية_".format(
                 icon=icons[market_state], state=market_state,
-                ch=btc_change_24h, h=btc_trend_1h,
+                ch=btc_change_24h, h=btc_trend_1h, eth=eth_change_24h,
                 note=notes[market_state],
                 confirm=BTC_CONFIRM_COUNT,
             )
@@ -1805,6 +1823,189 @@ def register_signal():
     log.info("📊 إشارات اليوم: %d/%d", daily_signals["count"], MAX_DAILY_SIGNALS)
 
 
+# ═══════════════════════════════════════════════
+# TRAILING STOP SYSTEM — حماية الأرباح الذكية
+# ═══════════════════════════════════════════════
+
+def ts_register_entry(sym, entry_price, sector="Unknown"):
+    # type: (str, float, str) -> None
+    """تسجيل صفقة جديدة في نظام الـ Trailing Stop"""
+    global ts_positions
+    # جلب الحجم الحالي كمرجع
+    _vol_ref = float(next((t["quoteVolume"] for t in all_tickers if t["symbol"]==sym), "0"))
+    ts_positions[sym] = {
+        "entry":     entry_price,
+        "peak":      entry_price,
+        "stop":      entry_price * (1 - TS_TRAIL_PCT / 100),
+        "locked":    0.0,
+        "sector":    sector,
+        "since":     time.time(),
+        "entry_vol": _vol_ref,  # حجم الدخول كمرجع
+    }
+    log.info("📌 TS Registered | %s | entry=%.8f", sym, entry_price)
+
+
+def check_trailing_stops():
+    # type: () -> None
+    """
+    فحص كل الصفقات المفتوحة:
+    - تحديث القمة والستوب
+    - إرسال إشعار البيع عند الانعكاس
+    """
+    global ts_positions, ts_sell_alerted
+
+    if not all_tickers or not ts_positions: return
+    now = time.time()
+
+    price_map = {t["symbol"]: float(t["lastPrice"]) for t in all_tickers}
+
+    for sym, pos in list(ts_positions.items()):
+        price = price_map.get(sym, 0)
+        if price <= 0: continue
+
+        entry  = pos["entry"]
+        peak   = pos["peak"]
+        stop   = pos["stop"]
+        locked = pos["locked"]
+
+        # حساب الربح الحالي
+        profit_pct = (price / entry - 1) * 100
+        peak_pct   = (peak  / entry - 1) * 100
+
+        # ══ تحديث القمة ══
+        if price > peak:
+            ts_positions[sym]["peak"] = price
+            peak     = price
+            peak_pct = (peak / entry - 1) * 100
+
+            # ══ تحريك الستوب مع القمة ══
+            new_stop = stop
+
+            if peak_pct >= TS_LOCK_50:
+                # +50% → نقفل +35%
+                new_stop  = entry * 1.35
+                new_locked = 35.0
+            elif peak_pct >= TS_LOCK_20:
+                # +20% → نقفل +10%
+                new_stop  = entry * 1.10
+                new_locked = 10.0
+            elif peak_pct >= TS_BREAKEVEN:
+                # +10% → نرجع لنقطة الدخول
+                new_stop  = entry * 1.001
+                new_locked = 0.0
+
+            # Trailing: الستوب دائماً 15% تحت القمة
+            trail_stop = peak * (1 - TS_TRAIL_PCT / 100)
+            new_stop   = max(new_stop, trail_stop)
+
+            if new_stop > stop:
+                ts_positions[sym]["stop"]   = new_stop
+                ts_positions[sym]["locked"] = max(locked, new_stop / entry * 100 - 100)
+                log.info("📈 TS Updated | %s | peak=+%.1f%% | stop=%.8f",
+                         sym, peak_pct, new_stop)
+
+        # ══ فحص الخروج الذكي ══
+        _ticker = next((t for t in all_tickers if t["symbol"]==sym), None)
+        if _ticker and now - ts_sell_alerted.get(sym, 0) > TS_SELL_COOL:
+            try:
+                _vol_now   = float(_ticker["quoteVolume"])
+                _entry_vol = pos.get("entry_vol", _vol_now)
+                _vol_ratio = _vol_now / _entry_vol if _entry_vol > 0 else 1.0
+                _change    = float(_ticker["priceChangePercent"])
+                _pl        = (price / entry - 1) * 100
+                base       = sym.replace("USDT", "")
+                _exit_reason = None
+                _exit_icon   = "⚠️"
+
+                # ── الحالة 1: ربح + سيولة تخرج ──
+                # عندنا ربح والسيولة تبدأ بالخروج = اخرج بربح
+                if _pl > 5.0 and _vol_ratio < 0.5 and market_state in ("DANGER","CAUTION"):
+                    _exit_reason = "✅ اخرج بربح — السيولة تخرج"
+                    _exit_icon   = "✅"
+
+                # ── الحالة 2: عند نقطة الدخول + سوق خطر ──
+                # السوق DANGER + السيولة تخرج = احمِ رأس المال
+                elif _pl > -2.0 and _pl < 3.0 and market_state == "DANGER" and _vol_ratio < 0.4:
+                    _exit_reason = "🛡️ احمِ رأس المال — السوق خطر"
+                    _exit_icon   = "🛡️"
+
+                # ── الحالة 3: خسارة + سوق خطر + سيولة تهرب ──
+                # الأسوأ = اخرج فوراً بخسارة محدودة
+                elif _pl < -3.0 and market_state == "DANGER" and _vol_ratio < 0.4:
+                    _exit_reason = "🔴 اخرج — السوق ينهار"
+                    _exit_icon   = "🔴"
+
+                if _exit_reason:
+                    msg = (
+                        _exit_icon + " *SIGNAL SELL* " + _exit_icon + "\n"
+                        "━" * 18 + "\n"
+                        + _exit_reason + "\n"
+                        "━" * 18 + "\n"
+                        "📍 *" + base + "/USDT*\n"
+                        "  💰 دخول: `" + fmt_price(entry) + "`\n"
+                        "  📈 القمة: `" + fmt_price(peak) + "` (+" + "{:.1f}".format((peak/entry-1)*100) + "%)\n"
+                        "  💰 الآن:  `" + fmt_price(price) + "`\n"
+                        "  📊 ربح/خسارة: `{:+.1f}%`\n".format(_pl) +
+                        "  📦 السيولة: `{:.1f}×` من الدخول\n".format(_vol_ratio) +
+                        "  🌡️ السوق: `" + market_state + "`\n"
+                        "━" * 18 + "\n"
+                        "🚨 *اخرج الآن!*"
+                    )
+                    send(msg)
+                    ts_sell_alerted[sym] = now
+                    log.info("🔴 SMART EXIT | %s | pl=%.1f%% | vol=%.1fx | market=%s",
+                             sym, _pl, _vol_ratio, market_state)
+            except: pass
+
+        # ══ فحص الستوب ══
+        stop = ts_positions[sym]["stop"]
+        if price <= stop:
+            # ضرب الستوب!
+            if now - ts_sell_alerted.get(sym, 0) < TS_SELL_COOL:
+                continue
+
+            locked_pct = ts_positions[sym]["locked"]
+
+            if profit_pct > 0:
+                reason  = "🔒 حماية الربح"
+                result  = "+{:.1f}%".format(profit_pct)
+                emoji   = "✅"
+            elif profit_pct > -5:
+                reason  = "🛡️ وقف الخسارة"
+                result  = "{:.1f}%".format(profit_pct)
+                emoji   = "⚠️"
+            else:
+                reason  = "🛑 وقف الخسارة"
+                result  = "{:.1f}%".format(profit_pct)
+                emoji   = "❌"
+
+            base = sym.replace("USDT", "")
+
+            msg = (
+                "🔴 *SIGNAL SELL* 🔴\n"
+                "━" * 18 + "\n"
+                + emoji + " *" + reason + "*\n"
+                "━" * 18 + "\n"
+                "📍 *" + base + "/USDT*\n"
+                "  💰 سعر الدخول: `" + fmt_price(entry) + "`\n"
+                "  📈 القمة: `" + fmt_price(peak) + "` (+" + "{:.1f}".format(peak_pct) + "%)\n"
+                "  💰 السعر الآن: `" + fmt_price(price) + "`\n"
+                "  📊 الربح/الخسارة: `" + result + "`\n"
+                "━" * 18 + "\n"
+                "⏱️ مدة الصفقة: `" + str(int((now - pos["since"]) / 3600)) + "h`\n"
+                "━" * 18 + "\n"
+                "🚨 *اخرج الآن — الستوب ضُرب!*"
+            )
+
+            send(msg)
+            ts_sell_alerted[sym] = now
+            log.info("🔴 SELL SIGNAL | %s | profit=%.1f%% | peak=+%.1f%%",
+                     sym, profit_pct, peak_pct)
+
+            # احذف الصفقة بعد البيع
+            del ts_positions[sym]
+
+
 def scan_early_detection():
     # type: () -> None
     """
@@ -1950,7 +2151,7 @@ def scan_early_detection():
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + fmt_price(sig["price"]) + "`\n"
             + "  📦 الحجم: `" + str(round(sig["vol"]/1e6, 2)) + "M`\n"
-            + "  📅 تغيير 24h: `" + str(round(sig["change"], 1)) + "%`\n"
+            + "  📅 تغيير 24h: `" + "{:+.1f}%".format(sig["change"]) + "`\n"
             + "  🔄 الحجم مقارنة بالأمس: `" + str(round(sig["vol_ratio"], 1)) + "×`\n"
             + "━" * 18 + "\n"
             + "🔍 *ما رصدناه:*\n"
@@ -2054,6 +2255,9 @@ def check_watchlist_entries():
         # STATIC تحتاج تحرك أقل للتنبيه (2% بدل 3%)
         _min_move = 2.0 if info.get("priority") == "STATIC" else WL_ENTRY_MOVE
         if move_since_add < _min_move: continue
+        # لا ترسل إذا الحجم ضعيف جداً
+        _cur_vol = float(next((t["quoteVolume"] for t in all_tickers if t["symbol"]==sym), "0"))
+        if _cur_vol < 1_000_000: continue  # حجم أقل من 1M = تجاهل
 
         # cooldown لنفس العملة
         if now - wl_entry_alerted.get(sym, 0) < WL_ENTRY_COOL: continue
@@ -2068,25 +2272,26 @@ def check_watchlist_entries():
 
         # ── إشعار الدخول ────────────────────────
         if priority == "STATIC":
-            icon = "🎯🟢"
-            lvl  = "WATCHLIST ENTRY"
+            icon = "🚀🟢"
+            lvl  = "SIGNAL ENTRY — إشارة دخول"
         elif priority == "HIGH":
-            icon = "🚨🟢"
-            lvl  = "HIGH PRIORITY ENTRY"
+            icon = "🚨🚀"
+            lvl  = "SIGNAL ENTRY STRONG — دخول قوي"
         else:
-            icon = "🟢⚡"
-            lvl  = "ENTRY SIGNAL"
+            icon = "🚀⚡"
+            lvl  = "SIGNAL ENTRY — إشارة دخول"
 
         vol_confirm_str = " ✅ حجم مؤكد" if vol_confirm else " ⚠️ حجم خفيف"
 
         msg = (
             icon + " *" + lvl + "* " + icon + "\n"
             + "━" * 18 + "\n"
-            + "👀 كنا نراقبها — تحركت الآن!\n"
+            + "🔔 *ادخل الآن — العملة تتحرك!*\n"
+            + "━" * 18 + "\n"
             + "📍 *" + sym.replace("USDT","") + "/USDT*\n"
             + "  💰 السعر: `" + fmt_price(price) + "`\n"
             + "  📈 تحرك منذ الرصد: `+" + str(round(move_since_add,1)) + "%`\n"
-            + "  📈 تغيير 24h: `+" + str(round(change,1)) + "%`\n"
+            + "  📈 تغيير 24h: `" + "{:+.1f}%".format(change) + "`\n"
             + "  📦 حجم: `" + str(round(vol/1e6,2)) + "M`" + vol_confirm_str + "\n"
             + "  🏷️ قطاع: `" + sector + "`\n"
             + "  🔍 سبب الرصد: `" + reason + "`\n"
@@ -2099,6 +2304,8 @@ def check_watchlist_entries():
         send(msg)
         wl_entry_alerted[sym] = now
         register_signal()
+        # تسجيل في نظام Trailing Stop
+        ts_register_entry(sym, price, info.get("sector","Unknown"))
         log.info("🟢 WL Entry | %s | move=+%.1f%% | vol=%.1fM",
                  sym, move_since_add, vol/1e6)
 
@@ -5708,6 +5915,8 @@ def save_state():
             "hot_alerted":          hot_alerted,
             "rt_alerted":           rt_alerted,
             "early_alerted":        early_alerted,
+            "ts_positions":         ts_positions,
+            "ts_sell_alerted":      ts_sell_alerted,
             "daily_signals":        daily_signals,
             "wl_entry_alerted":     wl_entry_alerted,
             # تقارير
@@ -5787,6 +5996,8 @@ def load_state():
         hot_alerted.update(state.get("hot_alerted", {}))
         rt_alerted.update(state.get("rt_alerted", {}))
         early_alerted.update(state.get("early_alerted", {}))
+        ts_positions.update(state.get("ts_positions", {}))
+        ts_sell_alerted.update(state.get("ts_sell_alerted", {}))
         wl_entry_alerted.update(state.get("wl_entry_alerted", {}))
 
         daily_report_sent_date = state.get("daily_report_sent_date", "")
@@ -5885,6 +6096,7 @@ def run():
     global last_rt_scan, last_hot_scan, last_bottom_scan
     global wl_entry_alerted, wl_price_snapshot, last_wl_check
     global early_alerted, early_vol_ref, last_early_scan
+    global ts_positions, ts_sell_alerted, last_ts_scan
     global daily_signals
     global last_ath_scan, last_expand
     global rt_vol_baseline, rt_alerted
@@ -5962,6 +6174,11 @@ def run():
             # 💾 حفظ الحالة كل 30 دقيقة
             if int(now) % 1800 < 12:  # كل 30 دقيقة
                 save_state()
+
+            # 🔴 Trailing Stop Check — كل 5 دقائق
+            if now - last_ts_scan >= TS_SCAN_EVERY:
+                check_trailing_stops()
+                last_ts_scan = now
 
             # 👁️ Watchlist Entry Check — كل دقيقة
             if now - last_wl_check >= WL_CHECK_EVERY:
