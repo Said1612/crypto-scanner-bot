@@ -1175,6 +1175,7 @@ def analyze_btc():
             "{icon} السوق: *{state}*\n"
             "₿ BTC 24h: `{ch:+.2f}%`\n"
             "₿ BTC 1h:  `{h:+.2f}%`\n"
+            "Ξ ETH 24h: `{eth:+.2f}%`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "_{note}_\n"
             "📡 _قوة الإشارة: {confirm}/3_".format(
