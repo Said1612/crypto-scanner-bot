@@ -5184,9 +5184,13 @@ def send_daily_report():
     # أرسل مرة واحدة في اليوم
     # النافذة: 00:00→00:59 UTC
     if daily_report_sent_date == today:
+        log.debug("📊 تقرير اليوم أُرسل مسبقاً: %s", today)
         return
-    if now_utc.hour != 0:
+    # نافذة موسعة: 00:00 → 06:00 إذا لم يُرسل بعد
+    if now_utc.hour > 6:
+        log.debug("📊 انتظار 00:00 UTC | الساعة الآن: %02d:%02d", now_utc.hour, now_utc.minute)
         return
+    log.info("📊 إرسال التقرير اليومي | %s", today)
 
     daily_report_sent_date = today
 
