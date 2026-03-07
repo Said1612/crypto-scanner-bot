@@ -5173,6 +5173,49 @@ def analyze_market_history():
     return result
 
 
+def _get_smart_money_summary():
+    # type: () -> str
+    """ملخص Stablecoin Sigma للدمج في التقرير اليومي"""
+    try:
+        if not all_tickers: return ""
+        ticker_map = {t["symbol"]: t for t in all_tickers}
+        detected = []
+        for sym in SMART_MONEY_STABLES:
+            t = ticker_map.get(sym)
+            if not t: continue
+            try:
+                vol = float(t["quoteVolume"])
+                ref = [x for x in stable_vol_history if x.get("sym") == sym]
+                if len(ref) < 3: continue
+                vols = [x["vol"] for x in ref[-7:]]
+                avg  = sum(vols) / len(vols)
+                std  = (sum((v-avg)**2 for v in vols)/len(vols))**0.5
+                if std < 1: continue
+                sigma = round((vol - avg) / std, 1)
+                if sigma >= SMART_MONEY_SIGMA:
+                    detected.append({
+                        "base":  sym.replace("USDT",""),
+                        "sigma": sigma,
+                        "vol":   vol,
+                        "ratio": round(vol/avg, 1),
+                    })
+            except: continue
+
+        if not detected: return ""
+        detected.sort(key=lambda x: -x["sigma"])
+
+        _SP  = "━" * 18
+        text = _SP + "\n"
+        text += "💵 *Stablecoin Sigma — نشاط الحيتان:*\n"
+        for d in detected[:5]:
+            whale = " 🐳" if d["sigma"] >= 5.0 else ""
+            text += "  • *{}* | σ`{}` | `{}×` | `{:.0f}M`{}\n".format(
+                d["base"], d["sigma"], d["ratio"], d["vol"]/1e6, whale)
+        if len(detected) >= 2:
+            text += "⚠️ _الحيتان يتجمعون — مال ضخم يدخل السوق_\n"
+        return text
+    except: return ""
+
 def send_daily_report():
     # type: () -> None
     global daily_report_sent_date, daily_market_vol_history
@@ -5350,29 +5393,29 @@ def send_daily_report():
     # Stablecoins منخفضة + سوق هابط = بيع عشوائي (ليس حيتان)
 
     if len(whale_signals) >= 2 and falling_pct >= 55:
-        whale_verdict  = "🔴 *الحيتان خارج السوق*"
-        whale_desc     = "يجمعون Stablecoins — ينتظرون أسعاراً أفضل"
-        whale_action   = "⛔ _لا تشتري الآن — انتظر انتهاء التجميع_"
+        whale_verdict  = "🔴 *تحذير — لا تشتري الآن*"
+        whale_desc     = "الحيتان يبيعون ويجمعون Stablecoins — ينتظرون أسعاراً أقل"
+        whale_action   = "⛔ _انتظر — السوق لم يصل قاعه بعد_"
         whale_icon     = "🐋🔴"
     elif len(whale_signals) >= 2 and rising_pct >= 55:
-        whale_verdict  = "🟢 *الحيتان داخل السوق*"
-        whale_desc     = "Stablecoins مرتفعة مع صعود = ضخ قوي"
-        whale_action   = "✅ _فرصة — السيولة تدخل_"
+        whale_verdict  = "🟢 *فرصة — السيولة تدخل السوق*"
+        whale_desc     = "الحيتان يضخون أموالاً — زخم شرائي قوي"
+        whale_action   = "✅ _يمكن الدخول — السيولة إيجابية_"
         whale_icon     = "🐋🟢"
     elif rising_pct >= 60 and not whale_signals:
-        whale_verdict  = "🟢 *السوق في حالة شراء*"
-        whale_desc     = "أغلب العملات ترتفع — زخم إيجابي"
+        whale_verdict  = "🟢 *السوق صاعد — زخم إيجابي*"
+        whale_desc     = "أغلب العملات ترتفع — جو شرائي عام"
         whale_action   = "✅ _يمكن الدخول بحذر_"
         whale_icon     = "📈🟢"
     elif falling_pct >= 65:
-        whale_verdict  = "🔴 *السوق في حالة بيع قوية*"
-        whale_desc     = "ضغط بيع واسع — ابتعد"
-        whale_action   = "⛔ _ابتعد تماماً — خطر_"
+        whale_verdict  = "🔴 *السوق هابط — ابتعد*"
+        whale_desc     = "ضغط بيع قوي على أغلب العملات — خطر"
+        whale_action   = "⛔ _لا تدخل — انتظر الاستقرار_"
         whale_icon     = "📉🔴"
     else:
-        whale_verdict  = "🟡 *السوق محايد — غير محدد*"
-        whale_desc     = "لا اتجاه واضح"
-        whale_action   = "⏳ _انتظر إشارة أوضح_"
+        whale_verdict  = "🟡 *السوق محايد — انتظر*"
+        whale_desc     = "لا اتجاه واضح — السوق في حالة ترقب"
+        whale_action   = "⏳ _انتظر إشارة واضحة قبل الدخول_"
         whale_icon     = "🟡"
 
     # ══════════════════════════════════════════
@@ -5404,14 +5447,16 @@ def send_daily_report():
     flow_sum = get_flow_summary()
 
     msg = (
-        "📅 *DAILY MARKET REPORT*\n"
-        "🗓️ `{date}` — إغلاق اليوم\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "{whale_icon} {verdict}\n"
-        "_{desc}_\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "₿ *BTC اليوم:* `{btc:+.2f}%`\n"
-        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 *DAILY REPORT* 📅\\n"
+        "🗓️ `{date}` — إغلاق اليوم\\n"
+        "━━━━━━━━━━━━━━━━━━\\n"
+        "{mkt_icon} *السوق: {mkt_state}*\\n"
+        "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\\n"
+        "Ξ ETH 24h: `{eth:+.2f}%`\\n"
+        "━━━━━━━━━━━━━━━━━━\\n"
+        "{whale_icon} {verdict}\\n"
+        "_{desc}_\\n"
+        "━━━━━━━━━━━━━━━━━━\\n"
         "📊 *نسبة الشراء/البيع (بالحجم):*\n"
         "{bar}\n"
         "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol:.0f}M USDT)\n"
@@ -5435,7 +5480,9 @@ def send_daily_report():
         whale_icon=whale_icon,
         verdict=whale_verdict,
         desc=whale_desc,
-        btc=btc_ch,
+        btc=btc_ch, eth=eth_change_24h,
+        btc1h=btc_trend_1h,
+        mkt_icon=icons.get(market_state,"📊"), mkt_state=market_state,
         bar=mkt_bar,
         rp=rising_pct,  fp=falling_pct,
         rising=rising,  falling=falling,
@@ -5509,8 +5556,11 @@ def send_daily_report():
             _trnd+="`"+_e["date"][5:]+"` "+_ic+" "+str(round(_bp2,0))+"%B | 🐳"
             _trnd+=str(round(_stp2,1))+"%S | σ"+str(_sc)+"\n"
         _trnd+=_SP
-    _analysis = analyze_market_history()
-    send(msg+"\n"+_brk+"\n"+_trnd+"\n"+_analysis)
+    _analysis  = analyze_market_history()
+    # ══ Stablecoin Sigma من analyze_smart_money ══
+    _sm_data   = _get_smart_money_summary()
+    _sm_block  = "\n" + _sm_data if _sm_data else ""
+    send(msg+"\n"+_brk+"\n"+_trnd+"\n"+_analysis+_sm_block)
     log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
              rising_pct, len(whale_signals), vol_change_pct)
 
@@ -6205,7 +6255,7 @@ def run():
             # تحديثات دورية
             if now - last_btc         >= BTC_EVERY:         analyze_btc()
             if now - last_sectors     >= SECTORS_EVERY:     analyze_sectors()
-            if now - last_smart_money >= SMART_MONEY_EVERY: analyze_smart_money()
+            # analyze_smart_money مدمجة في التقرير اليومي
             refresh_sector_report()   # 🆕 تقرير القطاعات + تجميع الحيتان كل ساعة
             # 🆕 Bottom Accumulation Scan كل ساعة
             if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
@@ -6223,7 +6273,7 @@ def run():
 
             # 🆕 V15: تقرير يومي عند 00:00 UTC
             send_daily_report()
-            run_daily_liquidity_scan()   # 🆕 V16: فحص السيولة اليومي
+            # run_daily_liquidity_scan مدمجة في التقرير اليومي
             if now - last_expand      >= EXPAND_EVERY:
                 # 🆕 V12: توسيع يومي تلقائي للقوائم
                 log.info("🔄 تحديث يومي — Auto Expand Sectors")
