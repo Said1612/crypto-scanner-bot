@@ -5209,8 +5209,8 @@ def _get_smart_money_summary():
         text += "💵 *Stablecoin Sigma — نشاط الحيتان:*\n"
         for d in detected[:5]:
             whale = " 🐳" if d["sigma"] >= 5.0 else ""
-            text += "  • *{}* | σ`{}` | `{}×` | `{:.0f}M`{}\n".format(
-                d["base"], d["sigma"], d["ratio"], d["vol"]/1e6, whale)
+            text += "  • *{}* | نشاط: `{}×` | `{:.0f}M USDT`{}\n".format(
+                d["base"], d["ratio"], d["vol"]/1e6, whale)
         if len(detected) >= 2:
             text += "⚠️ _الحيتان يتجمعون — مال ضخم يدخل السوق_\n"
         return text
@@ -5534,12 +5534,12 @@ def send_daily_report():
     _st=""
     for _sx in _sh[:5]:
         _wh=" 🐳" if _sx["sigma"]>=3.0 else ""
-        _st+="  💵 *"+_sx["base"]+"* | `"+str(round(_sx["vol"]/1e6,1))+"M` | σ`"+str(_sx["sigma"])+"`"+_wh+"\n"
+        _st+="  💵 *"+_sx["base"]+"* | نشاط: `"+str(_sx["ratio"])+"×` | `"+str(round(_sx["vol"]/1e6,1))+" مليون USDT`"+_wh+"\n"
     if not _st: _st="  لا يوجد\n"
     _ct=""
     for _co in _bc[:8]:
         _d2="🟢" if _co["ch"]>0 else "🔴"
-        _ct+="• *"+_co["base"]+"* "+_d2+" Sigma`"+str(int(_co["sigma"]))+"` (Alpha:10)\n"
+        _ct+="• *"+_co["base"]+"* "+_d2+" نشاط غير طبيعي `"+str(int(_co["sigma"]))+"×`\n"
     if not _ct: _ct="• لا توجد عملات\n"
     _SP="━"*18
     _brk=(_SP+"\n"
