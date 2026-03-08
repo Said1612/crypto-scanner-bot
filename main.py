@@ -2082,9 +2082,15 @@ def perf_register(sym, price, system, score=0, signals_desc=""):
     return sid
 
 
-def perf_check(price_map):
-    # type: (Dict[str, float]) -> None
+def perf_check(price_map=None):
+    # type: (Dict) -> None
     """يتحقق من نتائج الإشارات المسجلة عند 1h/4h/24h"""
+    # إذا لم يُمرَّر price_map نبنيه من all_tickers
+    if not price_map:
+        if not all_tickers:
+            return
+        price_map = {t.get("symbol",""): float(t.get("lastPrice",0))
+                     for t in all_tickers if t.get("lastPrice")}
     now = time.time()
     for sid, data in list(perf_signals.items()):
         sym   = data["sym"]
@@ -7097,6 +7103,12 @@ def run():
     flow_cycle = 0  # عداد لتحليل Flow كل 5 دورات (~60 ثانية)
 
     while True:
+        # قيم افتراضية آمنة — تُبنى لاحقاً في كل دورة
+        price_map  = {}
+        change_now = {}
+        vol_now    = {}
+        high_map   = {}
+        low_map    = {}
         try:
             now = time.time()
 
@@ -7115,7 +7127,6 @@ def run():
             # 🔴 Trailing Stop Check — كل 5 دقائق
             if now - last_ts_scan >= TS_SCAN_EVERY:
                 check_trailing_stops()
-                perf_check(price_map)    # 📊 تحديث نتائج الأداء
                 last_ts_scan = now
 
             # 👁️ Watchlist Entry Check — كل دقيقة
@@ -7223,6 +7234,10 @@ def run():
 
             # Momentum Detector
             detect_momentum(price_map, change_now, vol_now, high_map, low_map)
+
+            # 📊 تحديث نتائج الأداء — بعد بناء price_map
+            if now - last_ts_scan >= TS_SCAN_EVERY:
+                perf_check(price_map)
 
             # 🆕 V16: كشف التجميع الخفي — كل 10 دقائق
             if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
