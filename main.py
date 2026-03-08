@@ -5439,15 +5439,15 @@ def send_daily_report():
     # حالة تدفق السيولة
     flow_sum = get_flow_summary()
 
-    # ضمان أن القيم أرقام وليست نصوص
-    btc_ch         = float(btc_ch)        if btc_ch         is not None else 0.0
-    eth_change_24h = float(eth_change_24h) if eth_change_24h is not None else 0.0
-    btc_trend_1h   = float(btc_trend_1h)  if btc_trend_1h   is not None else 0.0
-    buy_pct        = float(buy_pct)        if buy_pct        is not None else 0.0
-    sell_pct       = float(sell_pct)       if sell_pct       is not None else 0.0
-    buy_vol        = float(buy_vol)        if buy_vol        is not None else 0.0
-    sell_vol       = float(sell_vol)       if sell_vol       is not None else 0.0
-    total_market_vol = float(total_market_vol) if total_market_vol is not None else 0.0
+    # ضمان أن القيم أرقام وليست نصوص — نستخدم متغيرات محلية جديدة
+    _btc         = float(btc_ch)          if btc_ch          is not None else 0.0
+    _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
+    _btc1h       = float(btc_trend_1h)    if btc_trend_1h    is not None else 0.0
+    _buy_pct     = float(buy_pct)         if buy_pct         is not None else 0.0
+    _sell_pct    = float(sell_pct)        if sell_pct        is not None else 0.0
+    _buy_vol     = float(buy_vol)         if buy_vol         is not None else 0.0
+    _sell_vol    = float(sell_vol)        if sell_vol        is not None else 0.0
+    _total_vol   = float(total_market_vol) if total_market_vol is not None else 0.0
 
     msg = (
         "📊 *DAILY REPORT* 📅\\n"
@@ -5483,20 +5483,20 @@ def send_daily_report():
         whale_icon=whale_icon,
         verdict=whale_verdict,
         desc=whale_desc,
-        btc=btc_ch, eth=eth_change_24h,
-        btc1h=btc_trend_1h,
+        btc=_btc, eth=_eth,
+        btc1h=_btc1h,
         mkt_icon={"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"📊"), mkt_state=market_state,
         bar=mkt_bar,
         rp=rising_pct,  fp=falling_pct,
         rising=rising,  falling=falling,
         total=total_coins,
-        buy=buy_pct,    sell=sell_pct,
-        buy_vol=buy_vol/1_000_000,
-        sell_vol=sell_vol/1_000_000,
+        buy=_buy_pct,    sell=_sell_pct,
+        buy_vol=_buy_vol/1_000_000,
+        sell_vol=_sell_vol/1_000_000,
         arrow=vol_arrow,
         vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "اول يوم 📊"),
         
-        total_vol=total_market_vol / 1_000_000,
+        total_vol=_total_vol / 1_000_000,
         vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "أول يوم"),
 
         whale=whale_txt,
