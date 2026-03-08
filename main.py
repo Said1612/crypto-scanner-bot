@@ -833,19 +833,12 @@ def poll_commands():
 
 def send_daily_report_forced():
     # type: () -> None
-    """إرسال التقرير اليومي فوراً بدون قيد الوقت"""
-    global daily_report_sent_date
-    old_date = daily_report_sent_date
-    daily_report_sent_date = ""  # إلغاء القيد
-    # تجاوز شرط الوقت مؤقتاً
-    import datetime as _dt2
-    _now = _dt2.datetime.utcnow()
-    # نرسل التقرير مباشرة بدون شرط الساعة
-    _today = _now.strftime("%Y-%m-%d")
-    daily_report_sent_date = _today
-    send_daily_report.__wrapped__() if hasattr(send_daily_report, "__wrapped__") else None
-    # استدعاء مباشر للمحتوى
-    log.info("\U0001f4e4 تقرير يدوي = تم")
+    """إرسال التقرير اليومي فوراً بدون قيد الوقت — /report"""
+    global daily_report_sent_date, lz_daily_sent_date
+    log.info("📤 تقرير يدوي — إعادة تعيين التاريخ")
+    daily_report_sent_date = ""   # إلغاء قيد التاريخ
+    lz_daily_sent_date     = ""   # إلغاء قيد السيولة
+    send_daily_report()           # استدعاء مباشر
 
 
 def safe_get(url, params=None, retries=3):
