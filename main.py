@@ -77,6 +77,8 @@ BTC_CAUTION_ZONE   = -1.5
 # 🆕 V15: Buffer zones — منع التذبذب بين الحالات
 # منطقة أمان: لا تغيير إلا إذا تجاوز الحد بـ 0.3%
 BTC_DANGER_BUFFER  = 0.3   # يدخل DANGER عند -3.3% | يخرج عند -2.7%
+BTC_CRASH_4H       = -2.5  # انهيار سريع: BTC ينزل -2.5% في 4 ساعات → DANGER فوري
+BTC_CRASH_1H       = -1.5  # انهيار حاد: BTC ينزل -1.5% في ساعة واحدة → DANGER فوري
 BTC_CAUTION_BUFFER = 0.3   # يدخل CAUTION عند -1.8% | يخرج عند -1.2%
 # عدد المرات المتتالية للتأكيد قبل تغيير الحالة
 BTC_CONFIRM_COUNT  = 1     # ⚡ قراءة واحدة فقط (كان 3 = 90 دقيقة)
@@ -1123,6 +1125,13 @@ def analyze_btc():
         c = kd1["closes"]
         btc_trend_1h = (c[-1] - c[0]) / c[0] * 100
 
+    # 🆕 اتجاه 4h — كشف الانهيار السريع
+    btc_trend_4h = 0.0
+    kd4 = get_klines("BTCUSDT", "4h", 3)
+    if kd4 and len(kd4["closes"]) >= 2:
+        c4 = kd4["closes"]
+        btc_trend_4h = (c4[-1] - c4[0]) / c4[0] * 100
+
     # 🆕 جلب ETH 24h
     eth_data = safe_get(MEXC_24H, {"symbol": "ETHUSDT"})
     if eth_data:
@@ -1155,10 +1164,14 @@ def analyze_btc():
 
     btc_signal = btc_change_24h
 
+    # 🆕 كشف الانهيار السريع — بغض النظر عن 24h
+    _crash_4h = btc_trend_4h <= BTC_CRASH_4H   # انهار -2.5% في 4 ساعات
+    _crash_1h = btc_trend_1h  <= BTC_CRASH_1H  # انهار -1.5% في ساعة
+
     # حدد الحالة المقترحة
-    if btc_signal <= danger_enter or btc_trend_1h <= -2.0:
+    if btc_signal <= danger_enter or btc_trend_1h <= -2.0 or _crash_4h:
         suggested = "DANGER"
-    elif btc_signal <= caution_enter:
+    elif btc_signal <= caution_enter or _crash_1h:
         suggested = "CAUTION"
     elif btc_signal >= caution_exit:
         suggested = "SAFE"
@@ -1212,13 +1225,14 @@ def analyze_btc():
             "━━━━━━━━━━━━━━━━━━\n"
             "{icon} السوق: *{state}*\n"
             "₿ BTC 24h: `{ch:+.2f}%`\n"
+            "₿ BTC 4h:  `{h4:+.2f}%`\n"
             "₿ BTC 1h:  `{h:+.2f}%`\n"
             "Ξ ETH 24h: `{eth:+.2f}%`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "_{note}_\n"
             "📡 _قوة الإشارة: {confirm}/3_".format(
                 icon=icons[market_state], state=market_state,
-                ch=btc_change_24h, h=btc_trend_1h, eth=eth_change_24h,
+                ch=btc_change_24h, h4=btc_trend_4h, h=btc_trend_1h, eth=eth_change_24h,
                 note=notes[market_state],
                 confirm=BTC_CONFIRM_COUNT,
             )
