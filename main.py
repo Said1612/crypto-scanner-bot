@@ -1091,6 +1091,19 @@ def analyze_btc():
         c = kd1["closes"]
         btc_trend_1h = (c[-1] - c[0]) / c[0] * 100
 
+    # 🆕 جلب ETH 24h
+    eth_data = safe_get(MEXC_24H, {"symbol": "ETHUSDT"})
+    if eth_data:
+        try:
+            _elp = float(eth_data.get("lastPrice", 0))
+            _eop = float(eth_data.get("openPrice", _elp))
+            if _eop > 0:
+                eth_change_24h = (_elp - _eop) / _eop * 100
+            else:
+                eth_change_24h = float(eth_data.get("priceChangePercent", 0))
+        except (KeyError, ValueError, TypeError):
+            pass
+
     # ══════════════════════════════════════════════
     # 🆕 V15: Buffer System — منع التذبذب
     # الحدود مع Buffer:
@@ -5475,6 +5488,13 @@ def send_daily_report():
 
     # ضمان أن القيم أرقام وليست نصوص — نستخدم متغيرات محلية جديدة
     _btc         = float(btc_ch)          if btc_ch          is not None else 0.0
+    # 🆕 تصحيح حالة السوق للعرض — إذا ضغط بيع شديد رغم SAFE
+    _display_state = market_state
+    if market_state == "SAFE" and sell_pct >= 80:
+        _display_state = "CAUTION"
+    elif market_state == "SAFE" and sell_pct >= 90:
+        _display_state = "DANGER"
+    _mkt_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
     _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
     _btc1h       = float(btc_trend_1h)    if btc_trend_1h    is not None else 0.0
     _buy_pct     = float(buy_pct)         if buy_pct         is not None else 0.0
@@ -5514,7 +5534,7 @@ def send_daily_report():
         desc=whale_desc,
         btc=_btc, eth=_eth,
         btc1h=_btc1h,
-        mkt_icon={"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"📊"), mkt_state=market_state,
+        mkt_icon=_mkt_icons.get(_display_state,"📊"), mkt_state=_display_state,
         bar=mkt_bar,
         rp=rising_pct,  fp=falling_pct,
         rising=rising,  falling=falling,
@@ -5573,17 +5593,17 @@ def send_daily_report():
     if not _ct: _ct="• لا توجد عملات\n"
     _SP="━"*18
     _brk=(_SP+"\n"
-        +"🐳 *احتفاظ الحيتان بـ Stablecoins:* `"
-        +str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
-        +_st+_ss+"\n"
+        +"🐳 *Stablecoins — احتفاظ الحيتان:*\n"
+        +"  📊 النسبة: `"+str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
+        +"  "+_ss+"\n"
         +_SP+"\n"
-        +"🐋 *نشاط الحيتان (غير طبيعي):*\n"
-        +whale_txt
-        +"\n"
-        +"💵 *أكبر Stablecoins اليوم:*\n"
-        +stable_txt
+        +"💵 *التفاصيل (نشاط × الحجم):*\n"
+        +_st
+        +(("\n🚨 *نشاط غير طبيعي:*\n"+whale_txt) if "لا نشاط" not in whale_txt else "")
         +_SP+"\n"
-        +"*"+str(len(_bc))+" عملة* Sigma>=10:\n"+_ct)
+        +"🔬 *Sigma>=10 (نشاط ضخم):*\n"
+        +("*"+str(len(_bc))+" عملة*\n"+_ct if _bc else "  • لا توجد عملات\n")
+        +_SP)
     _trnd=""
     if len(market_activity_history)>=2:
         _trnd=_SP+"\n📊 *Market Activity Trend* (كل الأيام المتاحة)\n"
