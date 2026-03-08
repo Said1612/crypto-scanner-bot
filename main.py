@@ -674,7 +674,7 @@ hidden_accum_alerted = {}  # type: Dict[str, float]  {sym: last_alert_time}
 
 # 🔥 LIQUIDITY HUNTER
 lh_alerted   = {}    # type: Dict[str, float]  {sym: last_alert_time}
-last_lh_scan = 0.0   # type: float
+last_lh_scan = 0.0   # type: float  ← قيمة ابتدائية على مستوى الملف
 
 # 📋 Small Caps — قائمة العملات الصغيرة
 small_caps        = []   # type: List[str]   قائمة ديناميكية
@@ -7047,6 +7047,12 @@ def run():
     global ath_alerted, ath_tracker
     global gem_watchlist, daily_gem_count
     global explosion_alerted, bottom_price_history, bottom_vol_history
+    # 🆕 V16 New Systems
+    global lh_alerted, last_lh_scan          # 🔥 Liquidity Hunter
+    global small_caps, last_sc_refresh       # 📋 Small Caps
+    global sc_alerted                        # 🔍 Small Cap Hunter
+    global last_sr_alert                     # 🌊 Sector Rotation
+    global perf_signals, perf_id_counter     # 📊 Performance Tracker
 
     log.info("🚀 MAFIO BOT V16 يبدأ...")
     load_state()  # استعادة البيانات من آخر تشغيل
@@ -7070,6 +7076,12 @@ def run():
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
     last_deep_scan = 0
+
+    # 🆕 V16: تأكيد global للمتغيرات الجديدة (القيم مُعرَّفة على مستوى الملف)
+    global last_lh_scan, last_sc_refresh, last_sr_alert
+    last_lh_scan    = 0.0
+    last_sc_refresh = 0.0
+    last_sr_alert   = 0.0
 
     send(
         "🤖 *MAFIO BOT SIGNAL V16*\n"
