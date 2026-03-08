@@ -5385,29 +5385,63 @@ def send_daily_report():
     # Stablecoins منخفضة + سوق صاعد = الحيتان دخلوا السوق (شراء)
     # Stablecoins منخفضة + سوق هابط = بيع عشوائي (ليس حيتان)
 
-    if len(whale_signals) >= 2 and falling_pct >= 55:
-        whale_verdict  = "🔴 *تحذير — لا تشتري الآن*"
-        whale_desc     = "الحيتان يبيعون ويجمعون Stablecoins — ينتظرون أسعاراً أقل"
-        whale_action   = "⛔ _انتظر — السوق لم يصل قاعه بعد_"
+    # ══════════════════════════════════════════
+    # حكم الحيتان — يعتمد على 3 مصادر:
+    # 1. whale_signals (نشاط Stablecoins غير طبيعي)
+    # 2. sell_pct / buy_pct (حجم الشراء vs البيع)
+    # 3. rising_pct / falling_pct (عدد العملات الصاعدة vs الهابطة)
+    # ══════════════════════════════════════════
+    _sell_pressure = sell_pct >= 70   # ضغط بيع حجمي
+    _buy_pressure  = buy_pct  >= 55   # ضغط شراء حجمي
+    _mkt_falling   = falling_pct >= 55
+    _mkt_rising    = rising_pct  >= 55
+    _whales_active = len(whale_signals) >= 2
+
+    if _whales_active and _sell_pressure and _mkt_falling:
+        # الحيتان يجمعون Stablecoins + ضغط بيع + سوق هابط = خطر حقيقي
+        whale_verdict  = "🔴 *تحذير — الحيتان خارج السوق*"
+        whale_desc     = "الحيتان يجمعون Stablecoins + ضغط بيع {:.0f}% — ينتظرون قاعاً".format(sell_pct)
+        whale_action   = "⛔ _لا تدخل — انتظر حتى تنخفض نسبة البيع_"
         whale_icon     = "🐋🔴"
-    elif len(whale_signals) >= 2 and rising_pct >= 55:
-        whale_verdict  = "🟢 *فرصة — السيولة تدخل السوق*"
-        whale_desc     = "الحيتان يضخون أموالاً — زخم شرائي قوي"
-        whale_action   = "✅ _يمكن الدخول — السيولة إيجابية_"
+
+    elif _whales_active and _buy_pressure and _mkt_rising:
+        # الحيتان نشطون + ضغط شراء + سوق صاعد = فرصة قوية
+        whale_verdict  = "🟢 *فرصة ذهبية — الحيتان يشترون*"
+        whale_desc     = "الحيتان يضخون سيولة + شراء {:.0f}% — زخم صاعد قوي".format(buy_pct)
+        whale_action   = "✅ _ادخل الآن — السيولة إيجابية والحيتان معك_"
         whale_icon     = "🐋🟢"
-    elif rising_pct >= 60 and not whale_signals:
-        whale_verdict  = "🟢 *السوق صاعد — زخم إيجابي*"
-        whale_desc     = "أغلب العملات ترتفع — جو شرائي عام"
-        whale_action   = "✅ _يمكن الدخول بحذر_"
-        whale_icon     = "📈🟢"
-    elif falling_pct >= 65:
-        whale_verdict  = "🔴 *السوق هابط — ابتعد*"
-        whale_desc     = "ضغط بيع قوي على أغلب العملات — خطر"
+
+    elif _whales_active and _sell_pressure and not _mkt_falling:
+        # الحيتان يجمعون Stablecoins لكن السوق لم ينهار = تجميع خفي محتمل
+        whale_verdict  = "👁️ *تجميع خفي محتمل*"
+        whale_desc     = "الحيتان يجمعون Stablecoins ({}) رغم استقرار السوق — مراقبة".format(len(whale_signals))
+        whale_action   = "⏳ _انتظر تأكيداً — قد يكون تجميعاً قبل الارتفاع_"
+        whale_icon     = "🐋👁️"
+
+    elif _sell_pressure and _mkt_falling:
+        # ضغط بيع + سوق هابط بدون حيتان = بيع عشوائي
+        whale_verdict  = "🔴 *ضغط بيع — ابتعد*"
+        whale_desc     = "بيع {:.0f}% من الحجم + {:.0f}% من العملات هابطة — خطر".format(sell_pct, falling_pct)
         whale_action   = "⛔ _لا تدخل — انتظر الاستقرار_"
         whale_icon     = "📉🔴"
+
+    elif _buy_pressure and _mkt_rising:
+        # شراء + سوق صاعد = جو إيجابي
+        whale_verdict  = "🟢 *السوق صاعد — زخم إيجابي*"
+        whale_desc     = "شراء {:.0f}% + {:.0f}% من العملات ترتفع — جو صحي".format(buy_pct, rising_pct)
+        whale_action   = "✅ _يمكن الدخول بحذر_"
+        whale_icon     = "📈🟢"
+
+    elif _sell_pressure:
+        # ضغط بيع فقط بدون انهيار واضح = حذر
+        whale_verdict  = "🟡 *ضغط بيع — توخَّ الحذر*"
+        whale_desc     = "بيع {:.0f}% من الحجم — السوق يميل للهبوط".format(sell_pct)
+        whale_action   = "⚠️ _انتظر قبل الدخول — الضغط البيعي مرتفع_"
+        whale_icon     = "🟡🔴"
+
     else:
         whale_verdict  = "🟡 *السوق محايد — انتظر*"
-        whale_desc     = "لا اتجاه واضح — السوق في حالة ترقب"
+        whale_desc     = "لا اتجاه واضح | شراء {:.0f}% | بيع {:.0f}%".format(buy_pct, sell_pct)
         whale_action   = "⏳ _انتظر إشارة واضحة قبل الدخول_"
         whale_icon     = "🟡"
 
@@ -5450,16 +5484,16 @@ def send_daily_report():
     _total_vol   = float(total_market_vol) if total_market_vol is not None else 0.0
 
     msg = (
-        "📊 *DAILY REPORT* 📅\\n"
-        "🗓️ `{date}` — إغلاق اليوم\\n"
-        "━━━━━━━━━━━━━━━━━━\\n"
-        "{mkt_icon} *السوق: {mkt_state}*\\n"
-        "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\\n"
-        "Ξ ETH 24h: `{eth:+.2f}%`\\n"
-        "━━━━━━━━━━━━━━━━━━\\n"
-        "{whale_icon} {verdict}\\n"
-        "_{desc}_\\n"
-        "━━━━━━━━━━━━━━━━━━\\n"
+        "📊 *DAILY REPORT* 📅\n"
+        "🗓️ `{date}` — إغلاق اليوم\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{mkt_icon} *السوق: {mkt_state}*\n"
+        "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\n"
+        "Ξ ETH 24h: `{eth:+.2f}%`\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{whale_icon} {verdict}\n"
+        "_{desc}_\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         "📊 *نسبة الشراء/البيع (بالحجم):*\n"
         "{bar}\n"
         "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol:.0f}M USDT)\n"
@@ -5468,11 +5502,6 @@ def send_daily_report():
         "💰 *تدفق رأس المال:*\n"
         "  {arrow} حجم السوق: `{vol_ch}` عن أمس\n"
         "  📦 إجمالي: `{total_vol:,.0f}M` USDT\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🐋 *نشاط الحيتان (Stablecoins):*\n"
-        "{whale}"
-        "💵 *أكبر Stablecoins اليوم:*\n"
-        "{stables}"
         "━━━━━━━━━━━━━━━━━━\n"
         "💸 *تدفق السيولة بين القطاعات:*\n"
         "{flow}"
@@ -5499,8 +5528,6 @@ def send_daily_report():
         total_vol=_total_vol / 1_000_000,
         vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "أول يوم"),
 
-        whale=whale_txt,
-        stables=stable_txt,
         flow=flow_sum,
         action=whale_action,
     )
@@ -5546,9 +5573,16 @@ def send_daily_report():
     if not _ct: _ct="• لا توجد عملات\n"
     _SP="━"*18
     _brk=(_SP+"\n"
-        +"🐳 *احتفاظ الحيتان Stablecoins:* `"
+        +"🐳 *احتفاظ الحيتان بـ Stablecoins:* `"
         +str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
-        +_st+_ss+"\n"+_SP+"\n"
+        +_st+_ss+"\n"
+        +_SP+"\n"
+        +"🐋 *نشاط الحيتان (غير طبيعي):*\n"
+        +whale_txt
+        +"\n"
+        +"💵 *أكبر Stablecoins اليوم:*\n"
+        +stable_txt
+        +_SP+"\n"
         +"*"+str(len(_bc))+" عملة* Sigma>=10:\n"+_ct)
     _trnd=""
     if len(market_activity_history)>=2:
@@ -5565,7 +5599,7 @@ def send_daily_report():
     _sm_block  = "\n" + _sm_data if _sm_data else ""
     send(msg+"\n"+_brk+"\n"+_trnd+"\n"+_analysis+_sm_block)
     log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
-             rising_pct, len(whale_signals), vol_change_pct)
+             rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
 
 # ═══════════════════════════════════════════════════════
 #  🆕 FEATURE 1: Daily Breakout Report (Sigma)
@@ -6462,4 +6496,4 @@ if __name__ == "__main__":
         _trnd+=_SEP
     send(msg+"\n"+_brk+"\n"+_trnd)
     log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
-             rising_pct, len(whale_signals), vol_change_pct)
+             rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
