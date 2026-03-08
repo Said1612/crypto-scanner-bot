@@ -52,7 +52,8 @@ BLOCKED_WATCHLIST = {
 }
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
-CHAT_ID        = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
+CHAT_ID        = os.getenv("CHAT_ID",  "YOUR_CHAT_ID")
+GROUP_ID       = os.getenv("GROUP_ID", "")   # رقم المجموعة (يبدأ بـ -)
 
 # ── إشارات ──────────────────────────────────────
 SCORE_MIN          = 55        # 🧪 TEST (كان 65)
@@ -224,6 +225,12 @@ FLOW_EXIT_DROP     = -1.5      # نسبة انخفاض = خروج سيولة م�
 FLOW_ALERT_COOL    = 600       # 🧪 TEST (كان 900) — 10 دقائق cooldown
 FLOW_HISTORY_MAX   = 20        # أقصى تاريخ محفوظ للقطاع
 
+# Sector Rotation
+SR_MIN_OUT        = -8.0   # قطاع يخرج منه: -8% أو أقل
+SR_MIN_IN         = 8.0    # قطاع يدخل إليه: +8% أو أكثر
+SR_COOLDOWN       = 14400  # 4 ساعات بين تنبيهات Rotation
+SR_TOP_COINS      = 5      # أفضل عملات في القطاع المنتعش
+
 # ── 🆕 Auto Expand ───────────────────────────────
 EXPAND_EVERY       = 86400     # إعادة توسيع القوائم كل 24 ساعة
 
@@ -317,7 +324,7 @@ SECTOR_KEYWORDS = {
         "OPEN","LANDX","CREDIX","POLIX","TRUE","MTV","PROP","TPROT",
         "STBTC","CULT","BRICS","ESTATE","REALT","DEXT","POLYMATH",
         "SECURITIZE","BACKED","MAPLE","CENTRIFUGE","GOLDFINCH",
-        "TOUCAN","COOREST","BASE","REALIO","LOFTY",
+        "TOUCAN","COOREST","BASE","REALIO","LOFTY","PRCL","PROPS","REALT","BLOCKSQUARE",
     ],
     "Gaming": [
         "GAME","PLAY","QUEST","HERO","GUILD","YIELD","PIXEL","PORTAL",
@@ -665,6 +672,15 @@ lz_daily_sent_date = ""   # type: str               تاريخ آخر فحص ي�
 # 🆕 V16: Hidden Accumulation — كشف التجميع الخفي
 hidden_accum_alerted = {}  # type: Dict[str, float]  {sym: last_alert_time}
 
+# 🔥 LIQUIDITY HUNTER
+lh_alerted   = {}    # type: Dict[str, float]  {sym: last_alert_time}
+last_lh_scan = 0.0   # type: float
+
+# 📋 Small Caps — قائمة العملات الصغيرة
+small_caps        = []   # type: List[str]   قائمة ديناميكية
+last_sc_refresh   = 0.0  # type: float       آخر تحديث للقائمة
+sc_alerted        = {}   # type: Dict[str, float]  {sym: last_alert_time}
+
 stable_vol_history = {}   # type: Dict[str, List[float]]
 smart_money_alert  = False
 smart_money_bonus  = 0
@@ -685,6 +701,7 @@ sector_vol_snapshots = {}  # type: Dict[str, List[float]]   {sector: [vol1, vol2
 sector_change_snapshots = {}  # type: Dict[str, List[float]] {sector: [avg_ch1, avg_ch2, ...]}
 sector_flow_alerted  = {}  # type: Dict[str, float]          {sector: last_alert_time}
 sector_flow_state    = {}  # type: Dict[str, str]            {sector: "IN"/"OUT"/"NEUTRAL"}
+last_sr_alert        = 0.0 # type: float  آخر تنبيه Sector Rotation
 top10_alerted        = {}  # type: Dict[str, float]          {sector: last_top10_alert_time}
 
 # 🆕 V15: تاريخ حجم كل عملة للمقارنة التاريخية
@@ -741,19 +758,34 @@ def format_price(p):
     return "{:,.2f}".format(p)
 
 
-def send(msg):
-    # type: (str) -> None
+def send(msg, personal_only=False):
+    # type: (str, bool) -> None
+    """
+    يرسل الرسالة لـ:
+    - CHAT_ID دائماً (الشخصي)
+    - GROUP_ID إذا كان مضبوطاً (المجموعة)
+
+    personal_only=True → الشخصي فقط (للأوامر الخاصة)
+    """
     if "YOUR" in TELEGRAM_TOKEN:
         log.info("[TELEGRAM] %s", msg[:80])
         return
-    try:
-        session.post(
-            "https://api.telegram.org/bot{}/sendMessage".format(TELEGRAM_TOKEN),
-            data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"},
-            timeout=10,
-        )
-    except Exception as e:
-        log.error("Telegram: %s", e)
+
+    targets = [CHAT_ID]
+    if GROUP_ID and not personal_only:
+        targets.append(GROUP_ID)
+
+    for chat_id in targets:
+        if not chat_id or "YOUR" in str(chat_id):
+            continue
+        try:
+            session.post(
+                "https://api.telegram.org/bot{}/sendMessage".format(TELEGRAM_TOKEN),
+                data={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
+                timeout=10,
+            )
+        except Exception as e:
+            log.error("Telegram [%s]: %s", chat_id, e)
 
 
 
@@ -1496,17 +1528,209 @@ def analyze_sector_flow():
             log.info("📤 Flow OUT | %s", [i["sector"] for i in outflows])
 
 
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   🌊 SECTOR ROTATION DETECTOR
+#   يكتشف عندما تخرج الأموال من قطاع وتدخل قطاعاً آخر
+#   ويرسل تنبيه واحد مركّز يربط الحدثين معاً
+# ═══════════════════════════════════════════════════════════════════
+
+def detect_sector_rotation():
+    # type: () -> None
+    """
+    يفحص القطاعات كل ساعة:
+    إذا وجد قطاع OUT + قطاع IN في نفس الوقت
+    → يرسل تنبيه Sector Rotation مع أفضل الفرص
+    """
+    global last_sr_alert
+    now = time.time()
+
+    if now - last_sr_alert < SR_COOLDOWN:
+        return
+
+    if not sector_vol_snapshots:
+        return
+
+    # احسب التغير لكل قطاع بناءً على snapshots
+    sector_pct = {}
+    sector_vol_abs = {}
+    for sector, vols in sector_vol_snapshots.items():
+        if len(vols) < 3:
+            continue
+        prev = sum(vols[-4:-1]) / 3 if len(vols) >= 4 else vols[-2]
+        curr = vols[-1]
+        if prev <= 0:
+            continue
+        pct = (curr - prev) / prev * 100
+        sector_pct[sector]     = round(pct, 1)
+        sector_vol_abs[sector] = curr / 1_000_000  # بالمليون
+
+    if not sector_pct:
+        return
+
+    # فرّق بين الداخل والخارج
+    entering = sorted(
+        [(s, p) for s, p in sector_pct.items() if p >= SR_MIN_IN],
+        key=lambda x: -x[1]
+    )
+    leaving = sorted(
+        [(s, p) for s, p in sector_pct.items() if p <= SR_MIN_OUT],
+        key=lambda x: x[1]
+    )
+
+    # يجب وجود الاثنين لإرسال Rotation
+    if not entering or not leaving:
+        return
+
+    last_sr_alert = now
+
+    # ── بناء الرسالة ──────────────────────────────
+    # قسم الخروج
+    out_lines = ""
+    for s, p in leaving[:3]:
+        vol = sector_vol_abs.get(s, 0)
+        out_lines += "  ⬇️ *{}* `{:+.1f}%` ({:.1f}M)\n".format(s, p, vol)
+
+    # قسم الدخول + أفضل عملات
+    in_lines   = ""
+    opp_lines  = ""  # الفرص المحددة
+
+    tmap = {t["symbol"]: t for t in all_tickers} if all_tickers else {}
+
+    for s, p in entering[:3]:
+        vol = sector_vol_abs.get(s, 0)
+        icon = "🔥" if p >= 25 else "✅"
+        in_lines += "  ⬆️ *{}* `{:+.1f}%` ({:.1f}M) {}\n".format(s, p, vol, icon)
+
+    # أفضل فرص في القطاع الأول الداخل
+    top_sector = entering[0][0]
+    coins      = SECTORS.get(top_sector, [])
+    top_coins  = []
+    for sym in coins:
+        if sym not in tmap:
+            continue
+        try:
+            ch  = float(tmap[sym]["priceChangePercent"])
+            vol = float(tmap[sym]["quoteVolume"])
+            pr  = float(tmap[sym]["lastPrice"])
+            # فلتر: حجم > 200K + تغيير إيجابي أو محايد (لم يرتفع كثيراً بعد)
+            if vol >= 200_000 and ch <= 15:
+                top_coins.append((sym.replace("USDT",""), ch, vol, pr))
+        except (KeyError, ValueError):
+            pass
+
+    top_coins.sort(key=lambda x: -x[2])  # رتّب حسب الحجم
+
+    for name, ch, vol, pr in top_coins[:SR_TOP_COINS]:
+        chg_icon = "🟢" if ch > 0 else "⚪"
+        opp_lines += "  {} *{}* `{:+.1f}%` | vol:`{:.0f}K`\n".format(
+            chg_icon, name, ch, vol/1000)
+
+    # حكم ذكي
+    top_in_pct  = entering[0][1]
+    top_out_pct = leaving[0][1]
+    if top_in_pct >= 30:
+        verdict = "🚀 *تدفق قوي جداً — فرصة نادرة!*"
+    elif top_in_pct >= 15:
+        verdict = "⚡ *تدفق واضح — دخول جيد*"
+    else:
+        verdict = "👀 *تدفق بدأ — راقب التأكيد*"
+
+    # هل السوق يدعم؟
+    mkt_note = ""
+    if market_state == "SAFE":
+        mkt_note = "✅ السوق SAFE — يدعم الدخول"
+    elif market_state == "CAUTION":
+        mkt_note = "⚠️ السوق CAUTION — ادخل بحذر"
+    else:
+        mkt_note = "🔴 السوق DANGER — مخاطرة عالية"
+
+    msg = (
+        "🌊 *SECTOR ROTATION*\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🔴 *خروج السيولة من:*\n"
+        + out_lines +
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🟢 *دخول السيولة إلى:*\n"
+        + in_lines +
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🎯 *أفضل فرص في {}:*\n".format(top_sector)
+        + (opp_lines if opp_lines else "  جاري البحث...\n") +
+        "━━━━━━━━━━━━━━━━━━\n"
+        + verdict + "\n"
+        + mkt_note + "\n"
+        "₿ BTC: `{:+.1f}%`\n".format(btc_change_24h)
+    )
+
+    send(msg)
+    log.info("🌊 Sector Rotation | OUT:%s → IN:%s",
+             [s for s, _ in leaving[:3]],
+             [s for s, _ in entering[:3]])
+
 def get_flow_summary():
     # type: () -> str
-    """يرجع ملخص حالة السيولة للقطاعات — يُستخدم في تقرير الأداء"""
-    in_sectors  = [s for s, state in sector_flow_state.items() if state == "IN"]
-    out_sectors = [s for s, state in sector_flow_state.items() if state == "OUT"]
+    """
+    ملخص تدفق السيولة بين القطاعات — مفصّل بالأرقام والنسب.
+    يقارن حجم اليوم بأمس لكل قطاع.
+    """
+    if not sector_vol_snapshots:
+        return "➡️ لا تدفق واضح — جاري جمع البيانات\n"
+
+    # احسب التغير لكل قطاع
+    sector_changes = []
+    for sector, vols in sector_vol_snapshots.items():
+        if len(vols) < 2:
+            continue
+        prev = vols[-2]
+        curr = vols[-1]
+        if prev <= 0:
+            continue
+        pct    = (curr - prev) / prev * 100
+        diff_m = (curr - prev) / 1_000_000
+        sector_changes.append((sector, pct, curr / 1_000_000, diff_m))
+
+    if not sector_changes:
+        return "➡️ لا تدفق واضح\n"
+
+    # رتّب: الأكثر دخولاً أولاً
+    sector_changes.sort(key=lambda x: -x[1])
+    entering = [(s, p, v, d) for s, p, v, d in sector_changes if p >= 8]
+    leaving  = [(s, p, v, d) for s, p, v, d in sector_changes if p <= -8]
+
     txt = ""
-    if in_sectors:
-        txt += "💸 سيولة داخلة: `{}`\n".format(", ".join(in_sectors))
-    if out_sectors:
-        txt += "📤 سيولة خارجة: `{}`\n".format(", ".join(out_sectors))
-    return txt or "➡️ لا تدفق واضح\n"
+
+    if entering:
+        txt += "🟢 *يدخل (أموال تتدفق):*\n"
+        medals = ["🥇", "🥈", "🥉"]
+        for i, (s, p, v, d) in enumerate(entering[:5]):
+            medal = medals[i] if i < 3 else "  •"
+            icon  = "🔥" if p >= 25 else "✅" if p >= 15 else ""
+            txt  += "  {} {} `{:+.0f}%` (+{:.1f}M) {} \n".format(
+                medal, s, p, abs(d), icon)
+
+    if leaving:
+        txt += "🔴 *يخرج (أموال تهرب):*\n"
+        for s, p, v, d in leaving[:3]:
+            txt += "  ⬇️ {} `{:+.0f}%` ({:.1f}M)\n".format(s, p, d)
+
+    # خلاصة ذكية
+    if entering and leaving:
+        top_in  = entering[0][0]
+        top_out = leaving[0][0]
+        txt += "━━━━━━━━━━━━━━━━━━\n"
+        txt += "🎯 *الأموال تهرب من {} → تدخل {}*\n".format(top_out, top_in)
+        txt += "  ابحث عن فرص في {} الآن!\n".format(top_in)
+    elif entering:
+        txt += "━━━━━━━━━━━━━━━━━━\n"
+        txt += "✅ *تدفق إيجابي — السوق يتحرك نحو {}*\n".format(entering[0][0])
+    elif leaving:
+        txt += "━━━━━━━━━━━━━━━━━━\n"
+        txt += "⚠️ *خروج سيولة من {} — احذر*\n".format(leaving[0][0])
+    else:
+        txt  = "➡️ السيولة موزعة بالتساوي — لا تدفق واضح\n"
+
+    return txt
 
 
 # ═══════════════════════════════════════════════
@@ -1801,6 +2025,185 @@ def get_backtest_stats():
             wins, len(completed_4h), avg)
     return txt
 
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   📊 PERFORMANCE TRACKER — تتبع أداء كل نظام بشكل مستقل
+#   يسجل كل إشارة مع مصدرها ويقيس نتائجها
+# ═══════════════════════════════════════════════════════════════════
+
+# مستودع الأداء — {signal_id: {...}}
+perf_signals = {}   # type: Dict[str, Dict]
+perf_id_counter = 0 # type: int
+
+# أسماء الأنظمة
+PERF_SYSTEMS = {
+    "quick":    "⚡ Quick Signals",
+    "lh_big":   "🔥 Liquidity Hunter",
+    "lh_small": "🔍 Small Cap Hunter",
+    "hidden":   "👁️ Hidden Accum",
+    "daily_lz": "📅 Daily Liquidity",
+    "bottom":   "📉 Bottom Accum",
+    "momentum": "🚀 Momentum",
+}
+
+
+def perf_register(sym, price, system, score=0, signals_desc=""):
+    # type: (str, float, str, int, str) -> str
+    """
+    يسجل إشارة جديدة في نظام تتبع الأداء.
+    يعيد signal_id لاستخدامه لاحقاً.
+    """
+    global perf_signals, perf_id_counter
+    perf_id_counter += 1
+    sid = "{}_{}".format(system, perf_id_counter)
+    sector = next((s for s, syms in SECTORS.items() if sym in syms), "Other")
+    is_small = sym in small_caps
+
+    perf_signals[sid] = {
+        "sym":          sym,
+        "system":       system,
+        "entry_price":  price,
+        "entry_time":   time.time(),
+        "sector":       sector,
+        "is_small_cap": is_small,
+        "score":        score,
+        "signals_desc": signals_desc,
+        # نتائج
+        "result_1h":    None,
+        "result_4h":    None,
+        "result_24h":   None,
+        "checked_1h":   False,
+        "checked_4h":   False,
+        "checked_24h":  False,
+    }
+    log.info("📊 Perf registered | %s | %s | score=%d", system, sym, score)
+    return sid
+
+
+def perf_check(price_map):
+    # type: (Dict[str, float]) -> None
+    """يتحقق من نتائج الإشارات المسجلة عند 1h/4h/24h"""
+    now = time.time()
+    for sid, data in list(perf_signals.items()):
+        sym   = data["sym"]
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+        entry   = data["entry_price"]
+        elapsed = now - data["entry_time"]
+        gain    = round((price - entry) / entry * 100 - BACKTEST_FEE, 2)
+
+        if not data["checked_1h"] and elapsed >= 3600:
+            data["checked_1h"] = True
+            data["result_1h"]  = gain
+        if not data["checked_4h"] and elapsed >= 14400:
+            data["checked_4h"] = True
+            data["result_4h"]  = gain
+        if not data["checked_24h"] and elapsed >= 86400:
+            data["checked_24h"] = True
+            data["result_24h"]  = gain
+            # احذف بعد 48 ساعة لتوفير الذاكرة
+        if elapsed >= 172800:
+            del perf_signals[sid]
+
+
+def perf_daily_report():
+    # type: () -> str
+    """
+    تقرير يومي شامل لأداء كل نظام.
+    يُرسَل ضمن send_daily_report()
+    """
+    if not perf_signals:
+        return ""
+
+    # جمع نتائج كل نظام
+    sys_stats = {k: {"wins_1h":0,"total_1h":0,"wins_4h":0,"total_4h":0,
+                     "best":None,"worst":None,"gains_4h":[]} 
+                 for k in PERF_SYSTEMS}
+
+    for sid, d in perf_signals.items():
+        sys = d["system"]
+        if sys not in sys_stats:
+            continue
+        st = sys_stats[sys]
+
+        if d["result_1h"] is not None:
+            st["total_1h"] += 1
+            if d["result_1h"] > 0:
+                st["wins_1h"] += 1
+
+        if d["result_4h"] is not None:
+            g = d["result_4h"]
+            st["total_4h"] += 1
+            if g > 0:
+                st["wins_4h"] += 1
+            st["gains_4h"].append((d["sym"], g))
+            if st["best"] is None or g > st["best"][1]:
+                st["best"] = (d["sym"], g)
+            if st["worst"] is None or g < st["worst"][1]:
+                st["worst"] = (d["sym"], g)
+
+    # بناء الرسالة
+    lines = [
+        "━━━━━━━━━━━━━━━━━━",
+        "📊 *PERFORMANCE REPORT*",
+        "━━━━━━━━━━━━━━━━━━",
+    ]
+
+    total_signals = 0
+    total_wins    = 0
+
+    for sys_key, sys_name in PERF_SYSTEMS.items():
+        st = sys_stats[sys_key]
+        if st["total_4h"] == 0 and st["total_1h"] == 0:
+            continue
+
+        total_signals += st["total_4h"]
+        total_wins    += st["wins_4h"]
+
+        # نسبة النجاح
+        if st["total_4h"] > 0:
+            wr   = round(st["wins_4h"] / st["total_4h"] * 100)
+            avg  = sum(g for _, g in st["gains_4h"]) / len(st["gains_4h"])
+            icon = "🟢" if wr >= 60 else "🟡" if wr >= 40 else "🔴"
+            line = "{} {} `{}%` نجاح ({}/{}) | متوسط `{:+.1f}%`".format(
+                icon, sys_name, wr, st["wins_4h"], st["total_4h"], avg)
+        else:
+            wr   = round(st["wins_1h"] / st["total_1h"] * 100) if st["total_1h"] else 0
+            icon = "🟡"
+            line = "{} {} `{}%` نجاح 1H ({}/{})".format(
+                icon, sys_name, wr, st["wins_1h"], st["total_1h"])
+
+        lines.append(line)
+
+        # أفضل وأسوأ إشارة
+        if st["best"]:
+            lines.append(
+                "  🏆 أفضل: *{}* `{:+.1f}%`  |  💀 أسوأ: *{}* `{:+.1f}%`".format(
+                    st["best"][0].replace("USDT",""),  st["best"][1],
+                    st["worst"][0].replace("USDT",""), st["worst"][1]
+                )
+            )
+
+    # الملخص الكلي
+    if total_signals > 0:
+        total_wr = round(total_wins / total_signals * 100)
+        lines += [
+            "━━━━━━━━━━━━━━━━━━",
+            "🎯 *الإجمالي:* `{}%` نجاح ({}/{} إشارة)".format(
+                total_wr, total_wins, total_signals),
+        ]
+        if total_wr >= 65:
+            lines.append("✅ _البوت يعمل بكفاءة عالية_")
+        elif total_wr >= 50:
+            lines.append("⚠️ _أداء متوسط — يحتاج مراجعة الإعدادات_")
+        else:
+            lines.append("🔴 _أداء ضعيف — راجع الـ thresholds_")
+
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lines) + "\n"
 
 # ═══════════════════════════════════════════════
 #   SMART MONEY DETECTION
@@ -4048,6 +4451,418 @@ def refresh_tickers():
 #   ANALYSIS FUNCTIONS
 # ═══════════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🔥 LIQUIDITY HUNTER — كاشف دخول السيولة المفاجئ
+#   يعمل كل 5 دقائق على كل العملات
+#   يكتشف 3 سيناريوهات قبل الارتفاع بدقائق/ساعات
+# ═══════════════════════════════════════════════════════════════════
+
+# إعدادات LIQUIDITY HUNTER
+# ══════════════════════════════════════════
+# Small Caps — قائمة مستقلة للعملات الصغيرة
+# ══════════════════════════════════════════
+SC_MIN_VOL        = 50_000    # حجم أدنى 50K USDT
+SC_MAX_VOL        = 500_000   # حجم أقصى 500K (فوقه يصبح Big Cap)
+SC_MAX_COINS      = 300       # أقصى عدد عملات في القائمة
+SC_REFRESH_EVERY  = 3600      # تحديث القائمة كل ساعة
+SC_VOL_SPIKE      = 4.0       # يحتاج spike أقوى (أكثر تصفية)
+SC_VOL_SPIKE_MICRO = 1.8      # عملات < 100K — spike أقل يكفي
+SC_MICRO_VOL_MAX  = 100_000   # حد الـ Micro Cap
+SC_SCORE_MIN      = 65        # حد أعلى للعملات الصغيرة (أكثر صرامة)
+
+LH_VOL_SPIKE      = 3.0   # الحجم ارتفع 3× المعدل = مشبوه
+LH_VOL_QUIET      = 1.8   # الحجم ارتفع 1.8× بهدوء = تجميع صامت
+LH_PRICE_FLAT     = 2.0   # السعر تغير أقل من 2% رغم ارتفاع الحجم
+LH_BTC_DIV_MIN    = 1.5   # BTC ينزل -1.5% لكن العملة ثابتة = قوة داخلية
+LH_COOLDOWN       = 14400 # 4 ساعات بين تنبيهات نفس العملة
+LH_SCORE_MIN      = 50    # الحد الأدنى للتنبيه
+LH_SCAN_EVERY     = 300   # كل 5 دقائق
+
+
+def liquidity_hunter(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🔥 LIQUIDITY HUNTER
+    يفحص 3 سيناريوهات لدخول السيولة المفاجئة:
+
+    🎯 سيناريو 1 — Volume Spike الصامت:
+       حجم 3×+ بدون ارتفاع سعر = الحيتان يشترون خفية
+
+    💧 سيناريو 2 — Bid Wall:
+       طلبات شراء ضخمة في Order Book = سعر محمي من الأسفل
+
+    📊 سيناريو 3 — BTC Divergence:
+       BTC ينزل لكن العملة تقاوم = أموال تدخل هذه العملة تحديداً
+    """
+    global lh_alerted, last_lh_scan
+    now = time.time()
+
+    # أفضل 60 عملة حسب الحجم
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in candidates if s not in tracked],
+        key=lambda x: -x[1]
+    )[:60]
+
+    btc_change = btc_change_24h  # حالة BTC الحالية
+    results    = []              # [(score, sym, signals, price, vol)]
+
+    for sym, vol in ranked:
+        if vol < 200_000:
+            continue
+        if now - lh_alerted.get(sym, 0) < LH_COOLDOWN:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        # جلب بيانات 15m (20 شمعة)
+        kd = get_klines(sym, "15m", 20)
+        if not kd or len(kd["closes"]) < 10:
+            continue
+
+        closes = kd["closes"]
+        vols   = kd["vols"]
+        opens  = kd["opens"]
+        lows   = kd["lows"]
+        n      = len(closes)
+
+        avg_vol = kd.get("avg_vol", sum(vols) / n) if n > 0 else 1
+        if avg_vol <= 0:
+            continue
+
+        vol_last3  = sum(vols[-3:]) / 3
+        vol_ratio  = vol_last3 / avg_vol
+        price_chg  = abs((closes[-1] - closes[-4]) / closes[-4] * 100) if closes[-4] > 0 else 99
+
+        score   = 0
+        signals = []
+
+        # ══════════════════════════════════════════
+        # سيناريو 1 — Volume Spike الصامت 🔥
+        # حجم ضخم + سعر ثابت = تجميع خفي
+        # ══════════════════════════════════════════
+        if vol_ratio >= LH_VOL_SPIKE and price_chg <= LH_PRICE_FLAT:
+            pts = min(int(vol_ratio * 10), 45)
+            score += pts
+            signals.append("🔥 VolSpike {:.1f}×".format(vol_ratio))
+
+        elif vol_ratio >= LH_VOL_QUIET and price_chg <= LH_PRICE_FLAT:
+            pts = min(int(vol_ratio * 8), 25)
+            score += pts
+            signals.append("🔇 QuietVol {:.1f}×".format(vol_ratio))
+
+        # ══════════════════════════════════════════
+        # سيناريو 2 — Wick Rejection 🕯️
+        # ذيول سفلية متكررة = رفض النزول
+        # ══════════════════════════════════════════
+        wick_score = 0
+        for i in range(-5, 0):
+            body       = abs(closes[i] - opens[i])
+            lower_wick = min(opens[i], closes[i]) - lows[i]
+            if body > 0 and lower_wick > body * 1.8:
+                wick_score += 1
+
+        if wick_score >= 3:
+            pts = wick_score * 7
+            score += pts
+            signals.append("🕯️ WickReject ×{}".format(wick_score))
+
+        # ══════════════════════════════════════════
+        # سيناريو 3 — BTC Divergence 📊
+        # BTC ينزل لكن العملة تقاوم
+        # ══════════════════════════════════════════
+        coin_change_24h = changes_map.get(sym, 0)
+        if btc_change <= -LH_BTC_DIV_MIN and coin_change_24h >= -1.0:
+            # BTC ينزل 1.5%+ لكن العملة ثابتة أو ترتفع
+            divergence = coin_change_24h - btc_change  # كلما كبر = أقوى
+            if divergence >= 2.0:
+                pts = min(int(divergence * 5), 30)
+                score += pts
+                signals.append("📊 BTCDiv +{:.1f}%".format(divergence))
+
+        # ══════════════════════════════════════════
+        # سيناريو 4 — Volume Trend صاعد 📈
+        # الحجم يتصاعد تدريجياً على 5 شمعات
+        # ══════════════════════════════════════════
+        vol_trend = sum(1 for i in range(-4, 0) if vols[i] > vols[i-1])
+        if vol_trend >= 4 and vol_ratio >= 1.4:
+            score += 20
+            signals.append("📈 VolTrend {}/4".format(vol_trend))
+
+        # ══════════════════════════════════════════
+        # فلتر: يجب على الأقل سيناريوان
+        # ══════════════════════════════════════════
+        if score >= LH_SCORE_MIN and len(signals) >= 2:
+            results.append((score, sym, signals, price, vol, coin_change_24h))
+
+    if not results:
+        return
+
+    # رتّب حسب Score تنازلياً — أرسل أفضل 3 فقط
+    results.sort(key=lambda x: -x[0])
+    for score, sym, signals, price, vol, chg in results[:3]:
+        # تأكيد على 1h أيضاً
+        kd1h = get_klines(sym, "1h", 6)
+        if not kd1h:
+            continue
+        vols_1h = kd1h["vols"]
+        avg_1h  = sum(vols_1h) / len(vols_1h) if vols_1h else 1
+        vol_1h_ratio = vols_1h[-1] / avg_1h if avg_1h > 0 else 0
+
+        # على الأقل 1.2× على 1h
+        if vol_1h_ratio < 1.2:
+            continue
+
+        sector  = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+        rarity  = "🐋🔥 نادر جداً" if score >= 80 else "🔥 قوي" if score >= 65 else "⚡ متوسط"
+
+        lines_msg = [
+            "🔥 *LIQUIDITY HUNTER*",
+            "━━━━━━━━━━━━━━━━━━",
+            "💧 *{}* — سيولة خفية مكتشفة!".format(sym.replace("USDT", "")),
+            "━━━━━━━━━━━━━━━━━━",
+            "📡 *السيناريوهات:*",
+            "  {}".format(" | ".join(signals)),
+            "━━━━━━━━━━━━━━━━━━",
+            "💪 قوة الإشارة: `{}/100` {}".format(score, rarity),
+            "💵 السعر: `{}`".format(round(price, 8)),
+            "📉 24h: `{:+.2f}%`  |  📊 1h حجم: `{:.1f}×`".format(chg, vol_1h_ratio),
+            "📦 الحجم: `{:.0f}K USDT`".format(vol / 1000),
+            "🏷️ القطاع: `{}`".format(sector),
+            "━━━━━━━━━━━━━━━━━━",
+            "⚡ _السوق نازل لكن السيولة تدخل هنا_",
+            "👁️ _راقب — قد يرتفع بسرعة_",
+        ]
+        msg = "\n".join(lines_msg)
+        send(msg)
+        lh_alerted[sym] = now
+        perf_register(sym, price, "lh_big", score, " | ".join(signals))
+        log.info("🔥 LiqHunter | %s | score=%d | %s", sym, score, " | ".join(signals))
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   📋 SMALL CAPS ENGINE
+#   قائمة ديناميكية للعملات الصغيرة — تُحدَّث كل ساعة
+#   حجم 50K→500K USDT يومياً
+# ═══════════════════════════════════════════════════════════════════
+
+def refresh_small_caps():
+    # type: () -> None
+    """
+    يبني قائمة Small Caps من مصدرين:
+    1. عملات SECTORS الحالية ذات حجم منخفض (تعرف قطاعها)
+    2. عملات MEXC الجديدة 50K→500K (تُصنَّف تلقائياً)
+
+    النتيجة: تغطية كاملة لكل قطاع حتى بعملاته الصغيرة
+    """
+    global small_caps, last_sc_refresh
+    log.info("📋 Small Caps: تحديث القائمة...")
+
+    data = safe_get(MEXC_24H)
+    if not data:
+        return
+
+    # بناء خريطة الحجوم
+    vol_map = {}
+    for t in data:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        try:
+            vol_map[sym] = float(t["quoteVolume"])
+        except (KeyError, ValueError):
+            continue
+
+    sc_set  = set()
+    stats   = {}   # {sector: count}
+
+    # ── المصدر 1: عملات SECTORS المعروفة ذات حجم صغير ──
+    for sector, coins in SECTORS.items():
+        sector_sc = []
+        for base in coins:
+            sym = base if base.endswith("USDT") else base + "USDT"
+            vol = vol_map.get(sym, 0)
+            if SC_MIN_VOL <= vol <= SC_MAX_VOL:
+                sc_set.add(sym)
+                sector_sc.append(sym)
+        if sector_sc:
+            stats[sector] = len(sector_sc)
+
+    # ── المصدر 2: عملات MEXC جديدة خارج SECTORS ──
+    known = set(
+        (b if b.endswith("USDT") else b + "USDT")
+        for coins in SECTORS.values() for b in coins
+    )
+    new_sc = []
+    for sym, vol in vol_map.items():
+        if sym in known or sym in sc_set:
+            continue
+        base = sym.replace("USDT", "")
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if base in {"USDC","USDE","FDUSD","DAI","TUSD","BUSD","XUSD","USD1",
+                    "BTC","ETH","BNB","SOL","XRP","USDT"}:
+            continue
+        if SC_MIN_VOL <= vol <= SC_MAX_VOL:
+            new_sc.append((sym, vol))
+
+    # أضف أفضل 100 جديدة حسب الحجم
+    new_sc.sort(key=lambda x: -x[1])
+    for sym, vol in new_sc[:100]:
+        sc_set.add(sym)
+
+    small_caps = list(sc_set)[:SC_MAX_COINS]
+    last_sc_refresh = time.time()
+
+    # تقرير مفصّل
+    sector_info = " | ".join("{}:{}".format(s, n) for s, n in stats.items())
+    log.info("📋 Small Caps: %d عملة | قطاعات: %s | جديدة: %d",
+             len(small_caps), sector_info, len(new_sc[:100]))
+
+
+def liquidity_hunter_small_caps(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🔍 LIQUIDITY HUNTER — Small Caps Edition
+    نفس المنطق لكن:
+    - يستخدم قائمة small_caps بدل candidates
+    - threshold أعلى (SC_VOL_SPIKE=4×، SC_SCORE_MIN=65)
+    - تنبيه مختلف يوضح المخاطرة العالية
+    """
+    global sc_alerted
+    now = time.time()
+
+    if not small_caps:
+        return
+
+    btc_change = btc_change_24h
+    results    = []
+
+    # فلتر مسبق بدون API — خذ أفضل 80 حسب الحجم الحالي
+    ranked_sc = sorted(
+        [(s, vol_now.get(s, 0)) for s in small_caps
+         if vol_now.get(s, 0) >= SC_MIN_VOL * 0.5
+         and now - sc_alerted.get(s, 0) >= LH_COOLDOWN],
+        key=lambda x: -x[1]
+    )[:80]
+
+    for sym, vol in ranked_sc:
+        vol = vol_now.get(sym, 0)
+        if vol < SC_MIN_VOL * 0.5:
+            continue
+        if now - sc_alerted.get(sym, 0) < LH_COOLDOWN:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        kd = get_klines(sym, "15m", 20)
+        if not kd or len(kd["closes"]) < 10:
+            continue
+
+        closes = kd["closes"]
+        vols   = kd["vols"]
+        opens  = kd["opens"]
+        lows   = kd["lows"]
+        n      = len(closes)
+
+        avg_vol   = kd.get("avg_vol", sum(vols) / n) if n > 0 else 1
+        if avg_vol <= 0:
+            continue
+
+        vol_last3 = sum(vols[-3:]) / 3
+        vol_ratio = vol_last3 / avg_vol
+        price_chg = abs((closes[-1] - closes[-4]) / closes[-4] * 100) if closes[-4] > 0 else 99
+
+        score   = 0
+        signals = []
+
+        # سيناريو 1 — Volume Spike الصامت
+        # Micro Cap (< 100K): يكفي 1.8× لأن الحجم الأساسي ضعيف
+        _spike_threshold = SC_VOL_SPIKE_MICRO if vol < SC_MICRO_VOL_MAX else SC_VOL_SPIKE
+        if vol_ratio >= _spike_threshold and price_chg <= LH_PRICE_FLAT:
+            pts = min(int(vol_ratio * 10), 50)
+            score += pts
+            tag = "🔬 MicroSpike" if vol < SC_MICRO_VOL_MAX else "🔥 VolSpike"
+            signals.append("{} {:.1f}×".format(tag, vol_ratio))
+        elif vol_ratio >= LH_VOL_QUIET and price_chg <= LH_PRICE_FLAT:
+            pts = min(int(vol_ratio * 7), 20)
+            score += pts
+            signals.append("🔇 QuietVol {:.1f}×".format(vol_ratio))
+
+        # سيناريو 2 — Wick Rejection
+        wick_score = 0
+        for i in range(-5, 0):
+            body       = abs(closes[i] - opens[i])
+            lower_wick = min(opens[i], closes[i]) - lows[i]
+            if body > 0 and lower_wick > body * 1.8:
+                wick_score += 1
+        if wick_score >= 3:
+            score += wick_score * 8
+            signals.append("🕯️ WickReject ×{}".format(wick_score))
+
+        # سيناريو 3 — BTC Divergence
+        coin_change_24h = changes_map.get(sym, 0)
+        if btc_change <= -LH_BTC_DIV_MIN and coin_change_24h >= -1.0:
+            divergence = coin_change_24h - btc_change
+            if divergence >= 2.0:
+                score += min(int(divergence * 5), 30)
+                signals.append("📊 BTCDiv +{:.1f}%".format(divergence))
+
+        # سيناريو 4 — Volume Trend
+        vol_trend = sum(1 for i in range(-4, 0) if vols[i] > vols[i-1])
+        if vol_trend >= 4 and vol_ratio >= 1.5:
+            score += 20
+            signals.append("📈 VolTrend {}/4".format(vol_trend))
+
+        if score >= SC_SCORE_MIN and len(signals) >= 2:
+            results.append((score, sym, signals, price, vol, coin_change_24h))
+
+    if not results:
+        return
+
+    results.sort(key=lambda x: -x[0])
+    for score, sym, signals, price, vol, chg in results[:2]:  # أفضل 2 فقط
+        kd1h = get_klines(sym, "1h", 6)
+        if not kd1h:
+            continue
+        vols_1h     = kd1h["vols"]
+        avg_1h      = sum(vols_1h) / len(vols_1h) if vols_1h else 1
+        vol_1h_ratio = vols_1h[-1] / avg_1h if avg_1h > 0 else 0
+
+        if vol_1h_ratio < 1.3:  # أصعب للـ Small Caps
+            continue
+
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "Small Cap")
+        rarity = "🐋🔥 نادر" if score >= 85 else "🔥 قوي" if score >= 70 else "⚡ متوسط"
+
+        lines_msg = [
+            "🔍 *SMALL CAP HUNTER*",
+            "━━━━━━━━━━━━━━━━━━",
+            "💎 *{}* — سيولة خفية!".format(sym.replace("USDT", "")),
+            "━━━━━━━━━━━━━━━━━━",
+            "📡 *السيناريوهات:*",
+            "  {}".format(" | ".join(signals)),
+            "━━━━━━━━━━━━━━━━━━",
+            "💪 القوة: `{}/100` {}".format(score, rarity),
+            "💵 السعر: `{}`".format(round(price, 8)),
+            "📉 24h: `{:+.2f}%`  |  1h حجم: `{:.1f}×`".format(chg, vol_1h_ratio),
+            "📦 الحجم: `{:.0f}K USDT`".format(vol / 1000),
+            "🏷️ القطاع: `{}`".format(sector),
+            "━━━━━━━━━━━━━━━━━━",
+            "⚠️ _Small Cap — مخاطرة عالية / ربح محتمل 30%+_",
+            "🎯 _ادخل بحجم صغير فقط_",
+        ]
+        msg = "\n".join(lines_msg)
+        send(msg)
+        sc_alerted[sym] = now
+        perf_register(sym, price, "lh_small", score, " | ".join(signals))
+        log.info("🔍 SmallCapHunter | %s | score=%d | %s", sym, score, " | ".join(signals))
+
+
 # ═══════════════════════════════════════════════════════════════
 #   🆕 V16: HIDDEN ACCUMULATION ENGINE
 #   كشف السيولة الخفية قبل الارتفاع
@@ -4243,6 +5058,7 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
         msg = "\n".join(lines_msg)
         send(msg)
         hidden_accum_alerted[sym] = now
+        perf_register(sym, price, "hidden", acc_score, acc_desc)
         log.info("👁️ Hidden Accum | %s | score=%d | %s", sym, acc_score, acc_desc)
 
 
@@ -5617,7 +6433,10 @@ def send_daily_report():
     # ══ Stablecoin Sigma من analyze_smart_money ══
     _sm_data   = _get_smart_money_summary()
     _sm_block  = "\n" + _sm_data if _sm_data else ""
+    _perf_block = perf_daily_report()
     send(msg+"\n"+_brk+"\n"+_trnd+"\n"+_analysis+_sm_block)
+    if _perf_block:
+        send(_perf_block)
     log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
              rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
 
@@ -6296,6 +7115,7 @@ def run():
             # 🔴 Trailing Stop Check — كل 5 دقائق
             if now - last_ts_scan >= TS_SCAN_EVERY:
                 check_trailing_stops()
+                perf_check(price_map)    # 📊 تحديث نتائج الأداء
                 last_ts_scan = now
 
             # 👁️ Watchlist Entry Check — كل دقيقة
@@ -6311,7 +7131,9 @@ def run():
 
             # تحديثات دورية
             if now - last_btc         >= BTC_EVERY:         analyze_btc()
-            if now - last_sectors     >= SECTORS_EVERY:     analyze_sectors()
+            if now - last_sectors     >= SECTORS_EVERY:
+                analyze_sectors()
+                detect_sector_rotation()  # 🌊 هل حدث Rotation؟
             # analyze_smart_money مدمجة في التقرير اليومي
             refresh_sector_report()   # 🆕 تقرير القطاعات + تجميع الحيتان كل ساعة
             # 🆕 Bottom Accumulation Scan كل ساعة
@@ -6402,8 +7224,22 @@ def run():
             # Momentum Detector
             detect_momentum(price_map, change_now, vol_now, high_map, low_map)
 
-            # 🆕 V16: كشف التجميع الخفي — الحيتان يشترون قبل الارتفاع
-            scan_hidden_accumulation(price_map, vol_now, changes_map)
+            # 🆕 V16: كشف التجميع الخفي — كل 10 دقائق
+            if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
+                scan_hidden_accumulation(price_map, vol_now, changes_map)
+
+            # 🔥 LIQUIDITY HUNTER — كل 5 دقائق
+            if now - last_lh_scan >= LH_SCAN_EVERY:
+                liquidity_hunter(price_map, vol_now, changes_map)
+                last_lh_scan = now
+
+            # 📋 Small Caps — تحديث القائمة كل ساعة
+            if now - last_sc_refresh >= SC_REFRESH_EVERY:
+                refresh_small_caps()
+
+            # 🔍 SMALL CAP HUNTER — كل 5 دقائق
+            if now - last_lh_scan < 10 and small_caps:
+                liquidity_hunter_small_caps(price_map, vol_now, changes_map)
 
             # Deep Scan
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
