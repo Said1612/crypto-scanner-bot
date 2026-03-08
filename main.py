@@ -5439,6 +5439,16 @@ def send_daily_report():
     # حالة تدفق السيولة
     flow_sum = get_flow_summary()
 
+    # ضمان أن القيم أرقام وليست نصوص
+    btc_ch         = float(btc_ch)        if btc_ch         is not None else 0.0
+    eth_change_24h = float(eth_change_24h) if eth_change_24h is not None else 0.0
+    btc_trend_1h   = float(btc_trend_1h)  if btc_trend_1h   is not None else 0.0
+    buy_pct        = float(buy_pct)        if buy_pct        is not None else 0.0
+    sell_pct       = float(sell_pct)       if sell_pct       is not None else 0.0
+    buy_vol        = float(buy_vol)        if buy_vol        is not None else 0.0
+    sell_vol       = float(sell_vol)       if sell_vol       is not None else 0.0
+    total_market_vol = float(total_market_vol) if total_market_vol is not None else 0.0
+
     msg = (
         "📊 *DAILY REPORT* 📅\\n"
         "🗓️ `{date}` — إغلاق اليوم\\n"
@@ -5456,7 +5466,7 @@ def send_daily_report():
         "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol:.0f}M USDT)\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *تدفق رأس المال:*\n"
-        "  {arrow} حجم السوق: `{vol_ch:+.1f}%` عن أمس\n"
+        "  {arrow} حجم السوق: `{vol_ch}` عن أمس\n"
         "  📦 إجمالي: `{total_vol:,.0f}M` USDT\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "🐋 *نشاط الحيتان (Stablecoins):*\n"
