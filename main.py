@@ -5223,7 +5223,7 @@ def send_daily_report():
         log.debug("📊 تقرير اليوم أُرسل مسبقاً: %s", today)
         return
     # نافذة موسعة: 00:00 → 06:00 إذا لم يُرسل بعد
-    if now_utc.hour != 0 or now_utc.minute > 14:
+    if now_utc.hour != 0 or now_utc.minute > 59:
         log.debug("📊 انتظار 00:00 UTC | الساعة الآن: %02d:%02d", now_utc.hour, now_utc.minute)
         return
     log.info("📊 إرسال التقرير اليومي | %s", today)
@@ -5475,7 +5475,7 @@ def send_daily_report():
         desc=whale_desc,
         btc=btc_ch, eth=eth_change_24h,
         btc1h=btc_trend_1h,
-        mkt_icon=icons.get(market_state,"📊"), mkt_state=market_state,
+        mkt_icon={"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"📊"), mkt_state=market_state,
         bar=mkt_bar,
         rp=rising_pct,  fp=falling_pct,
         rising=rising,  falling=falling,
