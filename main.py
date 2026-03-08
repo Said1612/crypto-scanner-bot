@@ -5537,7 +5537,7 @@ def send_daily_report():
     _st=""
     for _sx in _sh[:5]:
         _wh=" 🐳" if _sx["sigma"]>=3.0 else ""
-        _st+="  💵 *"+_sx["base"]+"* | نشاط: `"+str(_sx["ratio"])+"×` | `"+str(round(_sx["vol"]/1e6,1))+" مليون USDT`"+_wh+"\n"
+        _st+="  💵 *"+_sx["base"]+"* | نشاط: `"+str(_sx.get("ratio", round(_sx.get("sigma",1.0),1)))+"×` | `"+str(round(_sx["vol"]/1e6,1))+" مليون USDT`"+_wh+"\n"
     if not _st: _st="  لا يوجد\n"
     _ct=""
     for _co in _bc[:8]:
