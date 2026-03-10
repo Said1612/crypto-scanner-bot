@@ -874,15 +874,85 @@ def poll_commands():
                     for s,v in list(gem_watchlist.items())[:10]:
                         txt += "  • *" + s.replace("USDT","") + "* | مرحلة " + str(v.get("stage",1)) + "\n"
                     send(txt)
+            elif text in ("/btc", "/بتكوين"):
+                _icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"📊")
+                _btps = ("  🐋 TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%`".format(
+                    btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
+                    btc_tps_stats.get("vdelta",0.5)*100
+                )) if btc_tps_stats else ""
+                send(
+                    "₿ *BTC الآن*\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "{} السوق: *{}*\n"
+                    "24h: `{:+.2f}%`\n"
+                    "4h:  `{:+.2f}%`\n"
+                    "1h:  `{:+.2f}%`\n"
+                    "{}".format(
+                        _icon, market_state,
+                        btc_change_24h, btc_trend_4h, btc_trend_1h,
+                        _btps
+                    )
+                )
+
+            elif text in ("/sectors", "/قطاعات"):
+                if not hot_sectors:
+                    send("📊 لا توجد قطاعات ساخنة حالياً")
+                else:
+                    txt = "🏆 *أفضل القطاعات الآن:*\n━━━━━━━━━━━━━━━━━━\n"
+                    for i, (sec, data) in enumerate(list(hot_sectors.items())[:5], 1):
+                        ch = data.get("change", 0)
+                        icon = "🔥" if ch >= 5 else ("📈" if ch >= 2 else "➡️")
+                        txt += "{}. {} *{}* `{:+.2f}%`\n".format(i, icon, sec, ch)
+                    send(txt)
+
+            elif text in ("/performance", "/اداء"):
+                perf_daily_report()
+
+            elif text in ("/hunter", "/صياد"):
+                # آخر 5 إشارات من Liquidity Hunter
+                from collections import OrderedDict
+                _recent = sorted(
+                    [(s, v) for s, v in perf_track.items()],
+                    key=lambda x: x[1].get("time", 0), reverse=True
+                )[:5]
+                if not _recent:
+                    send("🔥 لا توجد إشارات Liquidity Hunter بعد")
+                else:
+                    txt = "🔥 *آخر إشارات Hunter:*\n━━━━━━━━━━━━━━━━━━\n"
+                    for sym, v in _recent:
+                        ch = v.get("change_pct", 0)
+                        icon = "✅" if ch > 0 else "❌"
+                        txt += "{} *{}* `{:+.2f}%` — {}\n".format(
+                            icon, sym.replace("USDT",""), ch, v.get("system","")[:15]
+                        )
+                    send(txt)
+
+            elif text in ("/stop", "/ايقاف"):
+                send("⏸️ تم إيقاف التنبيهات مؤقتاً — اكتب /start للعودة")
+                # نضع flag
+                import builtins
+                builtins._mafio_paused = True
+
+            elif text in ("/start", "/تشغيل"):
+                import builtins
+                builtins._mafio_paused = False
+                send("✅ التنبيهات تعمل الآن!")
+
             elif text in ("/help", "/مساعدة"):
                 send(
-                    "\U0001f916 *MAFIO BOT أوامر:*\n"
-                    "/report — تقرير فوري\n"
-                    "/status — حالة البوت\n"
-                    "/gems   — الجواهر المرصودة\n"
-                    "/report    — تقرير يومي \u0641وري\n"
-                    "/watchlist — قائمة المراقبة\n"
-                    "/help      — هذه القائمة"
+                    "🤖 *MAFIO BOT — الأوامر:*\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "📊 /status      — حالة البوت\n"
+                    "₿ /btc         — سعر BTC والاتجاه\n"
+                    "🏆 /sectors     — أفضل القطاعات\n"
+                    "👁️ /watchlist   — قائمة المراقبة\n"
+                    "📅 /report      — التقرير اليومي\n"
+                    "📈 /performance — نسبة نجاح الإشارات\n"
+                    "🔥 /hunter      — آخر إشارات Hunter\n"
+                    "⏸️ /stop        — إيقاف التنبيهات\n"
+                    "✅ /start       — تشغيل التنبيهات\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "💎 /gems        — الجواهر المرصودة"
                 )
     except Exception as e:
         log.debug("poll_commands error: %s", e)
