@@ -693,6 +693,8 @@ tps_baseline     = {}   # type: Dict[str, float]  {sym: avg_tps_baseline}
 
 # 🔥 LIQUIDITY HUNTER
 tps_alerted  = {}    # type: Dict[str, float]  ⚡ TPS/ATS alerted
+whale_watchlist  = {}  # type: Dict[str, Dict]   🐋 Whale Watch قائمة
+whale_confirmed  = {}  # type: Dict[str, float]  🐋 آخر تأكيد حيتان
 lz_tps_alerted = {}  # type: Dict[str, float]  🎯 LZ+TPS Fusion alerted
 tps_baseline = {}    # type: Dict[str, float]  baseline TPS per coin
 last_tps_scan= 0.0   # type: float
@@ -4638,6 +4640,117 @@ LZ_TPS_COOLDOWN   = 14400   # 4 ساعات بين تنبيهات نفس العم
 LZ_TPS_SCORE_MIN  = 70      # حد أدنى للنقاط
 lz_tps_alerted    = {}      # type: Dict[str, float]
 
+# ═══════════════════════════════════════════════════════════════════
+#   🐋 WHALE CONFIRMATION SYSTEM
+#   يراقب العملات التي اشترى فيها الأفراد
+#   وينتظر دخول الحيتان للتأكيد
+# ═══════════════════════════════════════════════════════════════════
+
+WHALE_WATCH_TTL    = 14400   # يراقب العملة 4 ساعات بعد إشارة الأفراد
+WHALE_CHECK_EVERY  = 300     # يتحقق كل 5 دقائق
+WHALE_ATS_MIN      = 3000    # ATS > 3000$ = حيتان دخلوا
+WHALE_VDELTA_MIN   = 0.65    # VDelta 65%+ مع الحيتان
+
+# قائمة المراقبة: {sym: {time, ats_then, vdelta_then, price_then}}
+whale_watchlist    = {}   # type: Dict[str, Dict]
+whale_confirmed    = {}   # type: Dict[str, float]  {sym: last_confirm_time}
+
+
+def whale_watch_add(sym, ats, vdelta, price):
+    # type: (str, float, float, float) -> None
+    """يضيف عملة لقائمة مراقبة الحيتان"""
+    global whale_watchlist
+    if sym not in whale_watchlist:
+        whale_watchlist[sym] = {
+            "time":        time.time(),
+            "ats_then":    ats,
+            "vdelta_then": vdelta,
+            "price_then":  price,
+        }
+        log.info("👁️ Whale Watch: %s | ATS=%.0f$ | VD=%.0f%%", sym, ats, vdelta*100)
+
+
+def scan_whale_confirmation(price_map):
+    # type: (Dict) -> None
+    """
+    يفحص كل العملات في قائمة المراقبة
+    إذا ATS ارتفع لـ WHALE_ATS_MIN+ → تنبيه Whale Confirmation
+    """
+    global whale_watchlist, whale_confirmed
+    now     = time.time()
+    to_del  = []
+
+    for sym, data in list(whale_watchlist.items()):
+        # انتهت مدة المراقبة؟
+        if now - data["time"] > WHALE_WATCH_TTL:
+            to_del.append(sym)
+            continue
+
+        # تحقق من cooldown التأكيد
+        if now - whale_confirmed.get(sym, 0) < WHALE_WATCH_TTL:
+            continue
+
+        # جلب TPS/ATS الحالي
+        stats = analyze_tps_ats(sym)
+        if not stats:
+            continue
+
+        ats    = stats["ats"]
+        vdelta = stats["vdelta"]
+        tps    = stats["tps"]
+        price  = price_map.get(sym, 0)
+
+        # هل دخل الحيتان؟
+        if ats < WHALE_ATS_MIN or vdelta < WHALE_VDELTA_MIN:
+            continue
+
+        # حساب التغير منذ إشارة الأفراد
+        price_then  = data["price_then"]
+        ats_then    = data["ats_then"]
+        price_chg   = (price - price_then) / price_then * 100 if price_then > 0 else 0
+        ats_mult    = ats / ats_then if ats_then > 0 else 1.0
+        elapsed_min = int((now - data["time"]) / 60)
+
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+
+        # نوع الحيتان
+        if ats >= ATS_WHALE:
+            whale_type = "🐋🐋 حوت ضخم"
+        else:
+            whale_type = "🐋 حوت"
+
+        msg = (
+            "🐋 *WHALE CONFIRMATION*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⬆️ *{}* — الحيتان دخلوا!\n".format(sym.replace("USDT","")) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 *التطور:*\n"
+            "  قبل `{}` دقيقة: 🦐 ATS `{:.0f}$`\n".format(elapsed_min, ats_then) +
+            "  الآن:           {} ATS `{:.0f}$` (+{:.1f}×) 🔥\n".format(whale_type, ats, ats_mult) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚡ TPS:    `{:.1f}` صفقة/ثانية\n".format(tps) +
+            "📊 VDelta: `{:.0f}%` شراء حقيقي\n".format(vdelta * 100) +
+            "💰 السعر:  `{:.4f}` ({:+.2f}% منذ الإشارة)\n".format(price, price_chg) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "✅ *تأكيد — أضف للمركز الآن!*\n"
+            "🏷️ القطاع: `{}`\n".format(sector) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🚀 _أفراد + حيتان = موجة كاملة_"
+        )
+
+        send(msg)
+        whale_confirmed[sym] = now
+        to_del.append(sym)  # أزل من المراقبة بعد التأكيد
+        perf_register(sym, price, "whale_confirm", 95, "Whale confirmed after retail")
+        log.info("🐋 Whale Confirmed! %s | ATS=%.0f$ | VD=%.0f%% | +%.1f%% منذ الإشارة",
+                 sym, ats, vdelta*100, price_chg)
+
+    # تنظيف القائمة
+    for sym in to_del:
+        whale_watchlist.pop(sym, None)
+
+
+
 def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
     """
@@ -4924,6 +5037,10 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         send(msg)
         tps_alerted[sym] = now
         perf_register(sym, price_map.get(sym, 0), "tps_ats", score, " | ".join(signals))
+
+        # 🐋 إذا أفراد يشترون → أضف لقائمة مراقبة الحيتان
+        if ats < WHALE_ATS_MIN and vdelta >= 0.65:
+            whale_watch_add(sym, ats, vdelta, price_map.get(sym, 0))
         log.info("⚡ TPS/ATS | %s | score=%d | tps=%.1f | ats=%.0f | vdelta=%.0f%%",
                  sym, score, stats["tps"], stats["ats"], stats["vdelta"] * 100)
 
@@ -7520,6 +7637,7 @@ def run():
     global explosion_alerted, bottom_price_history, bottom_vol_history
     # 🆕 V16 New Systems
     global tps_alerted, tps_baseline, last_tps_scan  # ⚡ TPS/ATS
+    global whale_watchlist, whale_confirmed            # 🐋 Whale Confirmation
     global lz_tps_alerted                              # 🎯 LZ+TPS Fusion
     global lh_alerted, last_lh_scan          # 🔥 Liquidity Hunter
     global small_caps, last_sc_refresh       # 📋 Small Caps
@@ -7729,10 +7847,11 @@ def run():
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
 
             # 🔥 LIQUIDITY HUNTER — كل 5 دقائق
-            # ⚡ TPS/ATS + LZ Fusion — كل 5 دقائق
+            # ⚡ TPS/ATS + LZ Fusion + Whale — كل 5 دقائق
             if now - last_tps_scan >= TPS_SCAN_EVERY:
                 scan_tps_ats(price_map, vol_now, change_now)
                 scan_lz_tps_fusion(price_map, vol_now, change_now)  # 🎯 الدمج
+                scan_whale_confirmation(price_map)                  # 🐋 تأكيد حيتان
                 last_tps_scan = now
 
             if now - last_lh_scan >= LH_SCAN_EVERY:
