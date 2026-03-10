@@ -4662,10 +4662,15 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         ats    = tps_stats["ats"]
         vdelta = tps_stats["vdelta"]
 
-        # baseline
-        base  = tps_baseline.get(sym, tps)
-        ratio = tps / base if base > 0 else 1.0
-        tps_baseline[sym] = base * 0.9 + tps * 0.1
+        # baseline — إصلاح: إذا baseline صغير جداً لا نحسب ratio
+        base  = tps_baseline.get(sym, 0)
+        if base < 0.05:
+            # أول مرة نرى هذه العملة — احفظ baseline فقط بدون ratio
+            tps_baseline[sym] = tps if tps > 0 else 0.1
+            ratio = 1.0   # لا spike في أول مشاهدة
+        else:
+            ratio = tps / base if base > 0 else 1.0
+            tps_baseline[sym] = base * 0.9 + tps * 0.1
 
         # ── الخطوة 3: حساب النقاط المدمجة ──
         score   = 0
@@ -4727,9 +4732,18 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         zone_high = nearest_zone["high"]
         stop_loss = zone_low * 0.985           # 1.5% تحت المنطقة
         # أقرب مقاومة من بين المناطق الأخرى
-        resistance_zones = [z for z in zones if z["mid"] > price * 1.02]
-        target = resistance_zones[0]["mid"] if resistance_zones else price * 1.15
-        rr     = (target - price) / (price - stop_loss) if price > stop_loss else 0
+        # الهدف = أقرب مقاومة واقعية (max +30%)
+        resistance_zones = sorted(
+            [z for z in zones if z["mid"] > price * 1.02],
+            key=lambda z: z["mid"]
+        )
+        if resistance_zones:
+            # أقرب مقاومة لكن لا تتجاوز +30%
+            nearest_res = resistance_zones[0]["mid"]
+            target = min(nearest_res, price * 1.30)
+        else:
+            target = price * 1.12   # هدف افتراضي +12% إذا لا مقاومة قريبة
+        rr = (target - price) / (price - stop_loss) if price > stop_loss else 0
 
         sector  = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
         chg     = changes_map.get(sym, 0)
@@ -4739,7 +4753,10 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         msg = (
             "🎯 *LZ + TPS FUSION*\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "💎 *{}* — منطقة سيولة + تأكيد صفقات!\n".format(sym.replace("USDT","")) +
+            "💎 *{}* — منطقة سيولة + {}!\n".format(
+                sym.replace("USDT",""),
+                "حيتان 🐋" if ats >= ATS_WHALE else ("متوسط 🐟" if ats >= 1000 else "أفراد 🦐")
+            ) +
             "━━━━━━━━━━━━━━━━━━\n"
             "🗺️ *منطقة السيولة:* {}\n".format(zone_tag) +
             "  📊 المنطقة: `{:.4f}` ← `{:.4f}`\n".format(zone_low, zone_high) +
@@ -4759,7 +4776,11 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             "⚖️ R/R:    `{:.1f}:1`\n".format(rr) +
             "━━━━━━━━━━━━━━━━━━\n"
             "📉 24h: `{:+.2f}%` | 🏷️ {}\n".format(chg, sector) +
-            "🐋 _منطقة سيولة + حيتان = فرصة نادرة_"
+            "{}\n".format(
+                "🐋 _منطقة سيولة + حيتان = فرصة نادرة_" if ats >= ATS_WHALE else
+                ("🐟 _منطقة سيولة + متداولون متوسطون_" if ats >= 1000 else
+                 "🦐 _منطقة سيولة — انتظر تأكيد حيتان_")
+            )
         )
 
         send(msg)
