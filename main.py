@@ -823,38 +823,48 @@ def poll_commands():
     """يستمع لأوامر Telegram ويرسل التقرير فوراً عند الطلب"""
     global _tg_offset, daily_report_sent_date
     try:
-        url = "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=2".format(
+        url = "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=3&allowed_updates=message".format(
             TELEGRAM_TOKEN, _tg_offset)
-        r = requests.get(url, timeout=5)
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            log.warning("⚠️ getUpdates HTTP %d", r.status_code)
+            return
         data = r.json()
-        if not data.get("ok"): return
-        for update in data.get("result", []):
+        if not data.get("ok"):
+            log.warning("⚠️ getUpdates not ok: %s", data)
+            return
+        updates = data.get("result", [])
+        if updates:
+            log.info("📨 getUpdates: %d رسالة جديدة", len(updates))
+        for update in updates:
             _tg_offset = update["update_id"] + 1
-            msg = update.get("message", {})
-            text = msg.get("text", "").strip().lower()
+            # دعم message و channel_post
+            msg = update.get("message") or update.get("channel_post") or {}
+            text = msg.get("text", "").strip()
+            # تحويل للأحرف الصغيرة فقط للمقارنة
+            text_lower = text.lower()
             chat_id = str(msg.get("chat", {}).get("id", ""))
-            # فقط من القناة الصحيحة
+            log.info("📨 update: chat_id=%s text='%s'", chat_id, text)
             # قبول من CHAT_ID الشخصي أو GROUP_ID
             allowed = [str(CHAT_ID)]
             if GROUP_ID and GROUP_ID != "YOUR_GROUP_ID":
                 allowed.append(str(GROUP_ID))
             if chat_id not in allowed:
-                log.debug("⛔ رسالة من chat_id غير معروف: %s", chat_id)
+                log.warning("⛔ chat_id غير معروف: %s | allowed: %s", chat_id, allowed)
                 continue
-            log.info("📨 أمر وصل: '%s' من %s", text, chat_id)
             # أوامر
-            if text in ("/report", "/تقرير"):
+            if text_lower in ("/report", "/تقرير"):
                 send("\U0001f4e4 تم طلب التقرير يدوياً...")
                 daily_report_sent_date = ""  # إعادة تعيين لإجبار الإرسال
                 send_daily_report_forced()
-            elif text in ("/status", "/حالة"):
+            elif text_lower in ("/status", "/حالة"):
                 send("\u2705 البوت يعمل | عملات: " + str(len(candidates)) +
                      " | جواهر: " + str(len(gem_watchlist)))
-            elif text in ("/report", "/تقرير"):
+            elif text_lower in ("/report", "/تقرير"):
                 send_daily_report_forced()
                 run_daily_liquidity_scan()
 
-            elif text in ("/watchlist", "/مراقبة"):
+            elif text_lower in ("/watchlist", "/مراقبة"):
                 if not watchlist:
                     send("👁️ قائمة المراقبة فارغة")
                 else:
@@ -873,7 +883,7 @@ def poll_commands():
                             base = s.replace("USDT","")
                             txt += "  · *" + base + "* | " + v.get("reason","")[:30] + "\n"
                     send(txt)
-            elif text in ("/gems", "/جواهر"):
+            elif text_lower in ("/gems", "/جواهر"):
                 if not gem_watchlist:
                     send("\U0001f48e لا توجد جواهر حالياً")
                 else:
@@ -881,7 +891,7 @@ def poll_commands():
                     for s,v in list(gem_watchlist.items())[:10]:
                         txt += "  • *" + s.replace("USDT","") + "* | مرحلة " + str(v.get("stage",1)) + "\n"
                     send(txt)
-            elif text in ("/btc", "/بتكوين"):
+            elif text_lower in ("/btc", "/بتكوين"):
                 _icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"📊")
                 _btps = ("  🐋 TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%`".format(
                     btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
@@ -901,7 +911,7 @@ def poll_commands():
                     )
                 )
 
-            elif text in ("/sectors", "/قطاعات"):
+            elif text_lower in ("/sectors", "/قطاعات"):
                 if not hot_sectors:
                     send("📊 لا توجد قطاعات ساخنة حالياً")
                 else:
@@ -912,10 +922,10 @@ def poll_commands():
                         txt += "{}. {} *{}* `{:+.2f}%`\n".format(i, icon, sec, ch)
                     send(txt)
 
-            elif text in ("/performance", "/اداء"):
+            elif text_lower in ("/performance", "/اداء"):
                 perf_daily_report()
 
-            elif text in ("/hunter", "/صياد"):
+            elif text_lower in ("/hunter", "/صياد"):
                 # آخر 5 إشارات من Liquidity Hunter
                 from collections import OrderedDict
                 _recent = sorted(
@@ -934,18 +944,18 @@ def poll_commands():
                         )
                     send(txt)
 
-            elif text in ("/stop", "/ايقاف"):
+            elif text_lower in ("/stop", "/ايقاف"):
                 send("⏸️ تم إيقاف التنبيهات مؤقتاً — اكتب /start للعودة")
                 # نضع flag
                 import builtins
                 builtins._mafio_paused = True
 
-            elif text in ("/start", "/تشغيل"):
+            elif text_lower in ("/start", "/تشغيل"):
                 import builtins
                 builtins._mafio_paused = False
                 send("✅ التنبيهات تعمل الآن!")
 
-            elif text in ("/help", "/مساعدة"):
+            elif text_lower in ("/help", "/مساعدة"):
                 send(
                     "🤖 *MAFIO BOT — الأوامر:*\n"
                     "━━━━━━━━━━━━━━━━━━\n"
@@ -7730,6 +7740,20 @@ def run():
 
     refresh_tickers()
     time.sleep(2)
+
+    # 🔧 مسح offset قديم عند البدء — لا نتخطى أي رسائل معلقة
+    try:
+        _r = requests.get(
+            "https://api.telegram.org/bot{}/getUpdates?offset=-1&timeout=1".format(TELEGRAM_TOKEN),
+            timeout=5
+        )
+        _d = _r.json()
+        if _d.get("ok") and _d.get("result"):
+            global _tg_offset
+            _tg_offset = _d["result"][-1]["update_id"] + 1
+            log.info("📨 Telegram offset initialized: %d", _tg_offset)
+    except Exception as _e:
+        log.warning("offset init error: %s", _e)
     refresh_tickers()
     init_static_watchlist()  # all_tickers جاهز الآن
 
