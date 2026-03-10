@@ -640,6 +640,8 @@ discovered     = {}   # {sym: {price, time, score}}
 btc_change_24h = 0.0
 btc_trend_1h   = 0.0
 eth_change_24h = 0.0
+btc_tps_stats  = {}   # type: Dict  آخر TPS/ATS لـ BTC
+eth_tps_stats  = {}   # type: Dict  آخر TPS/ATS لـ ETH
 market_state        = "SAFE"
 last_market_report  = 0.0    # آخر إرسال تقرير السوق
 MARKET_REPORT_EVERY = 14400  # كل 4 ساعات فقط
@@ -1164,6 +1166,15 @@ def analyze_btc():
         except (KeyError, ValueError, TypeError):
             pass
 
+    # 🆕 TPS/ATS لـ BTC و ETH
+    global btc_tps_stats, eth_tps_stats
+    _btc_tps = analyze_tps_ats("BTCUSDT")
+    if _btc_tps:
+        btc_tps_stats = _btc_tps
+    _eth_tps = analyze_tps_ats("ETHUSDT")
+    if _eth_tps:
+        eth_tps_stats = _eth_tps
+
     # ══════════════════════════════════════════════
     # 🆕 V15: Buffer System — منع التذبذب
     # الحدود مع Buffer:
@@ -1239,19 +1250,47 @@ def analyze_btc():
             "CAUTION": "⚠️ Gold فقط (Score 88+)",
             "DANGER":  "🔴 إشارات القطاعات الساخنة فقط",
         }
+        # بناء قسم TPS/ATS للرسالة
+        def _tps_line(stats, sym):
+            # type: (Dict, str) -> str
+            if not stats:
+                return ""
+            _vd  = stats.get("vdelta", 0.5)
+            _ats = stats.get("ats", 0)
+            _tps = stats.get("tps", 0)
+            _bt  = stats.get("buyer_type", "")
+            _verdict = (
+                "🐋 حيتان يشترون 🔥" if _ats >= ATS_WHALE and _vd >= 0.65 else
+                "🐋 حيتان يبيعون ⚠️" if _ats >= ATS_WHALE and _vd < 0.40 else
+                "📊 نشاط طبيعي"
+            )
+            return (
+                "  TPS:`{:.1f}` ATS:`{:.0f}$` {} VD:`{:.0f}%`\n"
+                "  ↳ {}\n".format(_tps, _ats, _bt, _vd*100, _verdict)
+            )
+
+        btc_tps_line = _tps_line(btc_tps_stats, "BTC")
+        eth_tps_line = _tps_line(eth_tps_stats, "ETH")
+
         send(
             "📊 *تقرير السوق*\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "{icon} السوق: *{state}*\n"
             "₿ BTC 24h: `{ch:+.2f}%`\n"
             "₿ BTC 4h:  `{h4:+.2f}%`\n"
-            "₿ BTC 1h:  `{h:+.2f}%`  (آخر شمعة)\n"
+            "₿ BTC 1h:  `{h:+.2f}%`\n"
+            "{btc_tps}"
+            "━━━━━━━━━━━━━━━━━━\n"
             "Ξ ETH 24h: `{eth:+.2f}%`\n"
+            "{eth_tps}"
             "━━━━━━━━━━━━━━━━━━\n"
             "_{note}_\n"
             "📡 _قوة الإشارة: {confirm}/3_".format(
                 icon=icons[market_state], state=market_state,
-                ch=btc_change_24h, h4=btc_trend_4h, h=btc_trend_1h, eth=eth_change_24h,
+                ch=btc_change_24h, h4=btc_trend_4h, h=btc_trend_1h,
+                btc_tps=btc_tps_line,
+                eth=eth_change_24h,
+                eth_tps=eth_tps_line,
                 note=notes[market_state],
                 confirm=BTC_CONFIRM_COUNT,
             )
@@ -6738,7 +6777,9 @@ def send_daily_report():
         "━━━━━━━━━━━━━━━━━━\n"
         "{mkt_icon} *السوق: {mkt_state}*\n"
         "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\n"
+        "{btc_tps_line}"
         "Ξ ETH 24h: `{eth:+.2f}%`\n"
+        "{eth_tps_line}"
         "━━━━━━━━━━━━━━━━━━\n"
         "{whale_icon} {verdict}\n"
         "_{desc}_\n"
@@ -6763,6 +6804,24 @@ def send_daily_report():
         desc=whale_desc,
         btc=_btc, eth=_eth,
         btc1h=_btc1h,
+        btc_tps_line=(
+            "  🐋 BTC TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
+                btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
+                btc_tps_stats.get("vdelta",0.5)*100,
+                "حيتان يشترون 🔥" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) >= 0.65
+                else ("حيتان يبيعون ⚠️" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) < 0.40
+                else "نشاط عادي")
+            ) if btc_tps_stats else ""
+        ),
+        eth_tps_line=(
+            "  🐋 ETH TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
+                eth_tps_stats.get("tps",0), eth_tps_stats.get("ats",0),
+                eth_tps_stats.get("vdelta",0.5)*100,
+                "حيتان يشترون 🔥" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) >= 0.65
+                else ("حيتان يبيعون ⚠️" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) < 0.40
+                else "نشاط عادي")
+            ) if eth_tps_stats else ""
+        ),
         mkt_icon=_mkt_icons.get(_display_state,"📊"), mkt_state=_display_state,
         bar=mkt_bar,
         rp=rising_pct,  fp=falling_pct,
