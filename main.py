@@ -77,7 +77,15 @@ BTC_CAUTION_ZONE   = -1.5
 # 🆕 V15: Buffer zones — منع التذبذب بين الحالات
 # منطقة أمان: لا تغيير إلا إذا تجاوز الحد بـ 0.3%
 BTC_DANGER_BUFFER  = 0.3   # يدخل DANGER عند -3.3% | يخرج عند -2.7%
-BTC_CRASH_4H       = -2.5  # انهيار سريع: BTC ينزل -2.5% في 4 ساعات → DANGER فوري
+BTC_CRASH_4H       = -2.5
+# ── TPS / ATS + Volume Delta ──────────────────────────────────────
+TPS_LIMIT      = 100     # آخر 100 صفقة
+TPS_SPIKE      = 3.0     # TPS ارتفع 3× = نشاط غير عادي
+ATS_WHALE      = 5000    # صفقة > 5000 USDT = حيتان
+ATS_RETAIL     = 500     # صفقة < 500 USDT  = أفراد
+VDELTA_STRONG  = 0.70    # 70%+ شراء حقيقي
+TPS_COOLDOWN   = 3600    # ساعة بين تنبيهات نفس العملة
+TPS_SCAN_EVERY = 300     # كل 5 دقائق  # انهيار سريع: BTC ينزل -2.5% في 4 ساعات → DANGER فوري
 BTC_CRASH_1H       = -1.5  # انهيار حاد: BTC ينزل -1.5% في ساعة واحدة → DANGER فوري
 BTC_CAUTION_BUFFER = 0.3   # يدخل CAUTION عند -1.8% | يخرج عند -1.2%
 # عدد المرات المتتالية للتأكيد قبل تغيير الحالة
@@ -298,6 +306,8 @@ MEXC_TICKER = "https://api.mexc.com/api/v3/ticker/24hr"  # نفس الـ endpoin
 MEXC_PRICE  = "https://api.mexc.com/api/v3/ticker/price"
 MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
 MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
+MEXC_TRADES = "https://api.mexc.com/api/v3/trades"  # ⚡ TPS/ATS
+MEXC_TRADES = "https://api.mexc.com/api/v3/trades"  # 🆕 Recent Trades للـ TPS/ATS
 
 EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
             # عملات مشبوهة أو مستقرة تظهر في النتائج
@@ -674,7 +684,15 @@ lz_daily_sent_date = ""   # type: str               تاريخ آخر فحص ي�
 # 🆕 V16: Hidden Accumulation — كشف التجميع الخفي
 hidden_accum_alerted = {}  # type: Dict[str, float]  {sym: last_alert_time}
 
+# 🆕 TPS/ATS Engine
+tps_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
+last_tps_scan    = 0.0  # type: float
+tps_baseline     = {}   # type: Dict[str, float]  {sym: avg_tps_baseline}
+
 # 🔥 LIQUIDITY HUNTER
+tps_alerted  = {}    # type: Dict[str, float]  ⚡ TPS/ATS alerted
+tps_baseline = {}    # type: Dict[str, float]  baseline TPS per coin
+last_tps_scan= 0.0   # type: float
 lh_alerted   = {}    # type: Dict[str, float]  {sym: last_alert_time}
 last_lh_scan = 0.0   # type: float  ← قيمة ابتدائية على مستوى الملف
 
@@ -4480,6 +4498,17 @@ def refresh_tickers():
 
 # إعدادات LIQUIDITY HUNTER
 # ══════════════════════════════════════════
+# TPS/ATS + Volume Delta
+# ══════════════════════════════════════════
+TPS_LIMIT         = 100    # آخر 100 صفقة للتحليل
+TPS_SPIKE         = 3.0    # TPS ارتفع 3× = نشاط غير عادي
+ATS_WHALE         = 5000   # متوسط صفقة > 5000 USDT = حيتان
+ATS_RETAIL        = 500    # متوسط صفقة < 500 USDT = أفراد
+VDELTA_STRONG     = 0.70   # 70%+ شراء = ضغط شراء قوي
+TPS_COOLDOWN      = 3600   # ساعة بين تنبيهات نفس العملة
+TPS_SCAN_EVERY    = 300    # كل 5 دقائق
+
+# ══════════════════════════════════════════
 # Small Caps — قائمة مستقلة للعملات الصغيرة
 # ══════════════════════════════════════════
 SC_MIN_VOL        = 50_000    # حجم أدنى 50K USDT
@@ -4498,6 +4527,155 @@ LH_BTC_DIV_MIN    = 1.5   # BTC ينزل -1.5% لكن العملة ثابتة = 
 LH_COOLDOWN       = 14400 # 4 ساعات بين تنبيهات نفس العملة
 LH_SCORE_MIN      = 50    # الحد الأدنى للتنبيه
 LH_SCAN_EVERY     = 300   # كل 5 دقائق
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   ⚡ TPS / ATS + VOLUME DELTA ENGINE
+#   يحلل الصفقات الفعلية لكشف:
+#   • TPS  — عدد الصفقات/ثانية  → ارتفاع مفاجئ = نشاط غير عادي
+#   • ATS  — متوسط حجم الصفقة  → كبير = حيتان / صغير = أفراد
+#   • VDelta — شراء حقيقي vs بيع حقيقي من الصفقات الفعلية
+# ═══════════════════════════════════════════════════════════════════
+
+def analyze_tps_ats(sym):
+    # type: (str) -> Optional[Dict]
+    """يجلب آخر 100 صفقة ويحسب TPS + ATS + VDelta"""
+    raw = safe_get(MEXC_TRADES, {"symbol": sym, "limit": TPS_LIMIT})
+    if not raw or not isinstance(raw, list) or len(raw) < 10:
+        return None
+    try:
+        now_ms  = int(time.time() * 1000)
+        window  = 30000   # آخر 30 ثانية
+        buy_vol = sell_vol = all_vol = 0.0
+        trade_window = 0
+        sizes   = []
+
+        for t in raw:
+            price  = float(t.get("price", 0))
+            qty    = float(t.get("qty",   0))
+            ts     = int(t.get("time",    0))
+            is_buy = not t.get("isBuyerMaker", True)
+            val    = price * qty
+            all_vol += val
+            sizes.append(val)
+            if is_buy:
+                buy_vol += val
+            else:
+                sell_vol += val
+            if now_ms - ts <= window:
+                trade_window += 1
+
+        if all_vol <= 0:
+            return None
+
+        tps        = trade_window / 30.0
+        ats        = all_vol / len(raw)
+        vdelta     = buy_vol / all_vol if all_vol > 0 else 0.5
+        buyer_type = "🐋 حيتان" if ats >= ATS_WHALE else ("🐟 متوسط" if ats >= 1000 else "🦐 أفراد")
+
+        return {
+            "tps": round(tps, 2), "ats": round(ats, 2),
+            "vdelta": round(vdelta, 3), "buy_vol": round(buy_vol, 2),
+            "sell_vol": round(sell_vol, 2), "all_vol": round(all_vol, 2),
+            "buyer_type": buyer_type,
+        }
+    except (KeyError, ValueError, ZeroDivisionError, TypeError):
+        return None
+
+
+def scan_tps_ats(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    يفحص أفضل 40 عملة بالحجم
+    يبحث عن: TPS spike + ATS حيتان + VDelta قوي
+    يحتاج 2+ إشارات للتنبيه
+    """
+    global tps_alerted, tps_baseline
+    now = time.time()
+
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in candidates if s not in tracked],
+        key=lambda x: -x[1]
+    )[:40]
+
+    results = []
+    for sym, vol in ranked:
+        if vol < 500_000:
+            continue
+        if now - tps_alerted.get(sym, 0) < TPS_COOLDOWN:
+            continue
+
+        stats = analyze_tps_ats(sym)
+        if not stats:
+            continue
+
+        tps    = stats["tps"]
+        ats    = stats["ats"]
+        vdelta = stats["vdelta"]
+
+        # baseline تدريجي
+        base   = tps_baseline.get(sym, tps)
+        ratio  = tps / base if base > 0 else 1.0
+        tps_baseline[sym] = base * 0.9 + tps * 0.1
+
+        score   = 0
+        signals = []
+
+        if ratio >= TPS_SPIKE:
+            score += min(int(ratio * 10), 40)
+            signals.append("⚡ TPS {:.1f}×".format(ratio))
+        elif ratio >= 2.0:
+            score += 15
+            signals.append("⚡ TPS {:.1f}×".format(ratio))
+
+        if ats >= ATS_WHALE:
+            score += 35
+            signals.append("🐋 ATS {:.0f}$".format(ats))
+        elif ats >= 2000:
+            score += 20
+            signals.append("🐟 ATS {:.0f}$".format(ats))
+
+        if vdelta >= VDELTA_STRONG:
+            score += 25
+            signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
+        elif vdelta >= 0.60:
+            score += 12
+            signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
+
+        if score >= 55 and len(signals) >= 2:
+            chg = changes_map.get(sym, 0)
+            results.append((score, sym, signals, stats, chg, vol))
+
+    if not results:
+        return
+
+    results.sort(key=lambda x: -x[0])
+    for score, sym, signals, stats, chg, vol in results[:3]:
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+        rarity = "🐋🔥 نادر" if score >= 80 else ("🔥 قوي" if score >= 65 else "⚡ متوسط")
+        msg = (
+            "⚡ *TPS/ATS ALERT*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🎯 *{}* — نشاط صفقات غير عادي!\n".format(sym.replace("USDT","")) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📡 *الإشارات:* {}\n".format(" | ".join(signals)) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚡ TPS:    `{:.1f}` صفقة/ثانية\n".format(stats["tps"]) +
+            "💰 ATS:    `{:.0f}` USDT/صفقة  {}\n".format(stats["ats"], stats["buyer_type"]) +
+            "📊 VDelta: `{:.0f}%` شراء حقيقي\n".format(stats["vdelta"]*100) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💪 القوة: `{}/100` {}\n".format(score, rarity) +
+            "📉 24h: `{:+.2f}%` | حجم: `{:.0f}K`\n".format(chg, vol/1000) +
+            "🏷️ القطاع: `{}`\n".format(sector) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🐋 _الحيتان يتحركون — راقب بدقة_"
+        )
+        send(msg)
+        tps_alerted[sym] = now
+        perf_register(sym, price_map.get(sym, 0), "tps_ats", score, " | ".join(signals))
+        log.info("⚡ TPS/ATS | %s | score=%d | tps=%.1f | ats=%.0f | vdelta=%.0f%%",
+                 sym, score, stats["tps"], stats["ats"], stats["vdelta"] * 100)
+
 
 
 def liquidity_hunter(price_map, vol_now, changes_map):
@@ -7070,6 +7248,7 @@ def run():
     global gem_watchlist, daily_gem_count
     global explosion_alerted, bottom_price_history, bottom_vol_history
     # 🆕 V16 New Systems
+    global tps_alerted, tps_baseline, last_tps_scan  # ⚡ TPS/ATS
     global lh_alerted, last_lh_scan          # 🔥 Liquidity Hunter
     global small_caps, last_sc_refresh       # 📋 Small Caps
     global sc_alerted                        # 🔍 Small Cap Hunter
@@ -7278,6 +7457,11 @@ def run():
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
 
             # 🔥 LIQUIDITY HUNTER — كل 5 دقائق
+            # ⚡ TPS/ATS scan — كل 5 دقائق
+            if now - last_tps_scan >= TPS_SCAN_EVERY:
+                scan_tps_ats(price_map, vol_now, change_now)
+                last_tps_scan = now
+
             if now - last_lh_scan >= LH_SCAN_EVERY:
                 liquidity_hunter(price_map, vol_now, changes_map)
                 last_lh_scan = now
