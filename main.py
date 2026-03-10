@@ -834,7 +834,14 @@ def poll_commands():
             text = msg.get("text", "").strip().lower()
             chat_id = str(msg.get("chat", {}).get("id", ""))
             # فقط من القناة الصحيحة
-            if chat_id != str(TELEGRAM_CHAT_ID): continue
+            # قبول من CHAT_ID الشخصي أو GROUP_ID
+            allowed = [str(CHAT_ID)]
+            if GROUP_ID and GROUP_ID != "YOUR_GROUP_ID":
+                allowed.append(str(GROUP_ID))
+            if chat_id not in allowed:
+                log.debug("⛔ رسالة من chat_id غير معروف: %s", chat_id)
+                continue
+            log.info("📨 أمر وصل: '%s' من %s", text, chat_id)
             # أوامر
             if text in ("/report", "/تقرير"):
                 send("\U0001f4e4 تم طلب التقرير يدوياً...")
