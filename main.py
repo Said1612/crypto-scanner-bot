@@ -691,6 +691,7 @@ tps_baseline     = {}   # type: Dict[str, float]  {sym: avg_tps_baseline}
 
 # 🔥 LIQUIDITY HUNTER
 tps_alerted  = {}    # type: Dict[str, float]  ⚡ TPS/ATS alerted
+lz_tps_alerted = {}  # type: Dict[str, float]  🎯 LZ+TPS Fusion alerted
 tps_baseline = {}    # type: Dict[str, float]  baseline TPS per coin
 last_tps_scan= 0.0   # type: float
 lh_alerted   = {}    # type: Dict[str, float]  {sym: last_alert_time}
@@ -4583,6 +4584,191 @@ def analyze_tps_ats(sym):
         return None
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🎯 LIQUIDITY ZONE + TPS/ATS FUSION ENGINE
+#   يدمج:
+#   1. مناطق السيولة اليومية (Swing High/Low + Volume)
+#   2. TPS/ATS الفوري (صفقات حقيقية + حيتان)
+#   = إشارة مزدوجة نادرة جداً 🔥
+# ═══════════════════════════════════════════════════════════════════
+
+# إعدادات الدمج
+LZ_TPS_PROXIMITY  = 0.015   # السعر قريب من المنطقة بـ 1.5%
+LZ_TPS_COOLDOWN   = 14400   # 4 ساعات بين تنبيهات نفس العملة
+LZ_TPS_SCORE_MIN  = 70      # حد أدنى للنقاط
+lz_tps_alerted    = {}      # type: Dict[str, float]
+
+def scan_lz_tps_fusion(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    يفحص كل 5 دقائق:
+    1. هل السعر قريب من منطقة سيولة يومية؟
+    2. هل TPS/ATS يؤكد دخول سيولة؟
+    إذا الاثنان موجودان = تنبيه مزدوج 🎯
+    """
+    global lz_tps_alerted
+    now = time.time()
+
+    # أفضل 30 عملة بالحجم
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in candidates],
+        key=lambda x: -x[1]
+    )[:30]
+
+    for sym, vol in ranked:
+        if vol < 300_000:
+            continue
+        if now - lz_tps_alerted.get(sym, 0) < LZ_TPS_COOLDOWN:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        # ── الخطوة 1: هل هناك منطقة سيولة قريبة؟ ──
+        kd = get_klines(sym, "1d", LZ_LOOKBACK)
+        if not kd or len(kd.get("closes", [])) < 20:
+            continue
+
+        zones = detect_liquidity_zones(kd)
+        if not zones:
+            continue
+
+        # أقرب منطقة للسعر الحالي
+        nearest_zone = None
+        min_dist     = float("inf")
+        for z in zones:
+            dist = abs(price - z["mid"]) / z["mid"]
+            if dist < min_dist:
+                min_dist     = dist
+                nearest_zone = z
+
+        if not nearest_zone or min_dist > LZ_TPS_PROXIMITY:
+            continue
+
+        # نوع المنطقة — دعم أم مقاومة؟
+        is_support    = price >= nearest_zone["low"] * 0.99
+        is_resistance = price <= nearest_zone["high"] * 1.01
+        if not is_support:
+            continue  # فقط مناطق الدعم للشراء
+
+        # ── الخطوة 2: تأكيد TPS/ATS ──
+        tps_stats = analyze_tps_ats(sym)
+        if not tps_stats:
+            continue
+
+        tps    = tps_stats["tps"]
+        ats    = tps_stats["ats"]
+        vdelta = tps_stats["vdelta"]
+
+        # baseline
+        base  = tps_baseline.get(sym, tps)
+        ratio = tps / base if base > 0 else 1.0
+        tps_baseline[sym] = base * 0.9 + tps * 0.1
+
+        # ── الخطوة 3: حساب النقاط المدمجة ──
+        score   = 0
+        signals = []
+
+        # نقاط المنطقة
+        zone_sigma = nearest_zone.get("sigma", 1)
+        zone_type  = nearest_zone.get("type", "REPEAT")
+        score += min(zone_sigma * 5, 30)
+        if zone_type == "FRESH":
+            score += 15
+            signals.append("🆕 Zone FRESH")
+        else:
+            touches = nearest_zone.get("touches", 1)
+            signals.append("🔁 Zone {}×".format(touches))
+
+        # قرب السعر من المنطقة
+        prox_pct = min_dist * 100
+        if prox_pct <= 0.5:
+            score += 20
+            signals.append("📍 {:.2f}% من المنطقة".format(prox_pct))
+        elif prox_pct <= 1.0:
+            score += 12
+            signals.append("📍 {:.2f}% من المنطقة".format(prox_pct))
+        else:
+            score += 5
+            signals.append("📍 {:.2f}% من المنطقة".format(prox_pct))
+
+        # TPS
+        if ratio >= TPS_SPIKE:
+            score += 20
+            signals.append("⚡ TPS {:.1f}×".format(ratio))
+        elif ratio >= 2.0:
+            score += 10
+            signals.append("⚡ TPS {:.1f}×".format(ratio))
+
+        # ATS
+        if ats >= ATS_WHALE:
+            score += 20
+            signals.append("🐋 ATS {:.0f}$".format(ats))
+        elif ats >= 2000:
+            score += 10
+            signals.append("🐟 ATS {:.0f}$".format(ats))
+
+        # VDelta
+        if vdelta >= VDELTA_STRONG:
+            score += 15
+            signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
+        elif vdelta >= 0.60:
+            score += 8
+            signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
+
+        if score < LZ_TPS_SCORE_MIN:
+            continue
+
+        # ── الخطوة 4: حساب الأهداف ──
+        # الهدف = أقرب مقاومة / Stop = تحت المنطقة
+        zone_low  = nearest_zone["low"]
+        zone_high = nearest_zone["high"]
+        stop_loss = zone_low * 0.985           # 1.5% تحت المنطقة
+        # أقرب مقاومة من بين المناطق الأخرى
+        resistance_zones = [z for z in zones if z["mid"] > price * 1.02]
+        target = resistance_zones[0]["mid"] if resistance_zones else price * 1.15
+        rr     = (target - price) / (price - stop_loss) if price > stop_loss else 0
+
+        sector  = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+        chg     = changes_map.get(sym, 0)
+        rarity  = "🏆 نادر جداً" if score >= 90 else ("🔥 قوي" if score >= 80 else "⚡ جيد")
+        zone_tag = "🆕 FRESH" if zone_type == "FRESH" else "🔁 REPEAT"
+
+        msg = (
+            "🎯 *LZ + TPS FUSION*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💎 *{}* — منطقة سيولة + تأكيد صفقات!\n".format(sym.replace("USDT","")) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🗺️ *منطقة السيولة:* {}\n".format(zone_tag) +
+            "  📊 المنطقة: `{:.4f}` ← `{:.4f}`\n".format(zone_low, zone_high) +
+            "  📍 السعر الآن: `{:.4f}` ({:.2f}% من المنطقة)\n".format(price, prox_pct) +
+            "  🔢 Sigma: `{}`\n".format(zone_sigma) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚡ *تأكيد TPS/ATS:*\n"
+            "  ⚡ TPS: `{:.1f}` صفقة/ثانية\n".format(tps) +
+            "  💰 ATS: `{:.0f}$` {}\n".format(ats, tps_stats["buyer_type"]) +
+            "  📊 VDelta: `{:.0f}%` شراء حقيقي\n".format(vdelta * 100) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📡 *الإشارات:* {}\n".format(" | ".join(signals[:3])) +
+            "💪 *القوة: `{}/100` {}*\n".format(score, rarity) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🎯 الهدف:  `{:.4f}` (+{:.1f}%)\n".format(target, (target-price)/price*100) +
+            "🛑 Stop:   `{:.4f}` (-{:.1f}%)\n".format(stop_loss, (price-stop_loss)/price*100) +
+            "⚖️ R/R:    `{:.1f}:1`\n".format(rr) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📉 24h: `{:+.2f}%` | 🏷️ {}\n".format(chg, sector) +
+            "🐋 _منطقة سيولة + حيتان = فرصة نادرة_"
+        )
+
+        send(msg)
+        lz_tps_alerted[sym] = now
+        perf_register(sym, price, "lz_tps_fusion", score, " | ".join(signals))
+        log.info("🎯 LZ+TPS | %s | score=%d | dist=%.2f%% | ats=%.0f | vdelta=%.0f%%",
+                 sym, score, prox_pct, ats, vdelta * 100)
+
+
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
     """
@@ -7249,6 +7435,7 @@ def run():
     global explosion_alerted, bottom_price_history, bottom_vol_history
     # 🆕 V16 New Systems
     global tps_alerted, tps_baseline, last_tps_scan  # ⚡ TPS/ATS
+    global lz_tps_alerted                              # 🎯 LZ+TPS Fusion
     global lh_alerted, last_lh_scan          # 🔥 Liquidity Hunter
     global small_caps, last_sc_refresh       # 📋 Small Caps
     global sc_alerted                        # 🔍 Small Cap Hunter
@@ -7457,9 +7644,10 @@ def run():
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
 
             # 🔥 LIQUIDITY HUNTER — كل 5 دقائق
-            # ⚡ TPS/ATS scan — كل 5 دقائق
+            # ⚡ TPS/ATS + LZ Fusion — كل 5 دقائق
             if now - last_tps_scan >= TPS_SCAN_EVERY:
                 scan_tps_ats(price_map, vol_now, change_now)
+                scan_lz_tps_fusion(price_map, vol_now, change_now)  # 🎯 الدمج
                 last_tps_scan = now
 
             if now - last_lh_scan >= LH_SCAN_EVERY:
