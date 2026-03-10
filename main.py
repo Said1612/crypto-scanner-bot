@@ -176,13 +176,6 @@ TS_DANGER_CLOSE  = -3.0   # السوق DANGER + العملة نازلة -3%
 TS_SELL_COOL     = 3600   # ساعة بين إشعارات البيع لنفس العملة
 
 # 🆕 Early Detection — رصد مبكر قبل الانفجار
-EARLY_LOW_PCT    = 1.10   # السعر < 110% من القاع التاريخي
-EARLY_HIGH_PCT   = 1.30   # السعر < 130% من القاع (قريب فقط)
-EARLY_MIN_VOL    = 2_000_000  # حجم 2M+ — عملات ذات سيولة حقيقية
-EARLY_VOL_RISE   = 1.3    # الحجم يتزايد 1.3× من المتوسط
-EARLY_COOLDOWN   = 86400  # 24 ساعة بين التنبيهات لنفس العملة
-EARLY_SCAN_EVERY = 900    # فحص كل 15 دقيقة
-EARLY_MAX_CHANGE = 5.0    # تغيير أقل من 5% فقط
 RT_PRICE_MOVE    = 2.0    # حركة سعر 2%+ مع السيولة
 HOT_MAX_CHANGE   = 50.0   # تجاهل Pump أكثر من 50%
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
@@ -752,14 +745,11 @@ rt_alerted       = {}  # type: Dict[str, float]  {sym: last_alert_time}
 wl_entry_alerted = {}  # type: Dict[str, float]  {sym: last_entry_alert_time}
 wl_price_snapshot= {}  # type: Dict[str, float]  {sym: price_when_added}
 last_wl_check    = 0.0
-early_alerted    = {}  # type: Dict[str, float]  {sym: last_alert_time}
 # Trailing Stop state
 ts_positions     = {}  # type: Dict[str, Dict]  {sym: {entry, peak, stop, locked}}
 ts_sell_alerted  = {}  # type: Dict[str, float] {sym: last_sell_time}
 last_ts_scan     = 0.0
 daily_signals    = {"date": "", "count": 0}  # عداد يومي شامل
-early_vol_ref    = {}  # type: Dict[str, float]  {sym: vol_reference}
-last_early_scan  = 0.0
 last_rt_scan     = 0.0
 last_bottom_scan     = 0.0
 
@@ -2585,186 +2575,6 @@ def check_trailing_stops():
             # احذف الصفقة بعد البيع
             del ts_positions[sym]
 
-
-def scan_early_detection():
-    # type: () -> None
-    """
-    رصد مبكر — يرصد نوعين:
-
-    1️⃣ تجميع في القاع:
-       حجم يتزايد + سعر مستقر أو صاعد قليلاً
-       = الحيتان يشترون بصمت
-
-    2️⃣ دخول سيولة ضخمة:
-       حجم يقفز فجأة + تغيير هادئ
-       = مال جديد يدخل العملة
-    """
-    global early_alerted, early_vol_ref
-
-    if not all_tickers: return
-    now = time.time()
-
-    all_sector_coins = set()
-    for sc in SECTORS.values():
-        all_sector_coins.update(sc)
-
-    signals = []
-
-    for t in all_tickers:
-        sym = t.get("symbol", "")
-        if sym not in all_sector_coins: continue
-        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
-
-        try:
-            price  = float(t["lastPrice"])
-            vol    = float(t["quoteVolume"])
-            change = float(t["priceChangePercent"])
-            high24 = float(t["highPrice"])
-            low24  = float(t["lowPrice"])
-        except: continue
-
-        if vol < EARLY_MIN_VOL: continue
-        if price <= 0: continue
-
-        # 🔒 Cooldown موحد — إشارة #1 فقط إذا لم تُرسل إشارة بعد
-        if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN:
-            if now - coin_whale_done.get(sym, 0) >= LZ_TPS_COOLDOWN:
-                continue
-        # cooldown
-        if now - early_alerted.get(sym, 0) < EARLY_COOLDOWN: continue
-
-        sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
-        score  = 0
-        types  = []
-
-        # ══════════════════════════════════════════
-        # 1️⃣ دخول السيولة — الحجم يقفز فجأة
-        # ══════════════════════════════════════════
-        _vol_ref = early_vol_ref.get(sym, vol)
-        vol_ratio = vol / _vol_ref if _vol_ref > 0 else 1.0
-
-        if vol_ratio >= 3.0:
-            score += 5
-            types.append("💥 سيولة انفجرت {:.1f}×".format(vol_ratio))
-        elif vol_ratio >= 2.0:
-            score += 4
-            types.append("🔥 سيولة ضخمة {:.1f}×".format(vol_ratio))
-        elif vol_ratio >= EARLY_VOL_RISE:
-            score += 2
-            types.append("📈 سيولة تتزايد {:.1f}×".format(vol_ratio))
-
-        # تحديث المرجع ببطء
-        early_vol_ref[sym] = _vol_ref * 0.85 + vol * 0.15
-
-        # ══════════════════════════════════════════
-        # 2️⃣ تجميع هادئ — سعر مستقر + حجم قوي
-        # ══════════════════════════════════════════
-        if abs(change) <= 2.0:
-            score += 3
-            types.append("🤫 تجميع هادئ (" + fmt_change(change) + ")"),
-        elif abs(change) <= 5.0:
-            score += 1
-            types.append("📊 حركة معتدلة (" + fmt_change(change) + ")"),
-        elif change > 5.0:
-            # صعود قوي = دخول سيولة شرائية
-            score += 2
-            types.append("🚀 صعود مع سيولة (" + fmt_change(change) + ")"),
-
-        # ══════════════════════════════════════════
-        # 3️⃣ حجم مطلق قوي = سيولة حقيقية
-        # ══════════════════════════════════════════
-        if vol >= 10_000_000:
-            score += 3
-            types.append("🐋 سيولة ضخمة جداً {:.0f}M".format(vol/1e6))
-        elif vol >= 5_000_000:
-            score += 2
-            types.append("💰 سيولة قوية {:.1f}M".format(vol/1e6))
-        elif vol >= 2_000_000:
-            score += 1
-
-        # ══════════════════════════════════════════
-        # 4️⃣ السعر قريب من قاع اليوم = فرصة أفضل
-        # ══════════════════════════════════════════
-        if low24 > 0:
-            price_vs_low = (price / low24 - 1) * 100
-            if price_vs_low <= 5.0:
-                score += 2
-                types.append("📍 قريب من قاع اليوم")
-            elif price_vs_low <= 15.0:
-                score += 1
-
-        if score < 6: continue  # حد أدنى للجودة
-
-        signals.append({
-            "sym":    sym,
-            "price":  price,
-            "low24":  low24,
-            "high24": high24,
-            "vol":    vol,
-            "change": change,
-            "sector": sector,
-            "score":  score,
-            "types":  types,
-            "vol_ratio": vol_ratio,
-        })
-
-    if not signals: return
-    signals.sort(key=lambda x: -x["score"])
-
-    for sig in signals[:1]:
-        sym  = sig["sym"]
-        base = sym.replace("USDT", "")
-
-        if sig["score"] >= 10:
-            icon = "🚨🎯"
-            lvl  = "STRONG LIQUIDITY SIGNAL"
-        elif sig["score"] >= 8:
-            icon = "🎯"
-            lvl  = "LIQUIDITY SIGNAL"
-        else:
-            icon = "👁️"
-            lvl  = "EARLY WATCH"
-
-        types_str = "\n".join("  · " + t for t in sig["types"])
-        target_10 = round(sig["price"] * 1.10, 8)
-        target_20 = round(sig["price"] * 1.20, 8)
-
-        msg = (
-            icon + " *" + lvl + "* " + icon + "\n"
-            + "━" * 18 + "\n"
-            + "📍 *" + base + "/USDT*\n"
-            + "  💰 السعر: `" + fmt_price(sig["price"]) + "`\n"
-            + "  📦 الحجم: `" + str(round(sig["vol"]/1e6, 2)) + "M`\n"
-            + "  " + ("🟢" if sig["change"] >= 0 else "🔴") + " تغيير 24h: `" + fmt_change(sig["change"]) + "`\n"
-            + "  🔄 الحجم مقارنة بالأمس: `" + str(round(sig["vol_ratio"], 1)) + "×`\n"
-            + "━" * 18 + "\n"
-            + "🔍 *ما رصدناه:*\n"
-            + types_str + "\n"
-            + "━" * 18 + "\n"
-            + "🎯 هدف +10%: `" + fmt_price(target_10) + "`\n"
-            + "🎯 هدف +20%: `" + fmt_price(target_20) + "`\n"
-            + "━" * 18 + "\n"
-            + "⚡ _رصد مبكر — أضيفت للمراقبة_"
-        )
-
-        if not can_send_signal():
-            log.info("🔕 حد يومي 10 إشارات — توقف")
-            break
-
-        send(msg)
-        early_alerted[sym] = now
-        coin_alerted[sym] = now   # 🔒 موحد
-        register_signal()
-
-        add_to_liquidity_watchlist(
-            sym, "early_vol_{:.1f}x".format(sig["vol_ratio"]),
-            sig["vol"], sig["price"], sig["sector"]
-        )
-
-        log.info("🎯 Early Detection | %s | score=%d | vol_ratio=%.1fx | vol=%.1fM",
-                 sym, sig["score"], sig["vol_ratio"], sig["vol"]/1e6)
-
-    log.info("🎯 Early Scan | signals=%d", len(signals))
 
 
 def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
@@ -4852,7 +4662,7 @@ def scan_whale_confirmation(price_map):
 
         msg = (
             "🌊🐋🌊🐋🌊🐋🌊🐋🌊\n"
-            "🐋 *WHALE CONFIRMATION* 〔#{sig}〕\n".format(sig=_sig_num) +
+            "🃏 *WHALE CONFIRMATION* 〔#{sig}〕 🃏\n".format(sig=_sig_num) +
             "🌊🐋🌊🐋🌊🐋🌊🐋🌊\n"
             "💎 *{sym}* — الحيتان دخلوا! 🔥\n".format(sym=sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n"
@@ -4870,8 +4680,34 @@ def scan_whale_confirmation(price_map):
             "💪 *أضف للمركز الآن!*\n"
             "🏷️ القطاع: `{sec}`\n".format(sec=sector) +
             "🌊🐋🌊🐋🌊🐋🌊🐋🌊\n"
-            "🚀 _إشارة #1 أفراد + إشارة #2 حيتان = موجة كاملة_ 🌊"
+            "🃏 _إشارة #1 أفراد + إشارة #2 حيتان = الجوكر يلعب!_ 🌊"
         )
+
+        # ══ GOLDEN SIGNAL — BTC.D ينزل + حيتان ══
+        btcd_now_val = get_btc_dominance(price_map) if price_map else 0.0
+        btcd_falling  = (len(btcd_history) >= 2 and
+                         btcd_now_val > 0 and
+                         btcd_now_val < btcd_history[0] - 1.0)
+        alt_season_now = btcd_now_val > 0 and btcd_now_val < BTCD_ALT_THRESHOLD
+
+        if btcd_falling or alt_season_now:
+            gold_tag = "🚀 Alt Season نشط!" if alt_season_now else "📉 BTC.D ينزل"
+            gold_msg = (
+                "\n🃏💎🃏💎🃏💎🃏💎🃏\n"
+                "*GOLDEN SIGNAL* 🏆\n"
+                "🃏💎🃏💎🃏💎🃏💎🃏\n"
+                "💎 *{}* — أقوى إشارة ممكنة!\n".format(sym.replace("USDT","")) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🐋 حيتان دخلوا\n"
+                "📊 BTC.D: `{:.2f}%` — {}\n".format(btcd_now_val, gold_tag) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💰 ATS: `{:.0f}$` | ⚡ TPS: `{:.1f}×`\n".format(ats, tps) +
+                "📊 VDelta: `{:.0f}%` 🔥\n".format(vdelta * 100) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🃏 _BTC.D ينزل + حيتان = الجوكر يلعب!_ 💎"
+            )
+            send(gold_msg)
+            log.info("💎 GOLDEN SIGNAL! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, btcd_now_val, ats)
 
         send(msg)
         whale_confirmed[sym]  = now
@@ -4899,14 +4735,15 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     global lz_tps_alerted
     now = time.time()
 
-    # أفضل 30 عملة بالحجم
+    # أفضل 30 عملة بالحجم + القائمة الثابتة
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
     ranked = sorted(
-        [(s, vol_now.get(s, 0)) for s in candidates],
+        [(s, vol_now.get(s, 0)) for s in all_syms],
         key=lambda x: -x[1]
-    )[:30]
+    )[:40]
 
     for sym, vol in ranked:
-        if vol < 300_000:
+        if vol < 1_000_000:  # 🛡️ فلتر التلاعب — حجم حقيقي فقط
             continue
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
@@ -5102,6 +4939,129 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                  sym, score, prox_pct, ats, vdelta * 100)
 
 
+# ─────────────────────────────────────────
+#   📊 BTC DOMINANCE MONITOR
+# ─────────────────────────────────────────
+btcd_history    = []    # type: List[float]  آخر 24 قراءة
+btcd_last_check = 0.0
+btcd_alert_sent = 0.0
+BTCD_CHECK_EVERY   = 3600    # كل ساعة
+BTCD_DROP_ALERT    = 1.5     # نزول 1.5% في 24h = Alt Season
+BTCD_RISE_ALERT    = 2.0     # صعود 2.0% = BTC يسيطر
+BTCD_ALT_THRESHOLD = 52.0    # تحت 52% = Alt Season كامل
+
+
+def get_btc_dominance(vol_now):
+    # type: (Dict) -> float
+    """
+    يحسب BTC Dominance من أحجام تداول Binance
+    BTC.D = BTC_vol / مجموع كل أحجام USDT
+    """
+    try:
+        btc_vol = vol_now.get("BTCUSDT", 0)
+        if btc_vol <= 0:
+            return 0.0
+        total_vol = sum(v for s, v in vol_now.items() if s.endswith("USDT") and v > 0)
+        if total_vol <= 0:
+            return 0.0
+        return round((btc_vol / total_vol) * 100, 2)
+    except Exception:
+        return 0.0
+
+
+def check_btc_dominance(vol_now):
+    # type: (Dict) -> None
+    """
+    يراقب BTC Dominance ويرسل تنبيه Alt Season
+    """
+    global btcd_history, btcd_last_check, btcd_alert_sent
+    now = time.time()
+
+    if now - btcd_last_check < BTCD_CHECK_EVERY:
+        return
+    btcd_last_check = now
+
+    btcd = get_btc_dominance(vol_now)
+    if btcd <= 0:
+        return
+
+    btcd_history.append(btcd)
+    if len(btcd_history) > 24:
+        btcd_history.pop(0)
+
+    log.info("📊 BTC.D = %.2f%% | تاريخ: %d قراءة", btcd, len(btcd_history))
+
+    if len(btcd_history) < 2:
+        return
+
+    # التغيير خلال آخر 24 ساعة
+    oldest = btcd_history[0]
+    change_24h = btcd - oldest
+
+    # ══ Alt Season — BTC.D ينزل ══
+    if (change_24h <= -BTCD_DROP_ALERT and
+            now - btcd_alert_sent > 14400):
+
+        if btcd < BTCD_ALT_THRESHOLD:
+            tag     = "🚀 ALT SEASON كامل!"
+            advice  = "✅ وقت الدخول في الـ Alts بقوة!"
+            emoji   = "🚀🌙"
+        else:
+            tag     = "📈 بداية تدفق للـ Alts"
+            advice  = "👀 راقب الـ Alts — قد يبدأ الموسم"
+            emoji   = "📈"
+
+        msg = (
+            "📊 *BTC DOMINANCE ALERT* {}\n".format(emoji) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📉 BTC.D الآن: `{:.2f}%`\n".format(btcd) +
+            "📊 التغيير 24h: `{:+.2f}%` 🔴\n".format(change_24h) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🏷️ {}\n".format(tag) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "{}\n".format(advice) +
+            "💡 _الأموال تخرج من BTC → تدخل Alts_"
+        )
+        send(msg)
+        btcd_alert_sent = now
+        log.info("🚀 Alt Season Alert! BTC.D=%.2f%% change=%.2f%%", btcd, change_24h)
+
+    # ══ BTC يسيطر — BTC.D يصعد ══
+    elif (change_24h >= BTCD_RISE_ALERT and
+              now - btcd_alert_sent > 14400):
+
+        msg = (
+            "📊 *BTC DOMINANCE ALERT* 🐋\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📈 BTC.D الآن: `{:.2f}%`\n".format(btcd) +
+            "📊 التغيير 24h: `{:+.2f}%` 🟢\n".format(change_24h) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🐋 BTC يسيطر — الأموال تعود لـ BTC\n"
+            "⚠️ _الـ Alts قد تضعف — احذر_"
+        )
+        send(msg)
+        btcd_alert_sent = now
+        log.info("🐋 BTC Dominance Rising! BTC.D=%.2f%% change=%.2f%%", btcd, change_24h)
+
+
+def _btc_1h_tag():
+    # type: () -> str
+    """يعطي وصف حالة BTC 1h للإشارات"""
+    try:
+        chg = btc_tps_stats.get("change_1h", 0)
+        if chg is None: chg = 0
+        if chg >= 1.0:
+            return "{:+.2f}% 🟢 قوي".format(chg)
+        elif chg >= 0:
+            return "{:+.2f}% ⚪ محايد".format(chg)
+        elif chg >= -1.0:
+            return "{:+.2f}% 🟡 ضعيف".format(chg)
+        else:
+            return "{:+.2f}% 🔴 خطر".format(chg)
+    except Exception:
+        return "N/A"
+
+
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
     """
@@ -5112,14 +5072,16 @@ def scan_tps_ats(price_map, vol_now, changes_map):
     global tps_alerted, tps_baseline
     now = time.time()
 
+    # دمج candidates مع القائمة الثابتة
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
     ranked = sorted(
-        [(s, vol_now.get(s, 0)) for s in candidates if s not in tracked],
+        [(s, vol_now.get(s, 0)) for s in all_syms if s not in tracked],
         key=lambda x: -x[1]
-    )[:40]
+    )[:50]
 
     results = []
     for sym, vol in ranked:
-        if vol < 500_000:
+        if vol < 1_000_000:  # 🛡️ فلتر التلاعب — حجم حقيقي فقط
             continue
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
@@ -7085,6 +7047,7 @@ def send_daily_report():
         "{mkt_icon} *السوق: {mkt_state}*\n"
         "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\n"
         "{btc_tps_line}"
+        "📊 BTC.D: `{btcd:.2f}%` {btcd_tag}\n"
         "Ξ ETH 24h: `{eth:+.2f}%`\n"
         "{eth_tps_line}"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -7616,8 +7579,7 @@ def save_state():
             "bottom_vol_history":   bottom_vol_history,
             "ath_tracker":          ath_tracker,
             "rt_vol_baseline":      rt_vol_baseline,
-            "early_vol_ref":        early_vol_ref,
-            # القوائم
+                        # القوائم
             "gem_watchlist":        gem_watchlist,
             "watchlist":            watchlist,
             "wl_price_snapshot":    wl_price_snapshot,
@@ -7630,8 +7592,7 @@ def save_state():
             "ath_alerted":          ath_alerted,
             "hot_alerted":          hot_alerted,
             "rt_alerted":           rt_alerted,
-            "early_alerted":        early_alerted,
-            "ts_positions":         ts_positions,
+                        "ts_positions":         ts_positions,
             "ts_sell_alerted":      ts_sell_alerted,
             "daily_signals":        daily_signals,
             "wl_entry_alerted":     wl_entry_alerted,
@@ -7657,11 +7618,11 @@ def load_state():
     # type: () -> None
     """استعادة البيانات — Redis أولاً ثم ملف محلي"""
     global bottom_price_history, bottom_vol_history, ath_tracker
-    global rt_vol_baseline, early_vol_ref
+    global rt_vol_baseline
     global gem_watchlist, watchlist, wl_price_snapshot, candidates
     global backtest_signals
     global bottom_alerted, explosion_alerted, ath_alerted
-    global hot_alerted, rt_alerted, early_alerted, wl_entry_alerted
+    global hot_alerted, rt_alerted, wl_entry_alerted
     global daily_report_sent_date, lz_daily_sent_date
     global daily_gem_count, stable_vol_history, daily_market_vol_history
     global daily_signals
@@ -7695,7 +7656,6 @@ def load_state():
         bottom_vol_history.update(state.get("bottom_vol_history", {}))
         ath_tracker.update(state.get("ath_tracker", {}))
         rt_vol_baseline.update(state.get("rt_vol_baseline", {}))
-        early_vol_ref.update(state.get("early_vol_ref", {}))
 
         gem_watchlist.update(state.get("gem_watchlist", {}))
         watchlist.update(state.get("watchlist", {}))
@@ -7711,7 +7671,6 @@ def load_state():
         ath_alerted.update(state.get("ath_alerted", {}))
         hot_alerted.update(state.get("hot_alerted", {}))
         rt_alerted.update(state.get("rt_alerted", {}))
-        early_alerted.update(state.get("early_alerted", {}))
         ts_positions.update(state.get("ts_positions", {}))
         ts_sell_alerted.update(state.get("ts_sell_alerted", {}))
         wl_entry_alerted.update(state.get("wl_entry_alerted", {}))
@@ -7811,7 +7770,6 @@ def run():
     global last_sector_report        # 🆕
     global last_rt_scan, last_hot_scan, last_bottom_scan
     global wl_entry_alerted, wl_price_snapshot, last_wl_check
-    global early_alerted, early_vol_ref, last_early_scan
     global ts_positions, ts_sell_alerted, last_ts_scan
     global daily_signals
     global last_ath_scan, last_expand
@@ -7825,6 +7783,7 @@ def run():
     global coin_alerted                                # 🔒 Cooldown موحد
     global coin_signal_count                           # 🔢 عداد الإشارات
     global coin_whale_done                             # 🐋 عملات وصل حيتانها
+    global btcd_history, btcd_last_check, btcd_alert_sent  # 📊 BTC Dominance
     global whale_watchlist, whale_confirmed            # 🐋 Whale Confirmation
     global lz_tps_alerted                              # 🎯 LZ+TPS Fusion
     global lh_alerted, last_lh_scan          # 🔥 Liquidity Hunter
@@ -7921,9 +7880,6 @@ def run():
             # ⚡ Instant Movers — كل 5 دقائق بدون تاريخ
 
             # 🎯 Early Detection — كل 15 دقيقة
-            if now - last_early_scan >= EARLY_SCAN_EVERY:
-                scan_early_detection()
-                last_early_scan = now
 
             # 💾 حفظ الحالة كل 30 دقيقة
             if int(now) % 1800 < 12:  # كل 30 دقيقة
@@ -7958,6 +7914,7 @@ def run():
                 if now - last_hot_scan >= HOT_SCAN_EVERY:
                     scan_hot_market()
                     last_hot_scan = now
+                check_btc_dominance(vol_now)
                 scan_bottom_accumulation()
                 # 🆕 ATH Distance Scan كل ساعتين
                 if now - last_ath_scan >= ATH_SCAN_EVERY:
