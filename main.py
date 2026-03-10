@@ -80,6 +80,19 @@ BTC_DANGER_BUFFER  = 0.3   # يدخل DANGER عند -3.3% | يخرج عند -2.7
 BTC_CRASH_4H       = -2.5
 # ── TPS / ATS + Volume Delta ──────────────────────────────────────
 TPS_LIMIT      = 100     # آخر 100 صفقة
+# ── قائمة عملات إضافية ثابتة ─────────────────────────────────────────
+EXTRA_COINS = [
+    # Meme coins
+    "FLOKIUSDT", "PEPEUSDT", "WIFUSDT", "BOMEUSDT", "MEWUSDT",
+    "PEOPLEUSDT", "1000SHIBUSDT",
+    # Layer1/Layer2
+    "FLOWUSDT", "KASUSDT", "KAIAUSDT", "JUPUSDT",
+    # Gaming & NFT
+    "PIXELUSDT", "RENDERUSDT", "GALAUSDT", "IMXUSDT",
+    # DeFi
+    "AAVEUSDT", "DYDXUSDT", "JOEUSDT",
+]
+
 TPS_SPIKE      = 3.0     # TPS ارتفع 3× = نشاط غير عادي
 ATS_WHALE      = 5000    # صفقة > 5000 USDT = حيتان
 ATS_RETAIL     = 500     # صفقة < 500 USDT  = أفراد
