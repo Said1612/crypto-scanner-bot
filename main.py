@@ -1226,7 +1226,7 @@ def analyze_btc():
             "{icon} السوق: *{state}*\n"
             "₿ BTC 24h: `{ch:+.2f}%`\n"
             "₿ BTC 4h:  `{h4:+.2f}%`\n"
-            "₿ BTC 1h:  `{h:+.2f}%`\n"
+            "₿ BTC 1h:  `{h:+.2f}%`  (آخر شمعة)\n"
             "Ξ ETH 24h: `{eth:+.2f}%`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "_{note}_\n"
@@ -6332,7 +6332,15 @@ def send_daily_report():
         _display_state = "DANGER"
     _mkt_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
     _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
-    _btc1h       = float(btc_trend_1h)    if btc_trend_1h    is not None else 0.0
+    # 🆕 جلب BTC 1h طازج مباشرة للتقرير — بدون الاعتماد على الكاش
+    _btc1h = btc_trend_1h  # الافتراضي
+    try:
+        _kd1h = get_klines("BTCUSDT", "1h", 6)
+        if _kd1h and len(_kd1h["closes"]) >= 2:
+            _c1h   = _kd1h["closes"]
+            _btc1h = (_c1h[-1] - _c1h[-2]) / _c1h[-2] * 100  # آخر شمعة vs قبلها
+    except Exception:
+        _btc1h = float(btc_trend_1h) if btc_trend_1h is not None else 0.0
     _buy_pct     = float(buy_pct)         if buy_pct         is not None else 0.0
     _sell_pct    = float(sell_pct)        if sell_pct        is not None else 0.0
     _buy_vol     = float(buy_vol)         if buy_vol         is not None else 0.0
