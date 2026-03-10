@@ -4914,7 +4914,12 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             "📉 24h: `{:+.2f}%` | حجم: `{:.0f}K`\n".format(chg, vol/1000) +
             "🏷️ القطاع: `{}`\n".format(sector) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "🐋 _الحيتان يتحركون — راقب بدقة_"
+            "{}\n".format(
+                "🐋 _حيتان حقيقيون — فرصة نادرة!_" if ats >= ATS_WHALE and vdelta >= 0.65 else
+                ("🐟 _متداولون متوسطون — زخم جيد_" if ats >= 1000 else
+                 ("🦐 _أفراد يشترون — FOMO شعبي_" if vdelta >= 0.70 else
+                  "🦐 _أفراد — انتظر تأكيد حيتان_"))
+            )
         )
         send(msg)
         tps_alerted[sym] = now
