@@ -2719,13 +2719,12 @@ def check_watchlist_entries():
             + "🚀 _العملة تتحرك — فرصة دخول الآن!_"
         )
 
-        if not can_send_signal(): break
-        send(msg)
+        # ══ النظام القديم معطّل — الجوكر فقط يرسل إشارات الدخول ══
+        # send(msg)  ← معطّل
         wl_entry_alerted[sym] = now
-        register_signal()
-        # تسجيل في نظام Trailing Stop
+        # تسجيل في نظام Trailing Stop فقط بدون إشعار
         ts_register_entry(sym, price, info.get("sector","Unknown"))
-        log.info("🟢 WL Entry | %s | move=+%.1f%% | vol=%.1fM",
+        log.info("👁️ WL silent track | %s | move=+%.1f%% | vol=%.1fM",
                  sym, move_since_add, vol/1e6)
 
     # حذف العملات المنتهية
@@ -4647,8 +4646,13 @@ def scan_whale_confirmation(price_map):
             to_del.append(sym)
             continue
 
-        # تحقق من cooldown التأكيد
-        if now - whale_confirmed.get(sym, 0) < WHALE_WATCH_TTL:
+        # 🔒 إذا أُرسل الجوكر → صمت تام 4h
+        if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
+            to_del.append(sym)  # أزل من القائمة
+            continue
+
+        # 🔒 cooldown التأكيد
+        if now - whale_confirmed.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
 
         # جلب TPS/ATS الحالي
@@ -4684,58 +4688,61 @@ def scan_whale_confirmation(price_map):
         coin_signal_count[sym] = coin_signal_count.get(sym, 0) + 1
         _sig_num = coin_signal_count[sym]
 
+        # ── سطر التطور: يظهر فقط إذا مرت دقيقتان+ ──
+        if elapsed_min >= 2:
+            evolution_line = (
+                "📊 *التطور:*\n"
+                "  🦐 قبل `{min}` دقيقة: ATS `{ats_b:.0f}$`\n".format(
+                    min=elapsed_min, ats_b=ats_then) +
+                "  {wt} الآن: ATS `{ats:.0f}$` (+{mult:.1f}×) 🔥\n".format(
+                    wt=whale_type, ats=ats, mult=ats_mult) +
+                "━━━━━━━━━━━━━━━━━━\n"
+            )
+        else:
+            evolution_line = (
+                "📊 ATS: `{ats:.0f}$` {wt} 🔥\n".format(
+                    ats=ats, wt=whale_type) +
+                "━━━━━━━━━━━━━━━━━━\n"
+            )
+
+        # ── BTC.D tag للدمج مع ENTRY ──
+        _btcd_val  = get_btc_dominance(vol_now) if vol_now else 0.0
+        _btcd_fall = (len(btcd_history) >= 2 and _btcd_val > 0 and
+                      _btcd_val < btcd_history[0] - 1.0)
+        _alt_now   = _btcd_val > 0 and _btcd_val < BTCD_ALT_THRESHOLD
+        _golden    = _btcd_fall or _alt_now
+
+        if _golden:
+            _g_tag   = "🚀 Alt Season!" if _alt_now else "📉 BTC.D ينزل"
+            header   = "🃏💎🃏💎🃏💎🃏💎🃏\n💎 *الجوكر الذهبي* 💎\n🃏💎🃏💎🃏💎🃏💎🃏\n"
+            btcd_line = "📊 BTC.D: `{:.2f}%` — {}\n".format(_btcd_val, _g_tag)
+            footer   = "🃏 _BTC.D ينزل + حيتان = الجوكر يلعب!_ 💎"
+        else:
+            header   = "🃏🐋🃏🐋🃏🐋🃏🐋🃏\n🃏 *الجوكر يلعب* 🃏\n🃏🐋🃏🐋🃏🐋🃏🐋🃏\n"
+            btcd_line = ""
+            footer   = "🃏 _المال الكبير دخل — الجوكر يلعب!_ 🎴"
+
         msg = (
-            "🐋🐋🐋🐋🐋🐋🐋🐋🐋\n"
-            "🚨 *ENTRY SIGNAL* 🚨\n"
-            "🐋🐋🐋🐋🐋🐋🐋🐋🐋\n"
+            header +
             "💥 *{sym}* — حيتان دخلوا! ادخل الآن!\n".format(sym=sym.replace("USDT","")) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "📊 *التطور:*\n"
-            "  🦐 قبل `{min}` دقيقة: ATS `{ats_b:.0f}$`\n".format(
-                min=elapsed_min, ats_b=ats_then) +
-            "  {wt} الآن:  ATS `{ats:.0f}$` (+{mult:.1f}×) 🔥\n".format(
-                wt=whale_type, ats=ats, mult=ats_mult) +
-            "━━━━━━━━━━━━━━━━━━\n"
+            "━━━━━━━━━━━━━━━━━━\n" +
+            evolution_line +
             "⚡ TPS:    `{tps:.1f}` صفقة/ثانية\n".format(tps=tps) +
             "📊 VDelta: `{vd:.0f}%` شراء حقيقي 🔥\n".format(vd=vdelta*100) +
-            "💰 السعر:  `{pr}` ({chg:+.2f}% منذ المراقبة)\n".format(
+            "💰 السعر:  `{pr}` ({chg:+.2f}%)\n".format(
                 pr=fmt_price(price), chg=price_chg) +
-            "━━━━━━━━━━━━━━━━━━\n"
+            "━━━━━━━━━━━━━━━━━━\n" +
+            btcd_line +
             "🏷️ القطاع: `{sec}`\n".format(sec=sector) +
             "━━━━━━━━━━━━━━━━━━\n"
             "✅ *ادخل الصفقة الآن* 💪\n"
-            "🛡️ ضع Stop Loss تحت آخر قاع\n"
-            "🐋🐋🐋🐋🐋🐋🐋🐋🐋\n"
-            "🃏 _الجوكر يلعب — المال الكبير دخل!_ 🃏"
+            "🛡️ ضع Stop Loss تحت آخر قاع\n" +
+            footer
         )
 
-        # ══ GOLDEN SIGNAL — BTC.D ينزل + حيتان ══
-        btcd_now_val = get_btc_dominance(price_map) if price_map else 0.0
-        btcd_falling  = (len(btcd_history) >= 2 and
-                         btcd_now_val > 0 and
-                         btcd_now_val < btcd_history[0] - 1.0)
-        alt_season_now = btcd_now_val > 0 and btcd_now_val < BTCD_ALT_THRESHOLD
-
-        if btcd_falling or alt_season_now:
-            gold_tag = "🚀 Alt Season نشط!" if alt_season_now else "📉 BTC.D ينزل"
-            gold_msg = (
-                "\n🃏💎🃏💎🃏💎🃏💎🃏\n"
-                "*GOLDEN SIGNAL* 🏆\n"
-                "🃏💎🃏💎🃏💎🃏💎🃏\n"
-                "💎 *{}* — أقوى إشارة ممكنة!\n".format(sym.replace("USDT","")) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "🐋 حيتان دخلوا\n"
-                "📊 BTC.D: `{:.2f}%` — {}\n".format(btcd_now_val, gold_tag) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "💰 ATS: `{:.0f}$` | ⚡ TPS: `{:.1f}×`\n".format(ats, tps) +
-                "📊 VDelta: `{:.0f}%` 🔥\n".format(vdelta * 100) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "🃏 _BTC.D ينزل + حيتان = الجوكر يلعب!_ 💎"
-            )
-            send(gold_msg)
-            log.info("💎 GOLDEN SIGNAL! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, btcd_now_val, ats)
-
-        send(msg)
+        send(msg)  # GOLDEN مدمج في msg أعلاه ✅
+        if _golden:
+            log.info("💎 GOLDEN ENTRY! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, _btcd_val, ats)
         whale_confirmed[sym]  = now
         coin_whale_done[sym]  = now   # 🔒 يغلق العملة 4 ساعات
         coin_alerted[sym]     = now
@@ -5157,17 +5164,31 @@ BTCD_ALT_THRESHOLD = 52.0    # تحت 52% = Alt Season كامل
 def get_btc_dominance(vol_now):
     # type: (Dict) -> float
     """
-    يحسب BTC Dominance من أحجام تداول Binance
-    BTC.D = BTC_vol / مجموع كل أحجام USDT
+    يحسب BTC Dominance تقريبي من أحجام تداول Binance
+    يستثني Stablecoins و Leverage tokens
+    BTC.D حقيقي ~55-65% عادةً
     """
     try:
         btc_vol = vol_now.get("BTCUSDT", 0)
         if btc_vol <= 0:
             return 0.0
-        total_vol = sum(v for s, v in vol_now.items() if s.endswith("USDT") and v > 0)
+        _stables = {"USDC","BUSD","TUSD","FDUSD","USDE","BFUSD","USDP","DAI"}
+        _lev_kw  = ["3L","3S","5L","5S","BULL","BEAR","UP","DOWN"]
+        total_vol = 0.0
+        for s, v in vol_now.items():
+            if not s.endswith("USDT"): continue
+            if v <= 0: continue
+            base = s.replace("USDT","")
+            if base in _stables: continue
+            if any(k in s for k in _lev_kw): continue
+            total_vol += v
         if total_vol <= 0:
             return 0.0
-        return round((btc_vol / total_vol) * 100, 2)
+        # BTC.D = BTC / مجموع كل العملات الحقيقية
+        raw = (btc_vol / total_vol) * 100
+        # تصحيح: Binance تمثل ~40% من السوق الكلي
+        # لكن نسبة BTC داخل Binance ≈ BTC.D الحقيقي
+        return round(raw, 2)
     except Exception:
         return 0.0
 
@@ -5367,7 +5388,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             "📉 24h: `{:+.2f}%` | حجم: `{:.0f}K`\n".format(chg, vol/1000) +
             "🏷️ القطاع: `{}`\n".format(sector) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "⏳ _انتظر إشارة 🐋 للدخول_"
+            "⏳ _انتظر الجوكر للدخول_ 🃏"
         )
         send(msg)
         tps_alerted[sym]  = now
@@ -7313,9 +7334,9 @@ def send_daily_report():
 
         flow=flow_sum,
         action=whale_action,
-        btcd=get_btc_dominance(price_map) if price_map else 0.0,
-        btcd_tag=("🚀 Alt Season!" if get_btc_dominance(price_map) < BTCD_ALT_THRESHOLD
-                  else ("👀 قريب" if get_btc_dominance(price_map) < 55
+        btcd=get_btc_dominance(vol_now) if vol_now else 0.0,
+        btcd_tag=("🚀 Alt Season!" if get_btc_dominance(vol_now) < BTCD_ALT_THRESHOLD
+                  else ("👀 قريب" if get_btc_dominance(vol_now) < 55
                   else "🐋 BTC يسيطر")) if price_map else "N/A",
     )
 
