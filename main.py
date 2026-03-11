@@ -1014,11 +1014,15 @@ def safe_get(url, params=None, retries=3):
             r.raise_for_status()
             api_calls_total  += 1
             api_calls_minute += 1
-            if time.time() - api_minute_reset >= 60:
+            _now = time.time()
+            _elapsed = _now - api_minute_reset
+            if _elapsed >= 60:
+                # معدل حقيقي = عدد الطلبات / الوقت الفعلي بالدقائق
+                _rate = int(api_calls_minute / (_elapsed / 60))
                 log.info("📡 API: %d طلب/دقيقة | إجمالي: %d",
-                         api_calls_minute, api_calls_total)
+                         _rate, api_calls_total)
                 api_calls_minute = 0
-                api_minute_reset = time.time()
+                api_minute_reset = _now
             return r.json()
 
         except Exception as e:
