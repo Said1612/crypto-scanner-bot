@@ -4715,7 +4715,7 @@ def scan_whale_confirmation(price_map):
         if _golden:
             _g_tag   = "🚀 Alt Season!" if _alt_now else "📉 BTC.D ينزل"
             header   = "🃏💎🃏💎🃏💎🃏💎🃏\n💎 *الجوكر الذهبي* 💎\n🃏💎🃏💎🃏💎🃏💎🃏\n"
-            btcd_line = "📊 BTC.D: `{:.2f}%` — {}\n".format(_btcd_val, _g_tag)
+            btcd_line = "📊 BTC.D: {} — {}\n".format("📉 ينزل" if _btcd_fall else "🔵 منخفض", _g_tag)
             footer   = "🃏 _BTC.D ينزل + حيتان = الجوكر يلعب!_ 💎"
         else:
             header   = "🃏🐋🃏🐋🃏🐋🃏🐋🃏\n🃏 *الجوكر يلعب* 🃏\n🃏🐋🃏🐋🃏🐋🃏🐋🃏\n"
@@ -5118,7 +5118,7 @@ def check_liquidity_exit(vol_now, price_map):
         details  = (
             "  📈 BTC 24h: `{:+.2f}%` ✅\n".format(btc_24h) +
             "  📉 BTC.D: `{:+.2f}%` ← ينزل 🚀\n".format(btcd_chg) +
-            "  📊 BTC.D الآن: `{:.2f}%`\n".format(btcd_now)
+            "  📊 BTC.D: 📉 ينزل {:.2f}% في 24h\n".format(abs(btcd_chg))
         )
         advice = (
             "  ✅ *وقت الدخول في Alts!*\n"
@@ -5239,7 +5239,7 @@ def check_btc_dominance(vol_now):
         msg = (
             "📊 *BTC DOMINANCE ALERT* {}\n".format(emoji) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "📉 BTC.D الآن: `{:.2f}%`\n".format(btcd) +
+            "📊 BTC.D: 📉 ينزل ({:+.2f}% في 24h)\n".format(change_24h) +
             "📊 التغيير 24h: `{:+.2f}%` 🔴\n".format(change_24h) +
             "━━━━━━━━━━━━━━━━━━\n"
             "🏷️ {}\n".format(tag) +
@@ -5258,7 +5258,7 @@ def check_btc_dominance(vol_now):
         msg = (
             "📊 *BTC DOMINANCE ALERT* 🐋\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "📈 BTC.D الآن: `{:.2f}%`\n".format(btcd) +
+            "📊 BTC.D: 📈 يصعد ({:+.2f}% في 24h)\n".format(change_24h) +
             "📊 التغيير 24h: `{:+.2f}%` 🟢\n".format(change_24h) +
             "━━━━━━━━━━━━━━━━━━\n"
             "🐋 BTC يسيطر — الأموال تعود لـ BTC\n"
@@ -7275,7 +7275,7 @@ def send_daily_report():
         "{mkt_icon} *السوق: {mkt_state}*\n"
         "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\n"
         "{btc_tps_line}"
-        "📊 BTC.D: `{btcd:.2f}%` {btcd_tag}\n"
+        "📊 BTC.D: {btcd_tag}\n"
         "Ξ ETH 24h: `{eth:+.2f}%`\n"
         "{eth_tps_line}"
         "━━━━━━━━━━━━━━━━━━\n"
