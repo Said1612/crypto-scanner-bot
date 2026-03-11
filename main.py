@@ -4776,12 +4776,13 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     )[:40]
 
     for sym, vol in ranked:
-        if vol < 1_000_000:  # 🛡️ فلتر التلاعب — حجم حقيقي فقط
+        _min_vol = 500_000 if sym in EXTRA_COINS else 1_000_000
+        if vol < _min_vol:  # 🛡️ EXTRA_COINS=500K | عادية=1M
             continue
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
-        # 🔒 حد أقصى 3 إشارات يومياً لنفس العملة
+        # 🔒 حد أقصى إشارتان يومياً لنفس العملة
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
             continue
         # 🔒 Cooldown موحد
@@ -5305,12 +5306,13 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
     results = []
     for sym, vol in ranked:
-        if vol < 1_000_000:  # 🛡️ فلتر التلاعب — حجم حقيقي فقط
+        _min_vol = 500_000 if sym in EXTRA_COINS else 1_000_000
+        if vol < _min_vol:  # 🛡️ EXTRA_COINS=500K | عادية=1M
             continue
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
-        # 🔒 حد أقصى 3 إشارات يومياً لنفس العملة
+        # 🔒 حد أقصى إشارتان يومياً لنفس العملة
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
             continue
         # 🔒 Cooldown موحد
