@@ -4922,10 +4922,24 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         rarity  = "🏆 نادر جداً" if score >= 90 else ("🔥 قوي" if score >= 80 else "⚡ جيد")
         zone_tag = "🆕 FRESH" if zone_type == "FRESH" else "🔁 REPEAT"
 
-        # عداد الإشارات
+        # ══ LZ+TPS: يرسل فقط إذا لم تصل إشارة #1 بعد ══
+        # إذا وصلت WATCH ALERT → أضف للمراقبة بصمت فقط
+        if coin_signal_count.get(sym, 0) >= 1:
+            # أضف للمراقبة بصمت — الحيتان سيرسلون ENTRY SIGNAL
+            if sym not in whale_watchlist:
+                whale_watchlist[sym] = {
+                    "time":       now,
+                    "price_then": price,
+                    "ats_then":   ats,
+                    "reason":     "LZ+TPS silent add",
+                }
+                log.info("👁️ LZ+TPS silent watchlist add: %s", sym)
+            continue
+
+        # أول إشارة — أرسل
         coin_signal_count[sym] = coin_signal_count.get(sym, 0) + 1
         _sig_num = coin_signal_count[sym]
-        _sig_tag = "" if _sig_num == 1 else "  〔إشارة #{}〕".format(_sig_num)
+        _sig_tag = ""
 
         msg = (
             "🎯 *LZ + TPS FUSION*{}\n".format(_sig_tag) +
