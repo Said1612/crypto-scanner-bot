@@ -94,6 +94,7 @@ EXTRA_COINS = [
 ]
 
 TPS_SPIKE      = 3.0     # TPS ارتفع 3× = نشاط غير عادي
+TPS_MAX_CHANGE = 6.0     # 🚫 تجاهل إذا ارتفعت +6% في 24h — الفرصة فاتت
 ATS_WHALE      = 5000    # صفقة > 5000 USDT = حيتان
 ATS_RETAIL     = 500     # صفقة < 500 USDT  = أفراد
 VDELTA_STRONG  = 0.70    # 70%+ شراء حقيقي
@@ -318,7 +319,13 @@ MEXC_TRADES = "https://api.mexc.com/api/v3/trades"  # 🆕 Recent Trades للـ 
 EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
             # عملات مشبوهة أو مستقرة تظهر في النتائج
             "EURUSDT","STABLEUSDT","UCNUSDT","VERMUSDT",
-            "BDXUSDT","POLXUSDT","MBGUSDT","L3USDT","VERMUSDT"}
+            "BDXUSDT","POLXUSDT","MBGUSDT","L3USDT","VERMUSDT",
+            # عملات خصوصية محظورة من Binance — لا حيتان فيها
+            "XMRUSDT","DASHUSDT","ZCASHUSDT","SCRTUSDT",
+}
+
+# حد أقصى لإشارات نفس العملة يومياً
+MAX_COIN_SIGNALS = 2  # إشارة #1 راقب + إشارة #2 ادخل — لا ثالثة
 
 # ── 🆕 Auto Expand Sectors ───────────────────────
 SECTOR_TARGET      = 50       # الهدف: 50 عملة لكل قطاع
@@ -4674,10 +4681,10 @@ def scan_whale_confirmation(price_map):
         _sig_num = coin_signal_count[sym]
 
         msg = (
-            "🌊🐋🌊🐋🌊🐋🌊🐋🌊\n"
-            "🃏 *WHALE CONFIRMATION* 〔#{sig}〕 🃏\n".format(sig=_sig_num) +
-            "🌊🐋🌊🐋🌊🐋🌊🐋🌊\n"
-            "💎 *{sym}* — الحيتان دخلوا! 🔥\n".format(sym=sym.replace("USDT","")) +
+            "🐋🐋🐋🐋🐋🐋🐋🐋🐋\n"
+            "🚨 *ENTRY SIGNAL* 🚨\n"
+            "🐋🐋🐋🐋🐋🐋🐋🐋🐋\n"
+            "💥 *{sym}* — حيتان دخلوا! ادخل الآن!\n".format(sym=sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n"
             "📊 *التطور:*\n"
             "  🦐 قبل `{min}` دقيقة: ATS `{ats_b:.0f}$`\n".format(
@@ -4686,14 +4693,16 @@ def scan_whale_confirmation(price_map):
                 wt=whale_type, ats=ats, mult=ats_mult) +
             "━━━━━━━━━━━━━━━━━━\n"
             "⚡ TPS:    `{tps:.1f}` صفقة/ثانية\n".format(tps=tps) +
-            "📊 VDelta: `{vd:.0f}%` شراء حقيقي\n".format(vd=vdelta*100) +
-            "💰 السعر:  `{pr}` ({chg:+.2f}% منذ الإشارة)\n".format(
+            "📊 VDelta: `{vd:.0f}%` شراء حقيقي 🔥\n".format(vd=vdelta*100) +
+            "💰 السعر:  `{pr}` ({chg:+.2f}% منذ المراقبة)\n".format(
                 pr=fmt_price(price), chg=price_chg) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "💪 *أضف للمركز الآن!*\n"
             "🏷️ القطاع: `{sec}`\n".format(sec=sector) +
-            "🌊🐋🌊🐋🌊🐋🌊🐋🌊\n"
-            "🃏 _إشارة #1 أفراد + إشارة #2 حيتان = الجوكر يلعب!_ 🌊"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "✅ *ادخل الصفقة الآن* 💪\n"
+            "🛡️ ضع Stop Loss تحت آخر قاع\n"
+            "🐋🐋🐋🐋🐋🐋🐋🐋🐋\n"
+            "🃏 _الجوكر يلعب — المال الكبير دخل!_ 🃏"
         )
 
         # ══ GOLDEN SIGNAL — BTC.D ينزل + حيتان ══
@@ -4761,12 +4770,19 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
+        # 🔒 حد أقصى 3 إشارات يومياً لنفس العملة
+        if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
+            continue
         # 🔒 Cooldown موحد
         last_alert  = coin_alerted.get(sym, 0)
         in_cooldown = (now - last_alert < TPS_COOLDOWN)
 
         price = price_map.get(sym, 0)
         if price <= 0:
+            continue
+
+        # 🚫 تجاهل إذا ارتفعت كثيراً — الفرصة فاتت
+        if changes_map.get(sym, 0) >= TPS_MAX_CHANGE:
             continue
 
         # ── الخطوة 1: هل هناك منطقة سيولة قريبة؟ ──
@@ -4952,6 +4968,162 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                  sym, score, prox_pct, ats, vdelta * 100)
 
 
+# ═══════════════════════════════════════════════════════════════════
+#   💧 LIQUIDITY EXIT ALERT — إنذار خروج السيولة قبل الانهيار
+# ═══════════════════════════════════════════════════════════════════
+liq_exit_alerted  = 0.0   # آخر تنبيه
+liq_exit_vol_hist = []    # تاريخ الحجم كل 5 دقائق
+LEX_COOLDOWN      = 3600  # مرة كل ساعة
+LEX_VOL_DROP      = 0.25  # حجم السوق نزل 25% = خطر
+LEX_VDELTA_SELL   = 0.35  # BTC VDelta أقل من 35% = حيتان يبيعون
+LEX_BTCD_RISE     = 1.5   # BTC.D صعد 1.5% في ساعة = هروب للـ BTC
+
+
+def check_liquidity_exit(vol_now, price_map):
+    # type: (Dict, Dict) -> None
+    """
+    يراقب السيناريوهات الأربعة:
+    BTC.D ↑ + BTC ↑ = BTC يقود — انتظر
+    BTC.D ↓ + BTC ↑ = Alt Season 🚀
+    BTC.D ↑ + BTC ↓ = هروب للـ BTC ⚠️
+    BTC.D ↓ + BTC ↓ = Risk-Off 💣 اخرج!
+    """
+    global liq_exit_alerted, liq_exit_vol_hist
+    now = time.time()
+
+    if now - liq_exit_alerted < LEX_COOLDOWN:
+        return
+
+    # ── حجم السوق الكلي ──
+    total_vol = sum(v for s, v in vol_now.items()
+                    if s.endswith("USDT") and v > 0)
+    liq_exit_vol_hist.append((now, total_vol))
+    if len(liq_exit_vol_hist) > 12:
+        liq_exit_vol_hist.pop(0)
+    if len(liq_exit_vol_hist) < 4:
+        return
+
+    # ── BTC تغيير 1h و 24h ──
+    btc_1h  = btc_tps_stats.get("change_1h",  0.0) if btc_tps_stats else 0.0
+    btc_24h = btc_tps_stats.get("change_24h", 0.0) if btc_tps_stats else 0.0
+
+    # ── BTC.D تغيير ──
+    btcd_now = get_btc_dominance(vol_now)
+    btcd_chg = 0.0
+    if len(btcd_history) >= 2 and btcd_now > 0:
+        btcd_chg = btcd_now - btcd_history[0]  # مقارنة بآخر 24 ساعة
+
+    # ── BTC VDelta ──
+    btc_vdelta  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+    btc_ats     = btc_tps_stats.get("ats", 0)      if btc_tps_stats else 0
+    btc_selling = (btc_vdelta < LEX_VDELTA_SELL and btc_ats >= ATS_WHALE)
+
+    # ── حجم السوق ينهار ──
+    old_vol    = liq_exit_vol_hist[0][1]
+    vol_drop   = (old_vol - total_vol) / old_vol if old_vol > 0 else 0
+    vol_drying = vol_drop >= LEX_VOL_DROP
+
+    # ════════════════════════════════════════
+    # تحديد السيناريو
+    # ════════════════════════════════════════
+    scenario = None
+    emoji    = ""
+    title    = ""
+    advice   = ""
+    details  = ""
+
+    # السيناريو 1 — RISK-OFF 💣 (الأخطر)
+    # BTC.D ↓ + BTC ↓ = الكل يخرج من السوق
+    if btc_24h <= -3.0 and btcd_chg <= -1.0 and vol_drying:
+        scenario = "RISK_OFF"
+        emoji    = "💣💣💣💣💣💣💣💣💣"
+        title    = "💣 RISK-OFF — الكل يخرج!"
+        details  = (
+            "  📉 BTC 24h: `{:+.2f}%` ❌\n".format(btc_24h) +
+            "  📉 BTC.D: `{:+.2f}%` ← ينزل مع BTC ❌\n".format(btcd_chg) +
+            "  📉 حجم السوق: `-{:.0f}%` ❌\n".format(vol_drop * 100)
+        )
+        advice = (
+            "  🔴 *اخرج من كل المراكز فوراً!*\n"
+            "  💵 حوّل لـ Stablecoins\n"
+            "  ⏳ انتظر استقرار السوق\n"
+            "  🚫 لا تشتري أي شيء الآن\n"
+        )
+
+    # السيناريو 2 — هروب للـ BTC ⚠️
+    # BTC.D ↑ + BTC ↓ = Alts تنهار بسرعة
+    elif btc_24h <= -2.0 and btcd_chg >= 2.0:
+        scenario = "BTC_DOMINANCE_SURGE"
+        emoji    = "🚨🚨🚨🚨🚨🚨🚨🚨🚨"
+        title    = "⚠️ هروب من Alts → BTC"
+        details  = (
+            "  📉 BTC 24h: `{:+.2f}%` ← ينزل\n".format(btc_24h) +
+            "  📈 BTC.D: `{:+.2f}%` ← يصعد ⚠️\n".format(btcd_chg) +
+            "  🐋 الأموال تهرب من Alts → BTC\n"
+        )
+        advice = (
+            "  🟠 *اخرج من مراكز Alts*\n"
+            "  📍 ضيّق Stop Loss فوراً\n"
+            "  👁️ راقب BTC — هل يستقر؟\n"
+        )
+
+    # السيناريو 3 — BTC يبيع الحيتان + حجم ينهار
+    elif btc_selling and vol_drying:
+        scenario = "WHALE_SELLING"
+        emoji    = "🚨🚨🚨🚨🚨🚨🚨🚨🚨"
+        title    = "🐋 حيتان يبيعون BTC — خطر!"
+        details  = (
+            "  🐋 BTC VDelta: `{:.0f}%` ← بيع قوي ❌\n".format(btc_vdelta * 100) +
+            "  📉 حجم السوق: `-{:.0f}%` ❌\n".format(vol_drop * 100) +
+            "  ⚡ BTC 1h: `{:+.2f}%`\n".format(btc_1h)
+        )
+        advice = (
+            "  🟡 ضيّق Stop Loss\n"
+            "  ⚠️ لا تفتح مراكز جديدة\n"
+            "  👁️ انتظر تأكيد الاتجاه\n"
+        )
+
+    # السيناريو 4 — Alt Season 🚀 (إيجابي)
+    # BTC.D ↓ + BTC ↑ = Alt Season
+    elif btc_24h >= 1.0 and btcd_chg <= -1.5 and btcd_now > 0:
+        scenario = "ALT_SEASON"
+        emoji    = "🚀🚀🚀🚀🚀🚀🚀🚀🚀"
+        title    = "🚀 Alt Season يبدأ!"
+        details  = (
+            "  📈 BTC 24h: `{:+.2f}%` ✅\n".format(btc_24h) +
+            "  📉 BTC.D: `{:+.2f}%` ← ينزل 🚀\n".format(btcd_chg) +
+            "  📊 BTC.D الآن: `{:.2f}%`\n".format(btcd_now)
+        )
+        advice = (
+            "  ✅ *وقت الدخول في Alts!*\n"
+            "  🎯 انتظر إشارة #1 + #2 للتأكيد\n"
+            "  💎 ابحث عن GOLDEN SIGNAL\n"
+        )
+    else:
+        return  # لا سيناريو واضح
+
+    # ── إرسال الرسالة ──
+    msg = (
+        "{}\n".format(emoji) +
+        "*MARKET SCENARIO ALERT*\n" +
+        "{}\n".format(emoji) +
+        "━━━━━━━━━━━━━━━━━━\n"
+        "*{}*\n".format(title) +
+        "━━━━━━━━━━━━━━━━━━\n" +
+        details +
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🛡️ *الإجراء:*\n" +
+        advice +
+        "━━━━━━━━━━━━━━━━━━\n"
+        "_BTC.D + BTC + حجم = الصورة الكاملة_ 📊"
+    )
+
+    send(msg)
+    liq_exit_alerted = now
+    log.warning("📊 SCENARIO: %s | BTC24h=%.1f%% | BTCD_chg=%.1f%% | vol_drop=%.1f%%",
+                scenario, btc_24h, btcd_chg, vol_drop * 100)
+
+
 # ─────────────────────────────────────────
 #   📊 BTC DOMINANCE MONITOR
 # ─────────────────────────────────────────
@@ -5099,9 +5271,17 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
+        # 🔒 حد أقصى 3 إشارات يومياً لنفس العملة
+        if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
+            continue
         # 🔒 Cooldown موحد
         last_alert  = coin_alerted.get(sym, 0)
         in_cooldown = (now - last_alert < TPS_COOLDOWN)
+
+        # 🚫 تجاهل إذا ارتفعت كثيراً — الفرصة فاتت
+        chg24 = changes_map.get(sym, 0)
+        if chg24 >= TPS_MAX_CHANGE:
+            continue
 
         stats = analyze_tps_ats(sym)
         if not stats:
@@ -5157,26 +5337,19 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _sig_tag = "" if _sig_num == 1 else "  〔إشارة #{}〕".format(_sig_num)
 
         msg = (
-            "⚡ *TPS/ATS ALERT*{}\n".format(_sig_tag) +
+            "👁️ *WATCH ALERT*{}\n".format(_sig_tag) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "🎯 *{}* — نشاط صفقات غير عادي!\n".format(sym.replace("USDT","")) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "📡 *الإشارات:* {}\n".format(" | ".join(signals)) +
+            "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n"
             "⚡ TPS:    `{:.1f}` صفقة/ثانية\n".format(stats["tps"]) +
-            "💰 ATS:    `{:.0f}` USDT/صفقة  {}\n".format(stats["ats"], stats["buyer_type"]) +
-            "📊 VDelta: `{:.0f}%` شراء حقيقي\n".format(stats["vdelta"]*100) +
+            "💰 ATS:    `{:.0f}$`  🦐 أفراد\n".format(stats["ats"]) +
+            "📊 VDelta: `{:.0f}%` شراء\n".format(stats["vdelta"]*100) +
             "━━━━━━━━━━━━━━━━━━\n"
             "💪 القوة: `{}/100` {}\n".format(score, rarity) +
             "📉 24h: `{:+.2f}%` | حجم: `{:.0f}K`\n".format(chg, vol/1000) +
             "🏷️ القطاع: `{}`\n".format(sector) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "{}\n".format(
-                "🐋 _حيتان حقيقيون — فرصة نادرة!_" if ats >= ATS_WHALE and vdelta >= 0.65 else
-                ("🐟 _متداولون متوسطون — زخم جيد_" if ats >= 1000 else
-                 ("🦐 _أفراد يشترون — FOMO شعبي_" if vdelta >= 0.70 else
-                  "🦐 _أفراد — انتظر تأكيد حيتان_"))
-            )
+            "⏳ _انتظر إشارة 🐋 للدخول_"
         )
         send(msg)
         tps_alerted[sym]  = now
@@ -6788,7 +6961,7 @@ def send_daily_report():
     # ── تقرير Backtest اليومي ──────────────────
     if backtest_signals:
         bt_results = []
-        _pm = {t["symbol"]: float(t["lastPrice"]) for t in all_tickers}
+        _pm     = {t["symbol"]: float(t["lastPrice"])    for t in all_tickers}
         for _sym, _data in list(backtest_signals.items()):
             _entry = _data.get("entry_price", 0)
             _cur   = _pm.get(_sym, 0)
@@ -6819,6 +6992,7 @@ def send_daily_report():
 
     if not all_tickers:
         return
+    vol_now = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in all_tickers}
 
     # ══════════════════════════════════════════
     # 1. تحليل Stablecoins — مؤشر الحيتان 🐋
@@ -7121,6 +7295,10 @@ def send_daily_report():
 
         flow=flow_sum,
         action=whale_action,
+        btcd=get_btc_dominance(price_map) if price_map else 0.0,
+        btcd_tag=("🚀 Alt Season!" if get_btc_dominance(price_map) < BTCD_ALT_THRESHOLD
+                  else ("👀 قريب" if get_btc_dominance(price_map) < 55
+                  else "🐋 BTC يسيطر")) if price_map else "N/A",
     )
 
     # ─── Breakout inline calc ───────────────────────────
@@ -7797,6 +7975,7 @@ def run():
     global coin_signal_count                           # 🔢 عداد الإشارات
     global coin_whale_done                             # 🐋 عملات وصل حيتانها
     global btcd_history, btcd_last_check, btcd_alert_sent  # 📊 BTC Dominance
+    global liq_exit_alerted, liq_exit_vol_hist             # 💧 Liquidity Exit
     global whale_watchlist, whale_confirmed            # 🐋 Whale Confirmation
     global lz_tps_alerted                              # 🎯 LZ+TPS Fusion
     global lh_alerted, last_lh_scan          # 🔥 Liquidity Hunter
@@ -8021,6 +8200,7 @@ def run():
             # 🔥 LIQUIDITY HUNTER — كل 5 دقائق
             # ⚡ TPS/ATS + LZ Fusion + Whale — كل 5 دقائق
             if now - last_tps_scan >= TPS_SCAN_EVERY:
+                check_liquidity_exit(vol_now, price_map)
                 scan_tps_ats(price_map, vol_now, change_now)
                 scan_lz_tps_fusion(price_map, vol_now, change_now)  # 🎯 الدمج
                 scan_whale_confirmation(price_map)                  # 🐋 تأكيد حيتان
