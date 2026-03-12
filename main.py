@@ -957,6 +957,23 @@ def poll_commands():
                         )
                     send(txt)
 
+            elif text_lower in ("/joker", "/جوكر"):
+                if not whale_watchlist:
+                    send("🃏 لا توجد عملات في مراقبة الجوكر حالياً")
+                else:
+                    now_t = time.time()
+                    txt = "🃏 *عملات تنتظر الجوكر:*\n"
+                    txt += "━━━━━━━━━━━━━━━━━━\n"
+                    for s, v in list(whale_watchlist.items()):
+                        base     = s.replace("USDT","")
+                        elapsed  = int((now_t - v["time"]) / 60)
+                        ats_then = v.get("ats_then", 0)
+                        txt += "👁️ *{}* | منذ {} دقيقة | ATS كان: {:.0f}$\n".format(
+                            base, elapsed, ats_then)
+                    txt += "━━━━━━━━━━━━━━━━━━\n"
+                    txt += "⏳ _الجوكر يراقب — ينتظر الحيتان_ 🐋"
+                    send(txt)
+
             elif text_lower in ("/stop", "/ايقاف"):
                 send("⏸️ تم إيقاف التنبيهات مؤقتاً — اكتب /start للعودة")
                 # نضع flag
@@ -982,7 +999,8 @@ def poll_commands():
                     "⏸️ /stop        — إيقاف التنبيهات\n"
                     "✅ /start       — تشغيل التنبيهات\n"
                     "━━━━━━━━━━━━━━━━━━\n"
-                    "💎 /gems        — الجواهر المرصودة"
+                    "💎 /gems        — الجواهر المرصودة\n"
+                    "🃏 /جوكر        — عملات تنتظر الجوكر"
                 )
     except Exception as e:
         log.debug("poll_commands error: %s", e)
@@ -4727,7 +4745,7 @@ def scan_whale_confirmation(price_map):
             "💥 *{sym}* — حيتان دخلوا! ادخل الآن!\n".format(sym=sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n" +
             evolution_line +
-            "⚡ TPS:    `{tps:.1f}` صفقة/ثانية\n".format(tps=tps) +
+            "{}\n".format("🐌 نشاط ضعيف جداً" if tps < 0.5 else ("🐢 نشاط عادي" if tps < 1.0 else ("⚡ نشاط جيد" if tps < 3.0 else ("🔥 نشاط قوي" if tps < 5.0 else "💥 نشاط انفجاري")))) +
             "📊 VDelta: `{vd:.0f}%` شراء حقيقي 🔥\n".format(vd=vdelta*100) +
             "💰 السعر:  `{pr}` ({chg:+.2f}%)\n".format(
                 pr=fmt_price(price), chg=price_chg) +
@@ -4875,13 +4893,13 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         prox_pct = min_dist * 100
         if prox_pct <= 0.5:
             score += 20
-            signals.append("📍 {:.2f}% من المنطقة".format(prox_pct))
+            signals.append("📍 داخل المنطقة تماماً ✅")
         elif prox_pct <= 1.0:
             score += 12
-            signals.append("📍 {:.2f}% من المنطقة".format(prox_pct))
+            signals.append("📍 قريب جداً من المنطقة")
         else:
             score += 5
-            signals.append("📍 {:.2f}% من المنطقة".format(prox_pct))
+            signals.append("📍 على حافة المنطقة")
 
         # TPS
         if ratio >= TPS_SPIKE:
@@ -4963,11 +4981,11 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             "━━━━━━━━━━━━━━━━━━\n"
             "🗺️ *منطقة السيولة:* {}\n".format(zone_tag) +
             "  📊 المنطقة: `{}` ← `{}`\n".format(fmt_price(zone_low), fmt_price(zone_high)) +
-            "  📍 السعر الآن: `{}` ({:.2f}% من المنطقة)\n".format(fmt_price(price), prox_pct) +
+            "  📍 السعر الآن: `{}` — {}\n".format(fmt_price(price), "داخل المنطقة ✅" if prox_pct <= 0.5 else ("قريب جداً" if prox_pct <= 1.0 else "على الحافة")) +
             "  🔢 Sigma: `{}`\n".format(zone_sigma) +
             "━━━━━━━━━━━━━━━━━━\n"
             "⚡ *تأكيد TPS/ATS:*\n"
-            "  ⚡ TPS: `{:.1f}` صفقة/ثانية\n".format(tps) +
+            "  {}\n".format("🐌 نشاط ضعيف جداً" if tps < 0.5 else ("🐢 نشاط عادي" if tps < 1.0 else ("⚡ نشاط جيد" if tps < 3.0 else ("🔥 نشاط قوي" if tps < 5.0 else "💥 نشاط انفجاري")))) +
             "  💰 ATS: `{:.0f}$` {}\n".format(ats, tps_stats["buyer_type"]) +
             "  📊 VDelta: `{:.0f}%` شراء حقيقي\n".format(vdelta * 100) +
             "━━━━━━━━━━━━━━━━━━\n"
@@ -5382,12 +5400,12 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             "━━━━━━━━━━━━━━━━━━\n"
             "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "⚡ TPS:    `{:.1f}` صفقة/ثانية\n".format(stats["tps"]) +
+            "{}\n".format("🐌 نشاط ضعيف جداً" if stats["tps"] < 0.5 else ("🐢 نشاط عادي" if stats["tps"] < 1.0 else ("⚡ نشاط جيد" if stats["tps"] < 3.0 else ("🔥 نشاط قوي" if stats["tps"] < 5.0 else "💥 نشاط انفجاري")))) +
             "💰 ATS:    `{:.0f}$`  🦐 أفراد\n".format(stats["ats"]) +
             "📊 VDelta: `{:.0f}%` شراء\n".format(stats["vdelta"]*100) +
             "━━━━━━━━━━━━━━━━━━\n"
             "💪 القوة: `{}/100` {}\n".format(score, rarity) +
-            "📉 24h: `{:+.2f}%` | حجم: `{:.0f}K`\n".format(chg, vol/1000) +
+            "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol/1_000_000) +
             "🏷️ القطاع: `{}`\n".format(sector) +
             "━━━━━━━━━━━━━━━━━━\n"
             "⏳ _انتظر الجوكر للدخول_ 🃏"
@@ -6987,12 +7005,13 @@ def send_daily_report():
     today    = now_utc.strftime("%Y-%m-%d")
 
     # أرسل مرة واحدة في اليوم
-    # النافذة: 00:00→00:59 UTC
     if daily_report_sent_date == today:
         log.debug("📊 تقرير اليوم أُرسل مسبقاً: %s", today)
         return
-    # نافذة موسعة: 00:00 → 06:00 إذا لم يُرسل بعد
-    if now_utc.hour != 0 or now_utc.minute > 59:
+    # نافذة: 00:00 → 06:00 UTC
+    # إذا لم يُرسل بعد → يرسل في أول دورة بعد منتصف الليل
+    # حتى لو أُعيد تشغيل البوت في 01:00 أو 05:00
+    if now_utc.hour >= 6:
         log.debug("📊 انتظار 00:00 UTC | الساعة الآن: %02d:%02d", now_utc.hour, now_utc.minute)
         return
     log.info("📊 إرسال التقرير اليومي | %s", today)
