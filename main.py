@@ -2783,7 +2783,7 @@ def check_watchlist_entries():
         log.info("👀 WL Check | watching=%d | expired=%d", len(watchlist), len(to_remove))
 
 
-def scan_instant_movers():
+def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):  # معطّل
     # type: () -> None
     """
     يعمل من الدقيقة الأولى — بدون أي تاريخ
@@ -2879,7 +2879,7 @@ def scan_instant_movers():
     log.info("⚡ Instant Scan | movers=%d", len(movers))
 
 
-def scan_realtime_liquidity():
+def scan_realtime_liquidity(price_map=None, vol_now=None):  # معطّل
     # type: () -> None
     """
     الأهم والأسرع — يعمل كل 5 دقائق
@@ -3022,7 +3022,7 @@ def scan_realtime_liquidity():
     log.info("💧 RT Scan done | alerts=%d", len(alerts))
 
 
-def scan_hot_market():
+def scan_hot_market(price_map=None, vol_now=None):  # معطّل
     # type: () -> None
     """
     يعمل فوراً بدون تاريخ
@@ -3150,7 +3150,7 @@ def scan_hot_market():
     log.info("🔥 Hot Scan | found=%d", len(hot))
 
 
-def scan_ath_distance():
+def scan_ath_distance(price_map=None):  # معطّل
     # type: () -> None
     """
     يرصد العملات التي انهارت 90-95%+ من أعلى مستوى تاريخي
@@ -3319,7 +3319,7 @@ def scan_ath_distance():
     log.info("💎 ATH Scan | gems=%d", len(gems))
 
 
-def scan_bottom_accumulation():
+def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
     # type: () -> None
     """
     يرصد التجميع الخفي في القيعان الممتدة:
@@ -5000,50 +5000,53 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                 log.info("👁️ LZ+TPS silent watchlist add: %s", sym)
             continue
 
-        # أول إشارة — أرسل
-        coin_signal_count[sym] = coin_signal_count.get(sym, 0) + 1
-        _sig_num = coin_signal_count[sym]
-        _sig_tag = ""
+        # أول إشارة — أرسل كـ WATCH ALERT مدمج مع LZ+TPS
+        coin_signal_count[sym] = 1
+
+        _tps_label = (
+            "🐌 نشاط ضعيف جداً" if tps < 0.5 else
+            ("🐢 نشاط عادي"      if tps < 1.0 else
+            ("⚡ نشاط جيد"       if tps < 3.0 else
+            ("🔥 نشاط قوي"       if tps < 5.0 else
+             "💥 نشاط انفجاري")))
+        )
+        _prox_label = (
+            "داخل المنطقة تماماً ✅" if prox_pct <= 0.5 else
+            ("قريب جداً 🔥"          if prox_pct <= 1.0 else
+             "على الحافة ⚡")
+        )
 
         msg = (
-            "🎯 *LZ + TPS FUSION*{}\n".format(_sig_tag) +
+            "👁️ *WATCH ALERT* 💎\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "💎 *{}* — منطقة سيولة + {}!\n".format(
-                sym.replace("USDT",""),
-                "حيتان 🐋" if ats >= ATS_WHALE else ("متوسط 🐟" if ats >= 1000 else "أفراد 🦐")
+            "🔍 *{}* — منطقة سيولة + نشاط! 👀\n".format(sym.replace("USDT","")) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📍 {} | {} `{}×`\n".format(
+                _prox_label, zone_tag, zone_sigma
+            ) +
+            "📊 المنطقة: `{}` ← `{}`\n".format(fmt_price(zone_low), fmt_price(zone_high)) +
+            "⚖️ R/R: `{:.1f}:1` | 🎯 `{}` (+{:.1f}%)\n".format(
+                rr, fmt_price(target), (target-price)/price*100
             ) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "🗺️ *منطقة السيولة:* {}\n".format(zone_tag) +
-            "  📊 المنطقة: `{}` ← `{}`\n".format(fmt_price(zone_low), fmt_price(zone_high)) +
-            "  📍 السعر الآن: `{}` — {}\n".format(fmt_price(price), "داخل المنطقة ✅" if prox_pct <= 0.5 else ("قريب جداً" if prox_pct <= 1.0 else "على الحافة")) +
-            "  🔢 Sigma: `{}`\n".format(zone_sigma) +
+            "{}\n".format(_tps_label) +
+            "💰 ATS: `{:.0f}$` 🦐 أفراد\n".format(ats) +
+            "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta * 100) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "⚡ *تأكيد TPS/ATS:*\n"
-            "  {}\n".format("🐌 نشاط ضعيف جداً" if tps < 0.5 else ("🐢 نشاط عادي" if tps < 1.0 else ("⚡ نشاط جيد" if tps < 3.0 else ("🔥 نشاط قوي" if tps < 5.0 else "💥 نشاط انفجاري")))) +
-            "  💰 ATS: `{:.0f}$` {}\n".format(ats, tps_stats["buyer_type"]) +
-            "  📊 VDelta: `{:.0f}%` شراء حقيقي\n".format(vdelta * 100) +
+            "💪 القوة: `{}/100` {}\n".format(score, rarity) +
+            "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol_now.get(sym,0)/1_000_000) +
+            "🏷️ القطاع: `{}`\n".format(sector) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "📡 *الإشارات:* {}\n".format(" | ".join(signals[:3])) +
-            "💪 *القوة: `{}/100` {}*\n".format(score, rarity) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "🎯 الهدف:  `{}` (+{:.1f}%)\n".format(fmt_price(target), (target-price)/price*100) +
-            "🛑 Stop:   `{}` (-{:.1f}%)\n".format(fmt_price(stop_loss), (price-stop_loss)/price*100) +
-            "⚖️ R/R:    `{:.1f}:1`\n".format(rr) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "📉 24h: `{:+.2f}%` | 🏷️ {}\n".format(chg, sector) +
-            "{}\n".format(
-                "🐋 _منطقة سيولة + حيتان = فرصة نادرة_" if ats >= ATS_WHALE else
-                ("🐟 _منطقة سيولة + متداولون متوسطون_" if ats >= 1000 else
-                 "🦐 _منطقة سيولة — انتظر تأكيد حيتان_")
-            )
+            "⏳ _انتظر الجوكر للدخول_ 🃏"
         )
 
         send(msg)
         lz_tps_alerted[sym] = now
-        coin_alerted[sym]   = now   # 🔒 يمنع كل الأنظمة من التكرار
+        coin_alerted[sym]   = now
+        whale_watch_add(sym, ats, vdelta, price)
         perf_register(sym, price, "lz_tps_fusion", score, " | ".join(signals))
-        log.info("🎯 LZ+TPS | %s | score=%d | dist=%.2f%% | ats=%.0f | vdelta=%.0f%%",
-                 sym, score, prox_pct, ats, vdelta * 100)
+        log.info("👁️ WATCH+LZ | %s | score=%d | rr=%.1f | ats=%.0f | vdelta=%.0f%%",
+                 sym, score, rr, ats, vdelta * 100)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -5436,7 +5439,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _sig_num = 1
 
         msg = (
-            "👁️ *WATCH ALERT*{}\n".format(_sig_tag) +
+            "👁️ *WATCH ALERT*\n" +
             "━━━━━━━━━━━━━━━━━━\n"
             "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n"
@@ -5709,7 +5712,7 @@ def refresh_small_caps():
              len(small_caps), sector_info, len(new_sc[:100]))
 
 
-def liquidity_hunter_small_caps(price_map, vol_now, changes_map):
+def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):  # معطّل
     # type: (Dict, Dict, Dict) -> None
     """
     🔍 LIQUIDITY HUNTER — Small Caps Edition
@@ -7395,10 +7398,10 @@ def send_daily_report():
 
         flow=flow_sum,
         action=whale_action,
-        btcd=get_btc_dominance(vol_now) if vol_now else 0.0,
-        btcd_tag=("🚀 Alt Season!" if get_btc_dominance(vol_now) < BTCD_ALT_THRESHOLD
-                  else ("👀 قريب" if get_btc_dominance(vol_now) < 55
-                  else "🐋 BTC يسيطر")) if price_map else "N/A",
+        btcd=0.0,
+        btcd_tag=("📉 ينزل — 🚀 Alt Season!" if btcd_trend == "falling"
+                  else ("📈 يصعد — 🐋 BTC يسيطر" if btcd_trend == "rising"
+                  else "➡️ مستقر")),
     )
 
     # ─── Breakout inline calc ───────────────────────────
@@ -8212,7 +8215,7 @@ def run():
                 if now - last_ath_scan >= ATH_SCAN_EVERY:
                     scan_ath_distance()
                     last_ath_scan = now
-                scan_volume_explosion()     # 🆕 رصد انفجار الحجم بعد التجميع
+                # scan_volume_explosion — معطّل (مكرر مع liquidity_hunter)
                 last_bottom_scan = now
 
             # 🆕 V15: تقرير يومي عند 00:00 UTC
@@ -8275,7 +8278,7 @@ def run():
             for sym in list(tracked.keys()):
                 if sym in price_map:
                     if not check_trailing(sym, price_map[sym]):
-                        check_progression(sym, price_map[sym])
+                        pass  # check_progression — معطّل (SIGNAL #2 قديم)
 
             # 🆕 Sector Flow: تجميع لقطات كل دورة
             update_sector_flow(ticker_map)
