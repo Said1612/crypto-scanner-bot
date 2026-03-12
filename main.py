@@ -476,6 +476,8 @@ SECTORS = {
         "ESTATEUSDT","REALTUSDT","DINOUSDT","FLOWXUSDT","ACHUSDT",
         "CELLUSDT","NEXOUSDT","SECURITIZEUSDT","POLKUSDT","NEWRLAUSDT",
         "CENTAUSDT","TRADEAUSDT",
+        # ── Mastercard RWA Partners ──
+        "PLUMEUSDT","CANTONUSDT","ASSETUSDT","TOKENYUSDT","DIGIASSETUSDT",
     ],
     "Gaming": [
         # ── الأساسيات ────────────────────────────
@@ -522,7 +524,7 @@ SECTORS = {
     ],
     "Layer2": [
         # ── الأساسيات ────────────────────────────
-        "MATICUSDT","OPUSDT","ARBUSDT","ZKUSDT","STRKUSDT",
+        "POLUSDT","OPUSDT","ARBUSDT","ZKUSDT","STRKUSDT",
         "LRCUSDT","METISUSDT","MANTAUSDT","SCROLLUSDT","MNTUSDT",
         "MERLUSDT","ALTUSDT","WUSDT","ZROUSDT","LINEAUSDT",
         "TAIKOUSDT","MODUSDT","CELRUSDT","SKLUSDT","OMGUSDT",
@@ -534,6 +536,8 @@ SECTORS = {
         "ARRUSDT","ZEPHUSDT","PIRATEUSDT","OPSUSDT","BOBAUSDT",
         "XVMUSDT","FRAXTALUSDT","MANTLEUSDT","BASEUSDT","PARTUSDT",
         "CHEQOUSDT","ZKPUSDT","POLYGONUSDT","GNOSISUSDT","KAIKOUSDT",
+        # ── Mastercard Partners ──
+        "AXLUSDT","WORMHOLEUSDT","LAYERZUSDT","HYPERLANEUSDT","CELERУСDT",
     ],
     "Meme": [
         # ── الأساسيات ────────────────────────────
@@ -627,6 +631,31 @@ SECTORS = {
         "MONAUSDT","DIGIУСDT","PARTICLUSDT","NULSUSDT","WANCUSDT",
         "STORMXUSDT","OROPOCKETUSDT","AIONUSDT","ELECUSDT","ETHCLASSICUSDT",
         "TOKENOMYUSDT","BRDUSDT","CREDITCOINUSDT","DGTXUSDT","BITCIUSDT",
+    ],
+
+    # ── قطاعات جديدة V16 ──────────────────────────────────────
+    "Robotics": [
+        # روبوتات + AI جسدي
+        "WLDUSDT","RENDUSDT","FETUSDT","AGIXUSDT","OCEANUSDT",
+        "AKTOUSDT","NUMERAIUSDT","ARKMUSDT","PHAUSDT","CUDOSUSDT",
+        "CGPTUSDT","NEUROUSDT","VIRTUSDT","SWARMAUSDT","MEAIUSDT",
+    ],
+
+    "NeoBank": [
+        # مدفوعات + بنوك رقمية + X402
+        "XLMUSDT","XRPUSDT","PYTHUSDT","STRKUSDT","COTIUSDT",
+        "REQUSDT","PAYUSDT","SOLOUSDT","BRLUSDT","USDCUSDT",
+        "SPRMUSDT","PAYPUSDT","MNTLUSDT","NEXOUSDT","WIREXUSDT",
+        "MPAYUSDT","PAYPOLUSUSDT","FLAREUSDT","SGUSDUSDT","BIGTUSDT",
+        # ── Mastercard Payments Partners ──
+        "APTUSDT","AVAXUSDT","SOLUSDT","ATOMUSDT","OPUSDT",
+        "POLUSDT","AXELARUSDT","OPTIMISMUSDT","STRKUSDT","USDCUSDT",
+    ],
+
+    "Quantum": [
+        # حوسبة كمية
+        "QNTUSDT","QTUMUSDT","IONQUSDT","QUAIUSDT","KVANTUSDT",
+        "QUIPUSDT","QUANTUMUSDT","QKCUSDT","ALEPHUSDT","NQUUSDT",
     ],
 }
 
@@ -8246,8 +8275,8 @@ def run():
                 analyze_sector_flow()
                 flow_cycle = 0
 
-            # Momentum Detector
-            detect_momentum(price_map, change_now, vol_now, high_map, low_map)
+            # Momentum Detector — معطّل (WATCH + الجوكر فقط)
+            # detect_momentum(price_map, change_now, vol_now, high_map, low_map)
 
             # 📊 تحديث نتائج الأداء — بعد بناء price_map
             if now - last_ts_scan >= TS_SCAN_EVERY:
