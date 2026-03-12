@@ -5379,7 +5379,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             score += 12
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
-        if score >= 55 and len(signals) >= 2:
+        if score >= 55 and len(signals) >= 2 and stats["tps"] >= 0.5:  # 🐌 ضعيف جداً = تجاهل
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
