@@ -8323,6 +8323,8 @@ def run():
 
             cycle += 1
             send_report()
+            # 🆕 V15: تقرير يومي — يُفحص كل دورة، يُرسل عند 00:00→05:59 UTC
+            send_daily_report()
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
