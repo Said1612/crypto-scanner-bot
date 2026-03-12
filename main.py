@@ -4976,6 +4976,11 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             target = price * 1.12   # هدف افتراضي +12% إذا لا مقاومة قريبة
         rr = (target - price) / (price - stop_loss) if price > stop_loss else 0
 
+        # 🛡️ R/R أقل من 1.5 = لا يستحق الإشارة
+        if rr < 1.5:
+            log.debug("⚖️ LZ+TPS skip %s: R/R=%.1f < 1.5", sym, rr)
+            continue
+
         sector  = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
         chg     = changes_map.get(sym, 0)
         rarity  = "🏆 نادر جداً" if score >= 90 else ("🔥 قوي" if score >= 80 else "⚡ جيد")
@@ -5417,12 +5422,18 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
     results.sort(key=lambda x: -x[0])
     for score, sym, signals, stats, chg, vol in results[:3]:
+        # 🔒 إذا سبق وأُرسل WATCH → أضف للمراقبة بصمت فقط
+        if coin_signal_count.get(sym, 0) >= 1:
+            if sym not in whale_watchlist:
+                whale_watch_add(sym, stats["ats"], stats["vdelta"], price_map.get(sym, 0))
+                log.info("👁️ TPS silent add: %s (already watched)", sym)
+            continue
+
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
         rarity = "🐋🔥 نادر" if score >= 80 else ("🔥 قوي" if score >= 65 else "⚡ متوسط")
-        # عداد الإشارات
-        coin_signal_count[sym] = coin_signal_count.get(sym, 0) + 1
-        _sig_num = coin_signal_count[sym]
-        _sig_tag = "" if _sig_num == 1 else "  〔إشارة #{}〕".format(_sig_num)
+        # عداد الإشارات — أول إشارة فقط
+        coin_signal_count[sym] = 1
+        _sig_num = 1
 
         msg = (
             "👁️ *WATCH ALERT*{}\n".format(_sig_tag) +
