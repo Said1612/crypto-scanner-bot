@@ -82,15 +82,36 @@ BTC_CRASH_4H       = -2.5
 TPS_LIMIT      = 100     # آخر 100 صفقة
 # ── قائمة عملات إضافية ثابتة ─────────────────────────────────────────
 EXTRA_COINS = [
-    # Meme coins
+    # ── Meme coins ────────────────────────────
     "FLOKIUSDT", "PEPEUSDT", "WIFUSDT", "BOMEUSDT", "MEWUSDT",
     "PEOPLEUSDT", "1000SHIBUSDT",
-    # Layer1/Layer2
+
+    # ── Layer1 / Layer2 ───────────────────────
     "FLOWUSDT", "KASUSDT", "KAIAUSDT", "JUPUSDT",
-    # Gaming & NFT
+
+    # ── Gaming & NFT ──────────────────────────
     "PIXELUSDT", "RENDERUSDT", "GALAUSDT", "IMXUSDT",
-    # DeFi
+
+    # ── DeFi ──────────────────────────────────
     "AAVEUSDT", "DYDXUSDT", "JOEUSDT",
+
+    # ── AI & Robotics — تجميع هادئ قبل الانفجار ──
+    "FETUSDT", "AGIXUSDT", "OCEANUSDT", "GRTUSDT",
+    "WLDUSDT", "ARKMUSDT", "VIRTUSDT", "ACTUSDT",
+    "CGPTUSDT", "NEUROUSDT", "TAOAUSDT", "SWARMAUSDT",
+
+    # ── RWA — تجميع مؤسسي ────────────────────
+    "ONDOUSDT", "MANTRAUSDT", "CFGUSDT", "PLUMEUSDT",
+
+    # ── NeoBank / Payments ────────────────────
+    "XLMUSDT", "XRPUSDT", "PYTHUSDT", "REQUSDT",
+
+    # ── Oracle ────────────────────────────────
+    "LINKUSDT", "BANDUSDT", "SUPRAUSDT", "API3USDT",
+
+    # ── Layer1 إضافية ─────────────────────────
+    "CFXUSDT", "APTUSDT", "SEIUSDT", "INJUSDT",
+    "NEARUSDT", "SOLUSDT", "AVAXUSDT", "ADAUSDT",
 ]
 
 TPS_SPIKE      = 3.0     # TPS ارتفع 3× = نشاط غير عادي
@@ -1035,14 +1056,19 @@ def poll_commands():
         log.debug("poll_commands error: %s", e)
 
 
+_force_daily_report = False  # flag لتجاوز قيد الساعة
+
 def send_daily_report_forced():
     # type: () -> None
     """إرسال التقرير اليومي فوراً بدون قيد الوقت — /report"""
-    global daily_report_sent_date, lz_daily_sent_date
+    global daily_report_sent_date, lz_daily_sent_date, _force_daily_report
     log.info("📤 تقرير يدوي — إعادة تعيين التاريخ")
     daily_report_sent_date = ""   # إلغاء قيد التاريخ
     lz_daily_sent_date     = ""   # إلغاء قيد السيولة
-    send_daily_report()           # استدعاء مباشر
+    _force_daily_report    = True # تجاوز قيد الساعة
+    send_daily_report()
+    _force_daily_report    = False
+
 
 
 def safe_get(url, params=None, retries=3):
@@ -4823,8 +4849,8 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     )[:40]
 
     for sym, vol in ranked:
-        _min_vol = 500_000 if sym in EXTRA_COINS else 1_000_000
-        if vol < _min_vol:  # 🛡️ EXTRA_COINS=500K | عادية=1M
+        _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
+        if vol < _min_vol:  # 🛡️ EXTRA_COINS=100K | عادية=1M
             continue
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
@@ -4981,6 +5007,12 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             log.debug("⚖️ LZ+TPS skip %s: R/R=%.1f < 1.5", sym, rr)
             continue
 
+        # 🐌 TPS ضعيف جداً = لا إشارة
+        # منطقة سيولة + تجميع بطيء مقبول من 0.2
+        if tps < 0.2:
+            log.debug("🐌 LZ+TPS skip %s: TPS=%.2f < 0.2", sym, tps)
+            continue
+
         sector  = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
         chg     = changes_map.get(sym, 0)
         rarity  = "🏆 نادر جداً" if score >= 90 else ("🔥 قوي" if score >= 80 else "⚡ جيد")
@@ -5004,11 +5036,12 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         coin_signal_count[sym] = 1
 
         _tps_label = (
-            "🐌 نشاط ضعيف جداً" if tps < 0.5 else
+            "🐌 نشاط ضعيف جداً" if tps < 0.2 else
+            ("🐢 تجميع بطيء"     if tps < 0.5 else
             ("🐢 نشاط عادي"      if tps < 1.0 else
             ("⚡ نشاط جيد"       if tps < 3.0 else
             ("🔥 نشاط قوي"       if tps < 5.0 else
-             "💥 نشاط انفجاري")))
+             "💥 نشاط انفجاري"))))
         )
         _prox_label = (
             "داخل المنطقة تماماً ✅" if prox_pct <= 0.5 else
@@ -5249,6 +5282,394 @@ def get_btc_dominance(vol_now):
         return 0.0
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🚨 PUMP DETECTOR — رصد الارتفاع المفاجئ
+#   🔴 DUMP DETECTOR — رصد الانهيار المفاجئ
+#   🌊 MARKET PULSE  — نبض السوق كل 30 دقيقة
+# ═══════════════════════════════════════════════════════════════════
+
+# تاريخ الأسعار للكشف عن التغيرات المفاجئة
+pump_dump_history  = {}   # type: Dict[str, list]   sym → [(time, price, vol)]
+pump_alerted       = {}   # type: Dict[str, float]  آخر تنبيه pump
+dump_alerted       = {}   # type: Dict[str, float]  آخر تنبيه dump
+last_pulse_time    = 0.0  # آخر نبض سوق
+market_pulse_history = [] # type: list  تاريخ نبض السوق
+
+PUMP_THRESHOLD     = 4.0   # ارتفاع 4%+ في 5 دقائق
+DUMP_THRESHOLD     = -4.0  # نزول 4%- في 5 دقائق
+PUMP_VOL_MULT      = 2.5   # حجم 2.5× المعدل
+PUMP_COOLDOWN      = 3600  # ساعة بين تنبيهات نفس العملة
+PULSE_EVERY        = 1800  # نبض السوق كل 30 دقيقة
+
+
+def update_pump_dump_history(price_map, vol_now):
+    # type: (Dict, Dict) -> None
+    """يحدث تاريخ الأسعار لكل عملة — يُستدعى كل دورة"""
+    now = time.time()
+    for sym, price in price_map.items():
+        if not sym.endswith("USDT"): continue
+        vol = vol_now.get(sym, 0)
+        if sym not in pump_dump_history:
+            pump_dump_history[sym] = []
+        pump_dump_history[sym].append((now, price, vol))
+        # نحتفظ بآخر 10 دقائق فقط
+        pump_dump_history[sym] = [
+            x for x in pump_dump_history[sym]
+            if now - x[0] <= 600
+        ]
+
+
+def scan_pump_dump(price_map, vol_now, change_now):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🚨 يرصد الارتفاعات والانهيارات المفاجئة
+    شرط: تغيير 4%+ في 5 دقائق + حجم 2.5×
+    """
+    now = time.time()
+
+    for sym in list(candidates):
+        if sym not in price_map: continue
+        price = price_map[sym]
+        vol   = vol_now.get(sym, 0)
+        hist  = pump_dump_history.get(sym, [])
+
+        if len(hist) < 3: continue
+
+        # نأخذ السعر قبل 5 دقائق
+        five_min_ago = [(t, p, v) for t, p, v in hist if now - t >= 280]
+        if not five_min_ago: continue
+        old_price = five_min_ago[-1][1]
+        if old_price <= 0: continue
+
+        move = (price - old_price) / old_price * 100
+
+        # متوسط الحجم التاريخي
+        hist_vols = coin_vol_history.get(sym, [])
+        avg_vol   = sum(hist_vols) / len(hist_vols) if hist_vols else vol
+        vol_mult  = vol / avg_vol if avg_vol > 0 else 1.0
+
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+        base   = sym.replace("USDT", "")
+
+        # ══ PUMP ══
+        if move >= PUMP_THRESHOLD and vol_mult >= PUMP_VOL_MULT:
+            if now - pump_alerted.get(sym, 0) < PUMP_COOLDOWN:
+                continue
+            pump_alerted[sym] = now
+            msg = (
+                "🚨 *PUMP ALERT*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📈 *{}* — ارتفع `{:+.1f}%` في 5 دقائق!\n"
+                "💧 الحجم: `{:.1f}×` المعدل 🔥\n"
+                "💵 السعر: `{}` | 24h: `{:+.1f}%`\n"
+                "🏷️ القطاع: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⚡ _حركة مفاجئة — راقب بحذر_"
+            ).format(base, move, vol_mult, fmt_price(price),
+                     change_now.get(sym, 0), sector)
+            send(msg)
+            log.info("🚨 PUMP | %s | move=%.1f%% | vol=%.1fx", sym, move, vol_mult)
+
+        # ══ DUMP ══
+        elif move <= DUMP_THRESHOLD and vol_mult >= PUMP_VOL_MULT:
+            if now - dump_alerted.get(sym, 0) < PUMP_COOLDOWN:
+                continue
+            dump_alerted[sym] = now
+            msg = (
+                "🔴 *DUMP ALERT*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📉 *{}* — انهار `{:+.1f}%` في 5 دقائق!\n"
+                "💧 الحجم: `{:.1f}×` المعدل ⚠️\n"
+                "💵 السعر: `{}` | 24h: `{:+.1f}%`\n"
+                "🏷️ القطاع: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🛑 _انهيار مفاجئ — احذر إذا دخلت_"
+            ).format(base, move, vol_mult, fmt_price(price),
+                     change_now.get(sym, 0), sector)
+            send(msg)
+            log.info("🔴 DUMP | %s | move=%.1f%% | vol=%.1fx", sym, move, vol_mult)
+
+
+def scan_market_pulse(price_map, vol_now, change_now):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🌊 نبض السوق كل 30 دقيقة
+    = كم % من العملات ترتفع؟
+    = هل السيولة تدخل أم تخرج؟
+    """
+    global last_pulse_time
+    now = time.time()
+    if now - last_pulse_time < PULSE_EVERY:
+        return
+    last_pulse_time = now
+
+    rising = 0; falling = 0; total = 0
+    strong_up = []; strong_down = []
+    buy_vol = 0.0; sell_vol = 0.0
+
+    for sym, chg in change_now.items():
+        if not sym.endswith("USDT"): continue
+        base = sym.replace("USDT","")
+        if base in STABLECOINS: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        vol = vol_now.get(sym, 0)
+        if vol < 500_000: continue
+        total += 1
+        if chg > 0:
+            rising  += 1
+            buy_vol += vol
+            if chg >= 3:
+                strong_up.append((base, chg, vol))
+        else:
+            falling  += 1
+            sell_vol += vol
+            if chg <= -3:
+                strong_down.append((base, chg, vol))
+
+    if total == 0: return
+
+    rising_pct  = rising  / total * 100
+    falling_pct = falling / total * 100
+    total_vol   = buy_vol + sell_vol
+    buy_pct     = buy_vol / total_vol * 100 if total_vol > 0 else 50
+
+    # حكم النبض
+    if rising_pct >= 65 and buy_pct >= 60:
+        pulse_icon  = "🟢"
+        pulse_label = "السوق صاعد قوي 🚀"
+        pulse_note  = "السيولة تدخل — فرصة جيدة"
+    elif rising_pct >= 55:
+        pulse_icon  = "🟡"
+        pulse_label = "ميل للصعود ↗️"
+        pulse_note  = "حذر — ليس كل القطاعات"
+    elif falling_pct >= 65 and buy_pct <= 40:
+        pulse_icon  = "🔴"
+        pulse_label = "السوق هابط ⚠️"
+        pulse_note  = "السيولة تخرج — ابتعد"
+    elif falling_pct >= 55:
+        pulse_icon  = "🟡"
+        pulse_label = "ميل للهبوط ↘️"
+        pulse_note  = "انتظر — ضغط بيعي"
+    else:
+        pulse_icon  = "⚪"
+        pulse_label = "السوق محايد ➡️"
+        pulse_note  = "لا اتجاه واضح — انتظر"
+
+    # أقوى العملات صعوداً
+    strong_up.sort(key=lambda x: -x[1])
+    strong_down.sort(key=lambda x: x[1])
+
+    up_txt   = " | ".join(["*{}* +{:.1f}%".format(b,c) for b,c,v in strong_up[:3]]) or "لا يوجد"
+    down_txt = " | ".join(["*{}* {:.1f}%".format(b,c) for b,c,v in strong_down[:3]]) or "لا يوجد"
+
+    # شريط المؤشر
+    bar_g = int(rising_pct / 10)
+    bar_r = 10 - bar_g
+    bar   = "🟩" * bar_g + "🟥" * bar_r
+
+    msg = (
+        "🌊 *MARKET PULSE*\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{} {}\n"
+        "{}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 `{}` عملة | 🟢 `{:.0f}%` | 🔴 `{:.0f}%`\n"
+        "💰 شراء: `{:.0f}%` | بيع: `{:.0f}%`\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🚀 صاعد: {}\n"
+        "📉 هابط: {}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💡 _{}_"
+    ).format(
+        pulse_icon, pulse_label, bar,
+        total, rising_pct, falling_pct,
+        buy_pct, 100 - buy_pct,
+        up_txt, down_txt,
+        pulse_note
+    )
+
+    send(msg)
+    log.info("🌊 PULSE | rising=%.0f%% | buy=%.0f%% | total=%d",
+             rising_pct, buy_pct, total)
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   🌊 LIQUIDITY FLOW TRACKER — اتجاه السيولة لحظة بلحظة
+#   يرصد: من أي قطاع تخرج؟ إلى أي قطاع تدخل؟
+# ═══════════════════════════════════════════════════════════════════
+
+sector_vol_history   = {}   # type: Dict[str, list]  قطاع → [vol1, vol2, ...]
+sector_flow_alerted  = {}   # type: Dict[str, float] آخر تنبيه لكل قطاع
+last_flow_track_time = 0.0
+FLOW_TRACK_EVERY     = 300  # كل 5 دقائق
+FLOW_ALERT_COOLDOWN  = 1800 # 30 دقيقة بين تنبيهات نفس القطاع
+FLOW_IN_THRESHOLD    = 1.5  # حجم ارتفع 1.5× = سيولة تدخل
+FLOW_OUT_THRESHOLD   = 0.6  # حجم انخفض 40%  = سيولة تخرج
+
+
+def track_liquidity_flow(vol_now, change_now):
+    # type: (Dict, Dict) -> None
+    """
+    🌊 يتابع اتجاه السيولة بين القطاعات كل 5 دقائق
+    يرسل تنبيه عند:
+      - دخول سيولة قوية لقطاع
+      - خروج سيولة من قطاع
+      - rotation بين قطاعين
+    """
+    global last_flow_track_time
+    now = time.time()
+    if now - last_flow_track_time < FLOW_TRACK_EVERY:
+        return
+    last_flow_track_time = now
+
+    # ── حساب حجم كل قطاع الآن ──
+    sector_vol_now = {}
+    sector_chg_now = {}
+
+    for sector, coins in SECTORS.items():
+        total_vol = 0.0
+        total_chg = 0.0
+        count     = 0
+        for sym in coins:
+            vol = vol_now.get(sym, 0)
+            chg = change_now.get(sym, 0)
+            if vol < 50_000: continue
+            total_vol += vol
+            total_chg += chg
+            count     += 1
+        if count > 0:
+            sector_vol_now[sector] = total_vol
+            sector_chg_now[sector] = total_chg / count
+
+    # ── تحديث التاريخ ──
+    for sector, vol in sector_vol_now.items():
+        if sector not in sector_vol_history:
+            sector_vol_history[sector] = []
+        sector_vol_history[sector].append(vol)
+        if len(sector_vol_history[sector]) > 12:  # آخر ساعة
+            sector_vol_history[sector].pop(0)
+
+    # ── كشف الدخول والخروج ──
+    flowing_in  = []  # قطاعات تدخلها السيولة
+    flowing_out = []  # قطاعات تخرج منها السيولة
+
+    for sector, vol in sector_vol_now.items():
+        hist = sector_vol_history.get(sector, [])
+        if len(hist) < 3: continue
+        avg = sum(hist[:-1]) / len(hist[:-1])
+        if avg <= 0: continue
+        ratio = vol / avg
+        chg   = sector_chg_now.get(sector, 0)
+
+        if ratio >= FLOW_IN_THRESHOLD and chg > 0:
+            flowing_in.append((sector, ratio, chg, vol))
+        elif ratio <= FLOW_OUT_THRESHOLD and chg < 0:
+            flowing_out.append((sector, ratio, chg, vol))
+
+    if not flowing_in and not flowing_out:
+        return
+
+    flowing_in.sort(key=lambda x: -x[1])
+    flowing_out.sort(key=lambda x: x[1])
+
+    # ── Rotation: خروج من قطاع + دخول لآخر ──
+    if flowing_in and flowing_out:
+        # rotation واضح
+        top_in  = flowing_in[0]
+        top_out = flowing_out[0]
+
+        # تحقق cooldown
+        alert_key = "rotation_{}_{}" .format(top_out[0], top_in[0])
+        if now - sector_flow_alerted.get(alert_key, 0) < FLOW_ALERT_COOLDOWN:
+            return
+        sector_flow_alerted[alert_key] = now
+
+        in_coins  = [s.replace("USDT","") for s in SECTORS.get(top_in[0],[])
+                     if vol_now.get(s,0) > 100_000][:4]
+        out_coins = [s.replace("USDT","") for s in SECTORS.get(top_out[0],[])
+                     if vol_now.get(s,0) > 100_000][:4]
+
+        msg = (
+            "🔄 *SECTOR ROTATION*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💸 *خروج:* `{}` `{:+.1f}%` ↘️\n"
+            "💰 *دخول:* `{}` `{:+.1f}%` ↗️\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📤 عملات تخرج منها: {}\n"
+            "📥 عملات تدخلها:   {}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💡 _السيولة تنتقل — راقب قطاع {}_ 👁️"
+        ).format(
+            top_out[0], top_out[2],
+            top_in[0],  top_in[2],
+            " | ".join(["*{}*".format(c) for c in out_coins]) or "—",
+            " | ".join(["*{}*".format(c) for c in in_coins])  or "—",
+            top_in[0]
+        )
+        send(msg)
+        log.info("🔄 ROTATION | out=%s → in=%s | ratio=%.1fx",
+                 top_out[0], top_in[0], top_in[1])
+        return
+
+    # ── دخول سيولة فقط ──
+    if flowing_in and not flowing_out:
+        top = flowing_in[0]
+        alert_key = "in_{}".format(top[0])
+        if now - sector_flow_alerted.get(alert_key, 0) < FLOW_ALERT_COOLDOWN:
+            return
+        sector_flow_alerted[alert_key] = now
+
+        coins = [s.replace("USDT","") for s in SECTORS.get(top[0],[])
+                 if vol_now.get(s,0) > 100_000][:5]
+
+        msg = (
+            "💰 *سيولة تدخل — {}*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📈 الحجم: `{:.1f}×` المعدل 🔥\n"
+            "📊 متوسط القطاع: `{:+.1f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "👀 عملات القطاع: {}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⏳ _انتظر الجوكر في هذا القطاع_ 🃏"
+        ).format(
+            top[0], top[1], top[2],
+            " | ".join(["*{}*".format(c) for c in coins]) or "—"
+        )
+        send(msg)
+        log.info("💰 FLOW IN | %s | ratio=%.1fx | chg=%.1f%%",
+                 top[0], top[1], top[2])
+
+    # ── خروج سيولة فقط ──
+    elif flowing_out and not flowing_in:
+        top = flowing_out[0]
+        alert_key = "out_{}".format(top[0])
+        if now - sector_flow_alerted.get(alert_key, 0) < FLOW_ALERT_COOLDOWN:
+            return
+        sector_flow_alerted[alert_key] = now
+
+        coins = [s.replace("USDT","") for s in SECTORS.get(top[0],[])
+                 if vol_now.get(s,0) > 100_000][:5]
+
+        msg = (
+            "🚨 *سيولة تخرج — {}*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📉 الحجم: `{:.1f}×` المعدل ⚠️\n"
+            "📊 متوسط القطاع: `{:+.1f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ عملات القطاع: {}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🛑 _ابتعد عن هذا القطاع الآن_"
+        ).format(
+            top[0], top[1], top[2],
+            " | ".join(["*{}*".format(c) for c in coins]) or "—"
+        )
+        send(msg)
+        log.info("🚨 FLOW OUT | %s | ratio=%.1fx | chg=%.1f%%",
+                 top[0], top[1], top[2])
+
+
 def check_btc_dominance(vol_now):
     # type: (Dict) -> None
     """
@@ -5361,8 +5782,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
     results = []
     for sym, vol in ranked:
-        _min_vol = 500_000 if sym in EXTRA_COINS else 1_000_000
-        if vol < _min_vol:  # 🛡️ EXTRA_COINS=500K | عادية=1M
+        _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
+        if vol < _min_vol:  # 🛡️ EXTRA_COINS=100K | عادية=1M
             continue
         # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
@@ -5416,7 +5837,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             score += 12
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
-        if score >= 55 and len(signals) >= 2 and stats["tps"] >= 0.5:  # 🐌 ضعيف جداً = تجاهل
+        _tps_min = 0.2 if sym in EXTRA_COINS else 0.5  # EXTRA=تجميع بطيء | عادية=نشاط حقيقي
+        if score >= 55 and len(signals) >= 2 and stats["tps"] >= _tps_min:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
@@ -5443,7 +5865,13 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             "━━━━━━━━━━━━━━━━━━\n"
             "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n"
-            "{}\n".format("🐌 نشاط ضعيف جداً" if stats["tps"] < 0.5 else ("🐢 نشاط عادي" if stats["tps"] < 1.0 else ("⚡ نشاط جيد" if stats["tps"] < 3.0 else ("🔥 نشاط قوي" if stats["tps"] < 5.0 else "💥 نشاط انفجاري")))) +
+            "{}\n".format(
+                "🐢 بداية دخول سيولة 💧" if (sym in EXTRA_COINS and stats["tps"] < 0.5) else
+                ("🐌 نشاط ضعيف جداً"    if stats["tps"] < 0.2 else
+                ("🐢 نشاط عادي"          if stats["tps"] < 1.0 else
+                ("⚡ نشاط متصاعد"        if stats["tps"] < 3.0 else
+                ("🔥 نشاط قوي"           if stats["tps"] < 5.0 else
+                 "💥 نشاط انفجاري"))))) +
             "💰 ATS:    `{:.0f}$`  🦐 أفراد\n".format(stats["ats"]) +
             "📊 VDelta: `{:.0f}%` شراء\n".format(stats["vdelta"]*100) +
             "━━━━━━━━━━━━━━━━━━\n"
@@ -7047,17 +7475,18 @@ def send_daily_report():
     now_utc  = datetime.utcnow()
     today    = now_utc.strftime("%Y-%m-%d")
 
-    # أرسل مرة واحدة في اليوم
+    # ── يرسل عند 00:00 UTC فقط (إغلاق اليوم) ──
+    # إلا إذا طُلب يدوياً عبر /report
+    if now_utc.hour != 0 and not _force_daily_report:
+        return
+
+    # أرسل مرة واحدة في اليوم فقط
     if daily_report_sent_date == today:
         log.debug("📊 تقرير اليوم أُرسل مسبقاً: %s", today)
         return
-    # نافذة: 00:00 → 06:00 UTC
-    # إذا لم يُرسل بعد → يرسل في أول دورة بعد منتصف الليل
-    # حتى لو أُعيد تشغيل البوت في 01:00 أو 05:00
-    if now_utc.hour >= 6:
-        log.debug("📊 انتظار 00:00 UTC | الساعة الآن: %02d:%02d", now_utc.hour, now_utc.minute)
-        return
-    log.info("📊 إرسال التقرير اليومي | %s", today)
+
+    log.info("📊 إرسال التقرير اليومي | %s | الساعة: %02d:%02d UTC",
+             today, now_utc.hour, now_utc.minute)
 
     daily_report_sent_date = today
 
@@ -8299,6 +8728,16 @@ def run():
             # 🆕 V16: كشف التجميع الخفي — كل 10 دقائق
             if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
+
+            # 🚨 PUMP/DUMP — كل دورة (12 ثانية)
+            update_pump_dump_history(price_map, vol_now)
+            scan_pump_dump(price_map, vol_now, change_now)
+
+            # 🌊 MARKET PULSE — كل 30 دقيقة
+            scan_market_pulse(price_map, vol_now, change_now)
+
+            # 🌊 LIQUIDITY FLOW TRACKER — كل 5 دقائق
+            track_liquidity_flow(vol_now, change_now)
 
             # 🔥 LIQUIDITY HUNTER — كل 5 دقائق
             # ⚡ TPS/ATS + LZ Fusion + Whale — كل 5 دقائق
