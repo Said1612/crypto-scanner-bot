@@ -7529,6 +7529,14 @@ def send_daily_report():
     log.info("📅 Daily Report — إرسال تقرير إغلاق اليوم...")
 
     if not all_tickers:
+        log.warning("📊 التقرير: all_tickers فارغة — إعادة المحاولة بعد 10 ثوانٍ")
+        send("⏳ جاري تحميل البيانات — سيصل التقرير خلال ثوانٍ...")
+        import threading
+        def _retry():
+            import time as _t
+            _t.sleep(15)
+            send_daily_report_forced()
+        threading.Thread(target=_retry, daemon=True).start()
         return
     vol_now = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in all_tickers}
 
