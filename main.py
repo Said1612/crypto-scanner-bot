@@ -36,14 +36,10 @@ from typing import Optional, Dict, List, Tuple, Any, Set
 STATE_FILE = "/app/mafio_state.json"
 
 # ── Upstash Redis ────────────────────────────
+# ── Upstash Redis REST API ───────────────────
 REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY   = "mafio_bot_state_v16"
-
-
-# ── Redis (Upstash) ───────────────────────────
-REDIS_URL  = os.environ.get("REDIS_URL",  "redis://default:Ac91AAIncDE0YmJiZTY2NjFlYzU0YTgxYTQ0MzhiMzZiMjVkYzIxYnAxNTMxMDk@one-chicken-53109.upstash.io:6379")
-REDIS_KEY  = "mafio_state_v16"  # مفتاح الحفظ في Redis
 
 
 # عملات محظورة — لا تدخل Watchlist أبداً
@@ -885,12 +881,15 @@ def poll_commands():
     # type: () -> None
     """يستمع لأوامر Telegram ويرسل التقرير فوراً عند الطلب"""
     global _tg_offset, daily_report_sent_date
+    # لا تشتغل إذا لم يُضبط الـ Token
+    if "YOUR" in TELEGRAM_TOKEN or not TELEGRAM_TOKEN:
+        return
     try:
         url = "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=3&allowed_updates=message".format(
             TELEGRAM_TOKEN, _tg_offset)
         r = requests.get(url, timeout=10)
         if r.status_code != 200:
-            log.warning("⚠️ getUpdates HTTP %d", r.status_code)
+            log.debug("⚠️ getUpdates HTTP %d", r.status_code)
             return
         data = r.json()
         if not data.get("ok"):
@@ -7284,13 +7283,18 @@ def run_daily_liquidity_scan():
         # إشارة نادرة؟
         rare_tag = "\n🐋🔥 *RARE — نادر جداً!*" if sigma >= LZ_TOUCHES_RARE else ""
 
+        # حساب R:R نسبة المخاطرة/المكافأة
+        _risk   = sl_pct
+        _reward = target_pct
+        _rr     = round(_reward / _risk, 1) if _risk > 0 else 1.5
+
         # تمييز WATCH vs BUY
-        sig_type = sig.get("type", "BUY")
+        sig_type = signal.get("type", "BUY")
         if sig_type == "WATCH":
             sig_icon  = "👁️"
             sig_title = "LIQUIDITY WATCH"
             sig_desc  = "السعر داخل منطقة السيولة — تجميع مبكر"
-            action_txt = "⏳ _راقب — انتظر الإغلاق فوق {:.5f}_".format(sig["zone_high"])
+            action_txt = "⏳ _راقب — انتظر الإغلاق فوق {:.5f}_".format(signal["zone_high"])
         else:
             sig_icon  = "🌊"
             sig_title = "DAILY LIQUIDITY SIGNAL V16"
@@ -8245,61 +8249,6 @@ def fmt_price(p):
 # REDIS PERSISTENCE — حفظ دائم عبر Upstash
 # ═══════════════════════════════════════════════
 
-def redis_save(data_json):
-    # type: (str) -> bool
-    """حفظ البيانات في Redis عبر HTTP"""
-    try:
-        import base64
-        # Upstash REST API
-        host = "one-chicken-53109.upstash.io"
-        token = "Ac91AAIncDE0YmJiZTY2NjFlYzU0YTgxYTQ0MzhiMzZiMjVkYzIxYnAxNTMxMDk"
-        url   = "https://{}/set/{}/{}".format(
-            host, REDIS_KEY,
-            requests.utils.quote(data_json, safe="")
-        )
-        resp = requests.get(
-            url,
-            headers={"Authorization": "Bearer " + token},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            log.info("☁️ Redis saved OK")
-            return True
-        else:
-            log.error("❌ Redis save failed: %s", resp.text[:100])
-            return False
-    except Exception as e:
-        log.error("❌ redis_save error: %s", e)
-        return False
-
-
-def redis_load():
-    # type: () -> str
-    """تحميل البيانات من Redis"""
-    try:
-        host  = "one-chicken-53109.upstash.io"
-        token = "Ac91AAIncDE0YmJiZTY2NjFlYzU0YTgxYTQ0MzhiMzZiMjVkYzIxYnAxNTMxMDk"
-        url   = "https://{}/get/{}".format(host, REDIS_KEY)
-        resp  = requests.get(
-            url,
-            headers={"Authorization": "Bearer " + token},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            result = resp.json().get("result")
-            if result:
-                log.info("☁️ Redis loaded OK")
-                return result
-        return ""
-    except Exception as e:
-        log.error("❌ redis_load error: %s", e)
-        return ""
-
-
-# ═══════════════════════════════════════════════
-# REDIS PERSISTENCE — حفظ دائم عبر Upstash
-# ═══════════════════════════════════════════════
-
 def redis_save(data):
     # type: (dict) -> bool
     """حفظ البيانات في Upstash Redis"""
@@ -8886,58 +8835,3 @@ def run():
 
 if __name__ == "__main__":
     run()    # ────────────────────────────────────────
-    # حساب Breakout + Stablecoins مباشرة
-    # ────────────────────────────────────────
-    _ALPHA=10; _STBL={"FDUSD","USDC","BUSD","DAI","TUSD","BFUSD","USDE","CRVUSD","USDD","XUSD"}
-    _bc=[]; _sh=[]; _bvt=0.0; _svt=0.0
-    for _t in all_tickers:
-        _sym=_t.get("symbol",""); _base=_sym.replace("USDT","")
-        if not _sym.endswith("USDT") or any(k in _sym for k in LEVERAGE_KEYWORDS): continue
-        try: _v=float(_t["quoteVolume"]); _c=float(_t["priceChangePercent"])
-        except: continue
-        if _v<100_000: continue
-        _h=coin_vol_history.get(_sym,[]); _ah=sum(_h)/len(_h) if len(_h)>=3 else _v
-        _sig=round(_v/_ah,1) if _ah>0 else 1.0
-        if _c>0: _bvt+=_v
-        else: _svt+=_v
-        _is_s=_base in _STBL or _base.startswith("USD") or _base.endswith("USD")
-        if _is_s and _v>=500_000: _sh.append({"base":_base,"vol":_v,"sigma":_sig})
-        if _sig>=_ALPHA and not _is_s: _bc.append({"base":_base,"sigma":_sig,"ch":_c})
-    _bc.sort(key=lambda x:-x["sigma"]); _sh.sort(key=lambda x:-x["vol"])
-    _tv=_bvt+_svt; _svp=_svt/_tv*100 if _tv>0 else 50
-    _ts=sum(s["vol"] for s in _sh); _stp=_ts/_tv*100 if _tv>0 else 0
-    market_activity_history.append({"date":today,"buy_vol":_bvt,"sell_vol":_svt,
-        "buy_pct":_bvt/_tv*100 if _tv>0 else 50,"stable_pct":_stp,"sigma_count":len(_bc)})
-    if len(market_activity_history)>30: market_activity_history.pop(0)
-    breakout_report_sent["date"] = today
-    if _stp>=20 and _svp>=55: _ssig="🚨 هروب ضخم Stablecoins"
-    elif _stp>=15: _ssig="⚠️ حيتان يحتفظون Stablecoins"
-    elif _stp>=8: _ssig="👀 تجميع خفيف"
-    else: _ssig="✅ Stablecoins طبيعية"
-    _stxt=""
-    for _sx in _sh[:5]:
-        _wh=" 🐳" if _sx["sigma"]>=3.0 else ""
-        _stxt+="  💵 *"+_sx["base"]+"* | `"+str(round(_sx["vol"]/1e6,1))+"M` | σ`"+str(_sx["sigma"])+"` "+_wh+"\n"
-    if not _stxt: _stxt="  لا يوجد\n"
-    _ctxt=""
-    for _co in _bc[:8]:
-        _d2="🟢" if _co["ch"]>0 else "🔴"
-        _ctxt+="• *"+_co["base"]+"* "+_d2+" Sigma`"+str(int(_co["sigma"]))+"` (Alpha:10)\n"
-    if not _ctxt: _ctxt="• لا توجد عملات\n"
-    _SEP="━"*18
-    _brk=(_SEP+"\n"
-        +"🐳 *احتفاظ الحيتان Stablecoins:* `"+str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
-        +_stxt+_ssig+"\n"
-        +_SEP+"\n"
-        +"*"+str(len(_bc))+" عملة* Sigma>=10:\n"+_ctxt)
-    _trnd=""
-    if len(market_activity_history)>=2:
-        _trnd=_SEP+"\n📊 *Market Activity Trend* (كل الأيام المتاحة)\n"
-        for _e in market_activity_history:
-            _bp2=_e["buy_pct"]; _stp2=_e.get("stable_pct",0); _sc=_e.get("sigma_count",0)
-            _ic="🟢" if _bp2>=55 else "🔴" if _bp2<=45 else "🟡"
-            _trnd+="`"+_e["date"][5:]+"` "+_ic+" "+str(round(_bp2,0))+"%B | 🐳"+str(round(_stp2,1))+"%S | σ"+str(_sc)+"\n"
-        _trnd+=_SEP
-    send(msg+"\n"+_brk+"\n"+_trnd)
-    log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
-             rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
