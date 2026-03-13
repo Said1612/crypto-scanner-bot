@@ -5882,18 +5882,51 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         coin_signal_count[sym] = 1
         _sig_num = 1
 
+        # ── نحاول إيجاد أقرب منطقة سيولة ──
+        _lz_block = ""
+        try:
+            _klines = safe_get(
+                "https://api.binance.com/api/v3/klines",
+                {"symbol": sym, "interval": "1h", "limit": 100}
+            )
+            if _klines and len(_klines) >= 20:
+                _highs  = [float(k[2]) for k in _klines]
+                _lows   = [float(k[3]) for k in _klines]
+                _closes = [float(k[4]) for k in _klines]
+                _cp     = price_map.get(sym, _closes[-1])
+                # نجد أقرب منطقة دعم وأقرب مقاومة
+                _support = max([l for l in _lows[-50:] if l < _cp * 0.995], default=0)
+                _resist  = min([h for h in _highs[-50:] if h > _cp * 1.005], default=0)
+                if _support > 0 and _resist > 0:
+                    _risk    = _cp - _support
+                    _reward  = _resist - _cp
+                    _rr      = round(_reward / _risk, 1) if _risk > 0 else 0
+                    _target_pct = round((_resist - _cp) / _cp * 100, 1)
+                    if _rr >= 1.5:
+                        _lz_block = (
+                            "📍 منطقة: `{:.6g}` ← `{:.6g}`\n".format(_support, _resist) +
+                            "⚖️ R/R: `{}:1` | 🎯 `{:.6g}` (`{:+.1f}%`)\n".format(
+                                _rr, _resist, _target_pct)
+                        )
+        except Exception:
+            pass
+
+        _tps_label = (
+            "🐢 بداية دخول سيولة 💧" if (sym in EXTRA_COINS and stats["tps"] < 0.5) else
+            ("🐌 نشاط ضعيف جداً"    if stats["tps"] < 0.2 else
+            ("🐢 نشاط عادي"          if stats["tps"] < 1.0 else
+            ("⚡ نشاط متصاعد"        if stats["tps"] < 3.0 else
+            ("🔥 نشاط قوي"           if stats["tps"] < 5.0 else
+             "💥 نشاط انفجاري"))))
+        )
+
         msg = (
             "👁️ *WATCH ALERT*\n" +
             "━━━━━━━━━━━━━━━━━━\n"
             "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "{}\n".format(
-                "🐢 بداية دخول سيولة 💧" if (sym in EXTRA_COINS and stats["tps"] < 0.5) else
-                ("🐌 نشاط ضعيف جداً"    if stats["tps"] < 0.2 else
-                ("🐢 نشاط عادي"          if stats["tps"] < 1.0 else
-                ("⚡ نشاط متصاعد"        if stats["tps"] < 3.0 else
-                ("🔥 نشاط قوي"           if stats["tps"] < 5.0 else
-                 "💥 نشاط انفجاري"))))) +
+            "━━━━━━━━━━━━━━━━━━\n" +
+            (_lz_block + "━━━━━━━━━━━━━━━━━━\n" if _lz_block else "") +
+            "{}\n".format(_tps_label) +
             "💰 ATS:    `{:.0f}$`  🦐 أفراد\n".format(stats["ats"]) +
             "📊 VDelta: `{:.0f}%` شراء\n".format(stats["vdelta"]*100) +
             "━━━━━━━━━━━━━━━━━━\n"
