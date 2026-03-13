@@ -919,6 +919,17 @@ def poll_commands():
             if text_lower in ("/report", "/تقرير"):
                 log.info("📤 /report طُلب من chat_id=%s", chat_id)
                 send("\U0001f4e4 جاري إعداد التقرير...")
+                # ✅ نجلب all_tickers مباشرة إذا كانت فارغة
+                global all_tickers
+                if not all_tickers:
+                    log.info("📤 /report: all_tickers فارغة — نجلبها الآن")
+                    try:
+                        _r = safe_get("https://api.binance.com/api/v3/ticker/24hr")
+                        if _r:
+                            all_tickers = _r
+                            log.info("📤 all_tickers جُلبت: %d عملة", len(all_tickers))
+                    except Exception as _e:
+                        log.error("📤 فشل جلب all_tickers: %s", _e)
                 daily_report_sent_date = ""
                 lz_daily_sent_date     = ""
                 _force_daily_report    = True
