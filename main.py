@@ -5312,6 +5312,9 @@ def update_pump_dump_history(price_map, vol_now):
         vol = vol_now.get(sym, 0)
         if sym not in pump_dump_history:
             pump_dump_history[sym] = []
+        # ✅ تأكد أن القيمة list
+        if not isinstance(pump_dump_history[sym], list):
+            pump_dump_history[sym] = []
         pump_dump_history[sym].append((now, price, vol))
         # نحتفظ بآخر 10 دقائق فقط
         pump_dump_history[sym] = [
@@ -5546,6 +5549,9 @@ def track_liquidity_flow(vol_now, change_now):
     # ── تحديث التاريخ ──
     for sector, vol in sector_vol_now.items():
         if sector not in sector_vol_history:
+            sector_vol_history[sector] = []
+        # ✅ تأكد أن القيمة list وليس float (من load_state)
+        if not isinstance(sector_vol_history[sector], list):
             sector_vol_history[sector] = []
         sector_vol_history[sector].append(vol)
         if len(sector_vol_history[sector]) > 12:  # آخر ساعة
