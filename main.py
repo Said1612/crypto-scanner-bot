@@ -5924,10 +5924,11 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             "👁️ *WATCH ALERT*\n" +
             "━━━━━━━━━━━━━━━━━━\n"
             "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
+            "💵 السعر: `{}`\n".format(fmt_price(price_map.get(sym, 0))) +
             "━━━━━━━━━━━━━━━━━━\n" +
             (_lz_block + "━━━━━━━━━━━━━━━━━━\n" if _lz_block else "") +
             "{}\n".format(_tps_label) +
-            "💰 ATS:    `{:.0f}$`  🦐 أفراد\n".format(stats["ats"]) +
+            "📡 TPS:    `{:.2f}` | ATS: `{:.0f}$` 🦐 أفراد\n".format(stats["tps"], stats["ats"]) +
             "📊 VDelta: `{:.0f}%` شراء\n".format(stats["vdelta"]*100) +
             "━━━━━━━━━━━━━━━━━━\n"
             "💪 القوة: `{}/100` {}\n".format(score, rarity) +
