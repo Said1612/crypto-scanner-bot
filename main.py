@@ -917,16 +917,16 @@ def poll_commands():
                 continue
             # أوامر
             if text_lower in ("/report", "/تقرير"):
-                send("\U0001f4e4 تم طلب التقرير يدوياً...")
-                daily_report_sent_date = ""  # إعادة تعيين لإجبار الإرسال
-                send_daily_report_forced()
+                log.info("📤 /report طُلب من chat_id=%s", chat_id)
+                send("\U0001f4e4 جاري إعداد التقرير...")
+                daily_report_sent_date = ""
+                lz_daily_sent_date     = ""
+                _force_daily_report    = True
+                send_daily_report()
+                _force_daily_report    = False
             elif text_lower in ("/status", "/حالة"):
                 send("\u2705 البوت يعمل | عملات: " + str(len(candidates)) +
                      " | جواهر: " + str(len(gem_watchlist)))
-            elif text_lower in ("/report", "/تقرير"):
-                send_daily_report_forced()
-                run_daily_liquidity_scan()
-
             elif text_lower in ("/watchlist", "/مراقبة"):
                 if not watchlist:
                     send("👁️ قائمة المراقبة فارغة")
@@ -1066,8 +1066,13 @@ def send_daily_report_forced():
     daily_report_sent_date = ""   # إلغاء قيد التاريخ
     lz_daily_sent_date     = ""   # إلغاء قيد السيولة
     _force_daily_report    = True # تجاوز قيد الساعة
-    send_daily_report()
-    _force_daily_report    = False
+    try:
+        send_daily_report()
+    except Exception as e:
+        log.error("❌ خطأ في التقرير اليدوي: %s", e)
+        send("❌ خطأ في التقرير: {}".format(str(e)))
+    finally:
+        _force_daily_report = False
 
 
 
@@ -7494,7 +7499,7 @@ def send_daily_report():
     log.info("📊 إرسال التقرير اليومي | %s | الساعة: %02d:%02d UTC",
              today, now_utc.hour, now_utc.minute)
 
-    daily_report_sent_date = today
+    daily_report_sent_date = today  # ✅ نسجل مبكراً لمنع التكرار
 
     # ── تقرير Backtest اليومي ──────────────────
     if backtest_signals:
@@ -7529,13 +7534,16 @@ def send_daily_report():
     log.info("📅 Daily Report — إرسال تقرير إغلاق اليوم...")
 
     if not all_tickers:
-        log.warning("📊 التقرير: all_tickers فارغة — إعادة المحاولة بعد 10 ثوانٍ")
-        send("⏳ جاري تحميل البيانات — سيصل التقرير خلال ثوانٍ...")
+        log.warning("📊 التقرير: all_tickers فارغة — إعادة المحاولة بعد 30 ثانية")
+        send("⏳ جاري تحميل البيانات — سيصل التقرير خلال 30 ثانية...")
         import threading
         def _retry():
             import time as _t
-            _t.sleep(15)
-            send_daily_report_forced()
+            _t.sleep(30)
+            # نصفر التاريخ ثم نحاول مرة واحدة فقط
+            global daily_report_sent_date
+            daily_report_sent_date = ""
+            send_daily_report()
         threading.Thread(target=_retry, daemon=True).start()
         return
     vol_now = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in all_tickers}
