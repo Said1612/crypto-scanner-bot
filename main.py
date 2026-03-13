@@ -8733,8 +8733,8 @@ def run():
             update_pump_dump_history(price_map, vol_now)
             scan_pump_dump(price_map, vol_now, change_now)
 
-            # 🌊 MARKET PULSE — كل 30 دقيقة
-            scan_market_pulse(price_map, vol_now, change_now)
+            # 🌊 MARKET PULSE — معطّل (DAILY REPORT يكفي)
+            # scan_market_pulse(price_map, vol_now, change_now)
 
             # 🌊 LIQUIDITY FLOW TRACKER — كل 5 دقائق
             track_liquidity_flow(vol_now, change_now)
