@@ -8537,6 +8537,21 @@ def run():
     global perf_signals, perf_id_counter     # 📊 Performance Tracker
 
     log.info("🚀 MAFIO BOT V16 يبدأ...")
+
+    # ✅ نحذف Webhook ونمسح أي تعارض عند البداية
+    try:
+        import requests as _rq
+        _rq.get(
+            "https://api.telegram.org/bot{}/deleteWebhook?drop_pending_updates=true".format(TELEGRAM_TOKEN),
+            timeout=10
+        )
+        log.info("✅ Webhook محذوف عند البداية")
+    except Exception as _e:
+        log.warning("deleteWebhook error: %s", _e)
+
+    # ✅ انتظار 5 ثوانٍ للتأكد من توقف النسخة القديمة
+    time.sleep(5)
+
     load_state()  # استعادة البيانات من آخر تشغيل
 
     log.info("⏳ تحميل بيانات السوق...")
