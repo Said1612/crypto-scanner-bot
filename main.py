@@ -7593,17 +7593,8 @@ def _send_daily_report_body(today, now_utc):
     log.info("📅 Daily Report — إرسال تقرير إغلاق اليوم...")
 
     if not all_tickers:
-        log.warning("📊 التقرير: all_tickers فارغة — إعادة المحاولة بعد 30 ثانية")
-        send("⏳ جاري تحميل البيانات — سيصل التقرير خلال 30 ثانية...")
-        import threading
-        def _retry():
-            import time as _t
-            _t.sleep(30)
-            # نصفر التاريخ ثم نحاول مرة واحدة فقط
-            global daily_report_sent_date
-            daily_report_sent_date = ""
-            send_daily_report()
-        threading.Thread(target=_retry, daemon=True).start()
+        log.warning("📊 التقرير: all_tickers فارغة")
+        send("⚠️ البيانات غير جاهزة — أعد المحاولة بعد دقيقة")
         return
     vol_now = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in all_tickers}
 
