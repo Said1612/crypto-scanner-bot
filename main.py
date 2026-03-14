@@ -8833,7 +8833,7 @@ def run():
                 log.info("✅ Deep Scan انتهى | %d عملة", scanned)
 
             cycle += 1
-            send_report()
+            # send_report() — معطّل (تقرير V15 القديم)
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
@@ -8845,59 +8845,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()    # ────────────────────────────────────────
-    # حساب Breakout + Stablecoins مباشرة
-    # ────────────────────────────────────────
-    _ALPHA=10; _STBL={"FDUSD","USDC","BUSD","DAI","TUSD","BFUSD","USDE","CRVUSD","USDD","XUSD"}
-    _bc=[]; _sh=[]; _bvt=0.0; _svt=0.0
-    for _t in all_tickers:
-        _sym=_t.get("symbol",""); _base=_sym.replace("USDT","")
-        if not _sym.endswith("USDT") or any(k in _sym for k in LEVERAGE_KEYWORDS): continue
-        try: _v=float(_t["quoteVolume"]); _c=float(_t["priceChangePercent"])
-        except: continue
-        if _v<100_000: continue
-        _h=coin_vol_history.get(_sym,[]); _ah=sum(_h)/len(_h) if len(_h)>=3 else _v
-        _sig=round(_v/_ah,1) if _ah>0 else 1.0
-        if _c>0: _bvt+=_v
-        else: _svt+=_v
-        _is_s=_base in _STBL or _base.startswith("USD") or _base.endswith("USD")
-        if _is_s and _v>=500_000: _sh.append({"base":_base,"vol":_v,"sigma":_sig})
-        if _sig>=_ALPHA and not _is_s: _bc.append({"base":_base,"sigma":_sig,"ch":_c})
-    _bc.sort(key=lambda x:-x["sigma"]); _sh.sort(key=lambda x:-x["vol"])
-    _tv=_bvt+_svt; _svp=_svt/_tv*100 if _tv>0 else 50
-    _ts=sum(s["vol"] for s in _sh); _stp=_ts/_tv*100 if _tv>0 else 0
-    market_activity_history.append({"date":today,"buy_vol":_bvt,"sell_vol":_svt,
-        "buy_pct":_bvt/_tv*100 if _tv>0 else 50,"stable_pct":_stp,"sigma_count":len(_bc)})
-    if len(market_activity_history)>30: market_activity_history.pop(0)
-    breakout_report_sent["date"] = today
-    if _stp>=20 and _svp>=55: _ssig="🚨 هروب ضخم Stablecoins"
-    elif _stp>=15: _ssig="⚠️ حيتان يحتفظون Stablecoins"
-    elif _stp>=8: _ssig="👀 تجميع خفيف"
-    else: _ssig="✅ Stablecoins طبيعية"
-    _stxt=""
-    for _sx in _sh[:5]:
-        _wh=" 🐳" if _sx["sigma"]>=3.0 else ""
-        _stxt+="  💵 *"+_sx["base"]+"* | `"+str(round(_sx["vol"]/1e6,1))+"M` | σ`"+str(_sx["sigma"])+"` "+_wh+"\n"
-    if not _stxt: _stxt="  لا يوجد\n"
-    _ctxt=""
-    for _co in _bc[:8]:
-        _d2="🟢" if _co["ch"]>0 else "🔴"
-        _ctxt+="• *"+_co["base"]+"* "+_d2+" Sigma`"+str(int(_co["sigma"]))+"` (Alpha:10)\n"
-    if not _ctxt: _ctxt="• لا توجد عملات\n"
-    _SEP="━"*18
-    _brk=(_SEP+"\n"
-        +"🐳 *احتفاظ الحيتان Stablecoins:* `"+str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
-        +_stxt+_ssig+"\n"
-        +_SEP+"\n"
-        +"*"+str(len(_bc))+" عملة* Sigma>=10:\n"+_ctxt)
-    _trnd=""
-    if len(market_activity_history)>=2:
-        _trnd=_SEP+"\n📊 *Market Activity Trend* (كل الأيام المتاحة)\n"
-        for _e in market_activity_history:
-            _bp2=_e["buy_pct"]; _stp2=_e.get("stable_pct",0); _sc=_e.get("sigma_count",0)
-            _ic="🟢" if _bp2>=55 else "🔴" if _bp2<=45 else "🟡"
-            _trnd+="`"+_e["date"][5:]+"` "+_ic+" "+str(round(_bp2,0))+"%B | 🐳"+str(round(_stp2,1))+"%S | σ"+str(_sc)+"\n"
-        _trnd+=_SEP
-    send(msg+"\n"+_brk+"\n"+_trnd)
-    log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
-             rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
+    run()
