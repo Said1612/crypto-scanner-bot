@@ -7855,12 +7855,12 @@ def _send_daily_report_body(today, now_utc):
         "━━━━━━━━━━━━━━━━━━\n"
         "📊 *نسبة الشراء/البيع (بالحجم):*\n"
         "{bar}\n"
-        "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol:.0f}M USDT)\n"
-        "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol:.0f}M USDT)\n"
+        "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol})\n"
+        "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol})\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *تدفق رأس المال:*\n"
         "  {arrow} حجم السوق: `{vol_ch}` عن أمس\n"
-        "  📦 إجمالي: `{total_vol:,.0f}M` USDT\n"
+        "  📦 إجمالي: `{total_vol}` USDT\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💸 *تدفق السيولة بين القطاعات:*\n"
         "{flow}"
@@ -7897,12 +7897,12 @@ def _send_daily_report_body(today, now_utc):
         rising=rising,  falling=falling,
         total=total_coins,
         buy=_buy_pct,    sell=_sell_pct,
-        buy_vol=_buy_vol/1_000_000,
-        sell_vol=_sell_vol/1_000_000,
+        buy_vol=("{:.2f}B".format(_buy_vol/1_000_000_000) if _buy_vol>=1_000_000_000 else "{:.0f}M".format(_buy_vol/1_000_000)),
+        sell_vol=("{:.2f}B".format(_sell_vol/1_000_000_000) if _sell_vol>=1_000_000_000 else "{:.0f}M".format(_sell_vol/1_000_000)),
         arrow=vol_arrow,
         vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "اول يوم 📊"),
         
-        total_vol=_total_vol / 1_000_000,
+        total_vol=("{:.2f}B".format(_total_vol/1_000_000_000) if _total_vol>=1_000_000_000 else "{:.0f}M".format(_total_vol/1_000_000)),
         vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "أول يوم"),
 
         flow=flow_sum,
@@ -8834,8 +8834,6 @@ def run():
 
             cycle += 1
             send_report()
-            # 🆕 V15: تقرير يومي — يُفحص كل دورة، يُرسل عند 00:00→05:59 UTC
-            send_daily_report()
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
