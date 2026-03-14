@@ -1325,7 +1325,7 @@ def pre_filter(sym, change, vol, price=0.0):
 # ═══════════════════════════════════════════════
 def analyze_btc():
     # type: () -> None
-    global btc_change_24h, btc_trend_1h, market_state, last_btc
+    global btc_change_24h, btc_trend_1h, btc_trend_4h, market_state, last_btc
     global last_market_report
     global eth_change_24h
 
@@ -1540,7 +1540,12 @@ def analyze_sectors():
 
         avg_ch     = sum(changes) / len(changes)
         rising_pct = sum(1 for c in changes if c > 0) / len(changes) * 100
-        prev_vol   = sector_vol_history.get(sector, total_vol)
+        # ✅ sector_vol_history قد يكون list (من Flow Tracker) أو float
+        _prev = sector_vol_history.get(sector, total_vol)
+        if isinstance(_prev, list):
+            prev_vol = _prev[-1] if _prev else total_vol
+        else:
+            prev_vol = _prev
         vol_ratio  = total_vol / prev_vol if prev_vol > 0 else 1.0
         sector_vol_history[sector] = total_vol
 
