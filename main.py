@@ -36,10 +36,14 @@ from typing import Optional, Dict, List, Tuple, Any, Set
 STATE_FILE = "/app/mafio_state.json"
 
 # ── Upstash Redis ────────────────────────────
-# ── Upstash Redis REST API ───────────────────
 REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY   = "mafio_bot_state_v16"
+
+
+# ── Redis (Upstash) ───────────────────────────
+REDIS_URL  = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL", ""))
+REDIS_KEY  = "mafio_state_v16"  # مفتاح الحفظ في Redis
 
 
 # عملات محظورة — لا تدخل Watchlist أبداً
@@ -331,7 +335,6 @@ MEXC_PRICE  = "https://api.mexc.com/api/v3/ticker/price"
 MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
 MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
 MEXC_TRADES = "https://api.mexc.com/api/v3/trades"  # ⚡ TPS/ATS
-MEXC_TRADES = "https://api.mexc.com/api/v3/trades"  # 🆕 Recent Trades للـ TPS/ATS
 
 EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
             # عملات مشبوهة أو مستقرة تظهر في النتائج
@@ -833,7 +836,7 @@ session.headers.update({"User-Agent": "MafioBot/11.0"})
 # ═══════════════════════════════════════════════
 #   HELPERS
 # ═══════════════════════════════════════════════
-def format_price(p):
+def fmt_price(p):
     # type: (float) -> str
     if p == 0: return "0"
     if p < 0.0001:  return "{:.10f}".format(p).rstrip("0")
@@ -881,15 +884,12 @@ def poll_commands():
     # type: () -> None
     """يستمع لأوامر Telegram ويرسل التقرير فوراً عند الطلب"""
     global _tg_offset, daily_report_sent_date
-    # لا تشتغل إذا لم يُضبط الـ Token
-    if "YOUR" in TELEGRAM_TOKEN or not TELEGRAM_TOKEN:
-        return
     try:
         url = "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=3&allowed_updates=message".format(
             TELEGRAM_TOKEN, _tg_offset)
         r = requests.get(url, timeout=10)
         if r.status_code != 200:
-            log.debug("⚠️ getUpdates HTTP %d", r.status_code)
+            log.warning("⚠️ getUpdates HTTP %d", r.status_code)
             return
         data = r.json()
         if not data.get("ok"):
@@ -923,7 +923,7 @@ def poll_commands():
                 if not all_tickers:
                     log.info("📤 /report: all_tickers فارغة — نجلبها الآن")
                     try:
-                        _r = safe_get("https://api.binance.com/api/v3/ticker/24hr")
+                        _r = safe_get(MEXC_24H)
                         if _r:
                             all_tickers = _r
                             log.info("📤 all_tickers جُلبت: %d عملة", len(all_tickers))
@@ -931,9 +931,7 @@ def poll_commands():
                         log.error("📤 فشل جلب all_tickers: %s", _e)
                 daily_report_sent_date = ""
                 lz_daily_sent_date     = ""
-                _force_daily_report    = True
-                send_daily_report()
-                _force_daily_report    = False
+                send_daily_report(force=True)
             elif text_lower in ("/status", "/حالة"):
                 send("\u2705 البوت يعمل | عملات: " + str(len(candidates)) +
                      " | جواهر: " + str(len(gem_watchlist)))
@@ -2162,7 +2160,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
             i=i,
             hot=hot_icon,
             sym=c["sym"].replace("USDT", ""),
-            price=format_price(c["price"]),
+            price=fmt_price(c["price"]),
             ch=c["ch"],
             ratio=c["vol_ratio"],
             reb=c["rebound"],
@@ -3947,7 +3945,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                     "━━━━━━━━━━━━━━━━━━\n"
                     "✅ *ادخل الآن — السيولة تتدفق*".format(
                         sym=sym, gain=gain, ratio=vol_ratio,
-                        price=format_price(price), drop=drop_from_high,
+                        price=fmt_price(price), drop=drop_from_high,
                         top="🏆 *أفضل عملات القطاع:*\n{}\n".format(top10_txt) if top10_txt else "",
                         time=datetime.now().strftime("%H:%M:%S"),
                     )
@@ -3975,7 +3973,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                     "━━━━━━━━━━━━━━━━━━\n"
                     "🚀 *سيولة قوية — ارفع Stop Loss*".format(
                         sym=sym, gain=gain, ratio=vol_ratio,
-                        price=format_price(price), close=close_icon,
+                        price=fmt_price(price), close=close_icon,
                         time=datetime.now().strftime("%H:%M:%S"),
                     )
                 )
@@ -4074,7 +4072,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                 hot=hot_tag, flow=flow_tag, wl=wl_tag,
                 sym=sym, sector=sector if sector else "—",
                 move=move, ch=change_24h, vol=vol,
-                price=format_price(price),
+                price=fmt_price(price),
                 drop=drop_from_high, reb=rebound,
                 top="🏆 *أفضل عملات القطاع:*\n{}\n".format(top10_txt) if top10_txt else "",
                 time=datetime.now().strftime("%H:%M:%S"),
@@ -4120,6 +4118,7 @@ def _classify_symbol(base):
     return best_sector if best_score >= 2 else None
 
 
+# ⚠️ تضيف عملات تلقائياً — تأكد من المراجعة قبل الإنتاج
 def auto_expand_sectors():
     # type: () -> None
     """
@@ -4656,22 +4655,7 @@ def analyze_tps_ats(sym):
 
 
 
-def fmt_price(price):
-    # type: (float) -> str
-    """تنسيق السعر حسب حجمه — يحل مشكلة 0.0000"""
-    if price <= 0:
-        return "0"
-    elif price >= 1000:
-        return "{:,.2f}".format(price)
-    elif price >= 1:
-        return "{:.4f}".format(price)
-    elif price >= 0.01:
-        return "{:.6f}".format(price)
-    elif price >= 0.0001:
-        return "{:.8f}".format(price)
-    else:
-        # أسعار صغيرة جداً مثل DOGS, SHIB
-        return "{:.10f}".format(price).rstrip("0")
+# ✅ fmt_price موحّدة — انظر التعريف الأسفل
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -5885,7 +5869,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _lz_block = ""
         try:
             _klines = safe_get(
-                "https://api.binance.com/api/v3/klines",
+                MEXC_KLINES,
                 {"symbol": sym, "interval": "1h", "limit": 100}
             )
             if _klines and len(_klines) >= 20:
@@ -6711,8 +6695,8 @@ def check_trailing(symbol, price):
             "💵 دخول: `{}` | خروج: `{}`\n"
             "📈 القمة كانت: `{}`".format(
                 symbol, emoji, result,
-                format_price(entry), format_price(price),
-                format_price(peak)
+                fmt_price(entry), fmt_price(price),
+                fmt_price(peak)
             )
         )
         log.info("🛑 Trailing: %s | %.2f%%", symbol, result)
@@ -6727,7 +6711,7 @@ def check_trailing(symbol, price):
             "📉 خسارة: `{:.2f}%` | SL: `-{}%`\n"
             "💵 دخول: `{}` ← الآن: `{}`".format(
                 symbol, change, sl_pct,
-                format_price(entry), format_price(price)
+                fmt_price(entry), fmt_price(price)
             )
         )
         log.info("🛑 SL: %s | %.2f%%", symbol, change)
@@ -6944,7 +6928,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
         "📉 24h: `{ch:+.1f}%` | BTC: `{btc:+.1f}%`\n"
         "⚠️ SL: `-{sl}%` | 🎯 Trailing: `{trail}%`".format(
             sym=symbol, label=label, stype=stype,
-            price=format_price(price), score=score,
+            price=fmt_price(price), score=score,
             time=datetime.now().strftime("%H:%M:%S"),
             mkt=mkt_icon, mst=market_state,
             sigs=sigs, ob=ob_txt,
@@ -6976,14 +6960,14 @@ def check_progression(symbol, price):
 
     if level == 1 and gain >= SIGNAL2_GAIN:
         send("{} *SIGNAL #2* | `{}`\n📈 *+{:.2f}%*\n💵 `{}` | SL:`-{}%`".format(
-            label, symbol, gain, format_price(price), sl))
+            label, symbol, gain, fmt_price(price), sl))
         tracked[symbol]["level"]      = 2
         tracked[symbol]["last_alert"] = now
         log.info("🔵 #2 | %s +%.2f%%", symbol, gain)
 
     elif level == 2 and gain >= SIGNAL3_GAIN:
         send("{} *SIGNAL #3* | `{}`\n🔥 *+{:.2f}%*\n💵 `{}` | SL:`-{}%`".format(
-            label, symbol, gain, format_price(price), sl))
+            label, symbol, gain, fmt_price(price), sl))
         tracked[symbol]["level"]      = 3
         tracked[symbol]["last_alert"] = now
         log.info("🔥 #3 | %s +%.2f%%", symbol, gain)
@@ -7283,18 +7267,13 @@ def run_daily_liquidity_scan():
         # إشارة نادرة؟
         rare_tag = "\n🐋🔥 *RARE — نادر جداً!*" if sigma >= LZ_TOUCHES_RARE else ""
 
-        # حساب R:R نسبة المخاطرة/المكافأة
-        _risk   = sl_pct
-        _reward = target_pct
-        _rr     = round(_reward / _risk, 1) if _risk > 0 else 1.5
-
         # تمييز WATCH vs BUY
-        sig_type = signal.get("type", "BUY")
+        sig_type = sig.get("type", "BUY")
         if sig_type == "WATCH":
             sig_icon  = "👁️"
             sig_title = "LIQUIDITY WATCH"
             sig_desc  = "السعر داخل منطقة السيولة — تجميع مبكر"
-            action_txt = "⏳ _راقب — انتظر الإغلاق فوق {:.5f}_".format(signal["zone_high"])
+            action_txt = "⏳ _راقب — انتظر الإغلاق فوق {:.5f}_".format(sig["zone_high"])
         else:
             sig_icon  = "🌊"
             sig_title = "DAILY LIQUIDITY SIGNAL V16"
@@ -7527,28 +7506,36 @@ def _get_smart_money_summary():
         return text
     except: return ""
 
-def send_daily_report():
-    # type: () -> None
+def send_daily_report(force=False):
+    # type: (bool) -> None
     global daily_report_sent_date, daily_market_vol_history
 
-    # ── التحقق من الوقت: هل نحن عند 00:00 UTC؟ ──
     now_utc  = datetime.utcnow()
     today    = now_utc.strftime("%Y-%m-%d")
 
-    # ── يرسل عند 00:00 UTC فقط (إغلاق اليوم) ──
-    # إلا إذا طُلب يدوياً عبر /report
-    if now_utc.hour != 0 and not _force_daily_report:
-        return
-
-    # أرسل مرة واحدة في اليوم فقط
-    if daily_report_sent_date == today:
-        log.debug("📊 تقرير اليوم أُرسل مسبقاً: %s", today)
-        return
+    # ── يرسل عند 00:00 UTC تلقائياً أو عند force=True ──
+    if not force and not _force_daily_report:
+        if now_utc.hour != 0:
+            return
+        if daily_report_sent_date == today:
+            log.debug("📊 تقرير اليوم أُرسل مسبقاً: %s", today)
+            return
 
     log.info("📊 إرسال التقرير اليومي | %s | الساعة: %02d:%02d UTC",
              today, now_utc.hour, now_utc.minute)
 
     daily_report_sent_date = today  # ✅ نسجل مبكراً لمنع التكرار
+
+    try:
+        _send_daily_report_body(today, now_utc)
+    except Exception as _err:
+        log.error("❌ send_daily_report فشل: %s", _err, exc_info=True)
+        send("❌ خطأ في التقرير: `{}`".format(str(_err)[:200]))
+
+def _send_daily_report_body(today, now_utc):
+    # type: (str, object) -> None
+    """الكود الفعلي للتقرير — منفصل لكشف الأخطاء"""
+    global daily_market_vol_history, market_activity_history
 
     # ── تقرير Backtest اليومي ──────────────────
     if backtest_signals:
@@ -7975,6 +7962,7 @@ def send_daily_report():
         send(_perf_block)
     log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
              rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
+    # ── نهاية _send_daily_report_body ──
 
 # ═══════════════════════════════════════════════════════
 #  🆕 FEATURE 1: Daily Breakout Report (Sigma)
@@ -8249,6 +8237,12 @@ def fmt_price(p):
 # REDIS PERSISTENCE — حفظ دائم عبر Upstash
 # ═══════════════════════════════════════════════
 
+# ✅ redis_save القديمة محذوفة — نستخدم الجديدة أدناه
+
+
+# ✅ redis_load القديمة محذوفة — نستخدم الجديدة أدناه
+
+
 def redis_save(data):
     # type: (dict) -> bool
     """حفظ البيانات في Upstash Redis"""
@@ -8481,7 +8475,7 @@ def init_static_watchlist():
         try:
             price = float(t["lastPrice"])
             vol   = float(t["quoteVolume"])
-        except:
+        except Exception as e:
             continue
 
         watchlist[sym] = {
@@ -8835,3 +8829,58 @@ def run():
 
 if __name__ == "__main__":
     run()    # ────────────────────────────────────────
+    # حساب Breakout + Stablecoins مباشرة
+    # ────────────────────────────────────────
+    _ALPHA=10; _STBL={"FDUSD","USDC","BUSD","DAI","TUSD","BFUSD","USDE","CRVUSD","USDD","XUSD"}
+    _bc=[]; _sh=[]; _bvt=0.0; _svt=0.0
+    for _t in all_tickers:
+        _sym=_t.get("symbol",""); _base=_sym.replace("USDT","")
+        if not _sym.endswith("USDT") or any(k in _sym for k in LEVERAGE_KEYWORDS): continue
+        try: _v=float(_t["quoteVolume"]); _c=float(_t["priceChangePercent"])
+        except: continue
+        if _v<100_000: continue
+        _h=coin_vol_history.get(_sym,[]); _ah=sum(_h)/len(_h) if len(_h)>=3 else _v
+        _sig=round(_v/_ah,1) if _ah>0 else 1.0
+        if _c>0: _bvt+=_v
+        else: _svt+=_v
+        _is_s=_base in _STBL or _base.startswith("USD") or _base.endswith("USD")
+        if _is_s and _v>=500_000: _sh.append({"base":_base,"vol":_v,"sigma":_sig})
+        if _sig>=_ALPHA and not _is_s: _bc.append({"base":_base,"sigma":_sig,"ch":_c})
+    _bc.sort(key=lambda x:-x["sigma"]); _sh.sort(key=lambda x:-x["vol"])
+    _tv=_bvt+_svt; _svp=_svt/_tv*100 if _tv>0 else 50
+    _ts=sum(s["vol"] for s in _sh); _stp=_ts/_tv*100 if _tv>0 else 0
+    market_activity_history.append({"date":today,"buy_vol":_bvt,"sell_vol":_svt,
+        "buy_pct":_bvt/_tv*100 if _tv>0 else 50,"stable_pct":_stp,"sigma_count":len(_bc)})
+    if len(market_activity_history)>30: market_activity_history.pop(0)
+    breakout_report_sent["date"] = today
+    if _stp>=20 and _svp>=55: _ssig="🚨 هروب ضخم Stablecoins"
+    elif _stp>=15: _ssig="⚠️ حيتان يحتفظون Stablecoins"
+    elif _stp>=8: _ssig="👀 تجميع خفيف"
+    else: _ssig="✅ Stablecoins طبيعية"
+    _stxt=""
+    for _sx in _sh[:5]:
+        _wh=" 🐳" if _sx["sigma"]>=3.0 else ""
+        _stxt+="  💵 *"+_sx["base"]+"* | `"+str(round(_sx["vol"]/1e6,1))+"M` | σ`"+str(_sx["sigma"])+"` "+_wh+"\n"
+    if not _stxt: _stxt="  لا يوجد\n"
+    _ctxt=""
+    for _co in _bc[:8]:
+        _d2="🟢" if _co["ch"]>0 else "🔴"
+        _ctxt+="• *"+_co["base"]+"* "+_d2+" Sigma`"+str(int(_co["sigma"]))+"` (Alpha:10)\n"
+    if not _ctxt: _ctxt="• لا توجد عملات\n"
+    _SEP="━"*18
+    _brk=(_SEP+"\n"
+        +"🐳 *احتفاظ الحيتان Stablecoins:* `"+str(round(_stp,1))+"% = "+str(int(_ts/1e6))+"M USDT`\n"
+        +_stxt+_ssig+"\n"
+        +_SEP+"\n"
+        +"*"+str(len(_bc))+" عملة* Sigma>=10:\n"+_ctxt)
+    _trnd=""
+    if len(market_activity_history)>=2:
+        _trnd=_SEP+"\n📊 *Market Activity Trend* (كل الأيام المتاحة)\n"
+        for _e in market_activity_history:
+            _bp2=_e["buy_pct"]; _stp2=_e.get("stable_pct",0); _sc=_e.get("sigma_count",0)
+            _ic="🟢" if _bp2>=55 else "🔴" if _bp2<=45 else "🟡"
+            _trnd+="`"+_e["date"][5:]+"` "+_ic+" "+str(round(_bp2,0))+"%B | 🐳"+str(round(_stp2,1))+"%S | σ"+str(_sc)+"\n"
+        _trnd+=_SEP
+    send(msg+"\n"+_brk+"\n"+_trnd)
+    log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
+             rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
