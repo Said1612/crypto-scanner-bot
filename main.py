@@ -888,6 +888,18 @@ def poll_commands():
         url = "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=3&allowed_updates=message".format(
             TELEGRAM_TOKEN, _tg_offset)
         r = requests.get(url, timeout=10)
+        if r.status_code == 409:
+            # 409 = تعارض — نحذف Webhook تلقائياً
+            log.warning("⚠️ getUpdates 409 — حذف Webhook تلقائياً")
+            try:
+                requests.get(
+                    "https://api.telegram.org/bot{}/deleteWebhook?drop_pending_updates=true".format(TELEGRAM_TOKEN),
+                    timeout=10
+                )
+                log.info("✅ Webhook محذوف — إعادة المحاولة")
+            except Exception as _e:
+                log.error("❌ deleteWebhook فشل: %s", _e)
+            return
         if r.status_code != 200:
             log.warning("⚠️ getUpdates HTTP %d", r.status_code)
             return
