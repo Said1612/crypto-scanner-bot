@@ -8549,8 +8549,8 @@ def run():
     except Exception as _e:
         log.warning("deleteWebhook error: %s", _e)
 
-    # ✅ انتظار 5 ثوانٍ للتأكد من توقف النسخة القديمة
-    time.sleep(5)
+    # ✅ انتظار 15 ثانية للتأكد من توقف النسخة القديمة
+    time.sleep(15)
 
     load_state()  # استعادة البيانات من آخر تشغيل
 
