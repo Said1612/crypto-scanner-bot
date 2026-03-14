@@ -7546,7 +7546,7 @@ def send_daily_report(force=False):
 def _send_daily_report_body(today, now_utc):
     # type: (str, object) -> None
     """الكود الفعلي للتقرير — منفصل لكشف الأخطاء"""
-    global daily_market_vol_history, market_activity_history
+    global daily_market_vol_history, market_activity_history, btcd_trend
 
     # ── تقرير Backtest اليومي ──────────────────
     if backtest_signals:
