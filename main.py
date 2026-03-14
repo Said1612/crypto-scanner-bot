@@ -8581,7 +8581,7 @@ def run():
     last_expand = time.time()
 
     analyze_sectors()
-    scan_sector_activity()   # تقرير فوري عند البدء
+    # scan_sector_activity() — معطّل عند البدء لمنع رسالتين
     last_sector_report = time.time()  # منع إرسال ثانٍ فوراً
     log.info("✅ جاهز | Candidates: %d | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
