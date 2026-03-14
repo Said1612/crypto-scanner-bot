@@ -324,7 +324,7 @@ SMART_MONEY_FALL_PCT   = 55
 SMART_MONEY_ALERT_SIGMA= 5.0
 
 SMART_MONEY_STABLES = [
-    "USDCUSDT","FDUSDUSDT","TUSDUSDT","USD1USDT",
+    "FDUSDUSDT","TUSDUSDT","USD1USDT",
     "RLUSDUSDT","BFUSDUSDT","USDPUSDT","USDDUSDT",
 ]
 
@@ -664,12 +664,12 @@ SECTORS = {
     "NeoBank": [
         # مدفوعات + بنوك رقمية + X402
         "XLMUSDT","XRPUSDT","PYTHUSDT","STRKUSDT","COTIUSDT",
-        "REQUSDT","PAYUSDT","SOLOUSDT","BRLUSDT","USDCUSDT",
+        "REQUSDT","PAYUSDT","SOLOUSDT","BRLUSDT",
         "SPRMUSDT","PAYPUSDT","MNTLUSDT","NEXOUSDT","WIREXUSDT",
         "MPAYUSDT","PAYPOLUSUSDT","FLAREUSDT","SGUSDUSDT","BIGTUSDT",
         # ── Mastercard Payments Partners ──
         "APTUSDT","AVAXUSDT","SOLUSDT","ATOMUSDT","OPUSDT",
-        "POLUSDT","AXELARUSDT","OPTIMISMUSDT","STRKUSDT","USDCUSDT",
+        "POLUSDT","AXELARUSDT","OPTIMISMUSDT","STRKUSDT",
     ],
 
     "Quantum": [
@@ -4848,6 +4848,8 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     )[:40]
 
     for sym, vol in ranked:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue  # ✅ لا إشارات للمستقرات
         _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
         if vol < _min_vol:  # 🛡️ EXTRA_COINS=100K | عادية=1M
             continue
@@ -5704,6 +5706,14 @@ def check_btc_dominance(vol_now):
     oldest = btcd_history[0]
     change_24h = btcd - oldest
 
+    # ✅ تحديث btcd_trend للتقرير اليومي
+    if change_24h <= -0.3:
+        btcd_trend = "falling"
+    elif change_24h >= 0.3:
+        btcd_trend = "rising"
+    else:
+        btcd_trend = "neutral"
+
     # ══ Alt Season — BTC.D ينزل ══
     if (change_24h <= -BTCD_DROP_ALERT and
             now - btcd_alert_sent > 14400):
@@ -5787,6 +5797,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
     results = []
     for sym, vol in ranked:
+        if sym.replace("USDT","") in STABLECOINS: continue  # ✅ لا إشارات للمستقرات
         _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
         if vol < _min_vol:  # 🛡️ EXTRA_COINS=100K | عادية=1M
             continue
