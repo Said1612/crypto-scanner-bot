@@ -7847,7 +7847,6 @@ def _send_daily_report_body(today, now_utc):
         "{mkt_icon} *السوق: {mkt_state}*\n"
         "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\n"
         "{btc_tps_line}"
-        "📊 BTC.D: {btcd_tag}\n"
         "Ξ ETH 24h: `{eth:+.2f}%`\n"
         "{eth_tps_line}"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -7908,10 +7907,7 @@ def _send_daily_report_body(today, now_utc):
 
         flow=flow_sum,
         action=whale_action,
-        btcd=0.0,
-        btcd_tag=("📉 ينزل — 🚀 Alt Season!" if btcd_trend == "falling"
-                  else ("📈 يصعد — 🐋 BTC يسيطر" if btcd_trend == "rising"
-                  else "➡️ مستقر")),
+
     )
 
     # ─── Breakout inline calc ───────────────────────────
