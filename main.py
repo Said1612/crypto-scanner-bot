@@ -84,7 +84,8 @@ TPS_LIMIT      = 100     # آخر 100 صفقة
 EXTRA_COINS = [
     # ── Meme coins ────────────────────────────
     "FLOKIUSDT", "PEPEUSDT", "WIFUSDT", "BOMEUSDT", "MEWUSDT",
-    "PEOPLEUSDT", "1000SHIBUSDT",
+    "PEOPLEUSDT", "1000SHIBUSDT", "BANANAUSDT", "NEIROUSDT",
+    "SUNDOGUSDT", "MOODENGUSDT", "FWOGUSDT", "GORKYUSDT",
 
     # ── Layer1 / Layer2 ───────────────────────
     "FLOWUSDT", "KASUSDT", "KAIAUSDT", "JUPUSDT",
@@ -414,6 +415,8 @@ SECTOR_KEYWORDS = {
         "NOOT","WOOF","COPE","CHAD","BASED","FROG","CAT","DOG","APE",
         "MONKEY","HAMSTER","SQUIRREL","RACCOON","PENGUIN","PENG",
         "BRETT","ANDY","MOO","BAD","HARAMBE","GIGA","APED","LADYS","BABY",
+        "BANANA","PENG","NEIRO","SUNDOG","MOODENG","FWOG","GORK","MICHI","MAGA",
+        "MANEKI","BOOMER","MEW","RETARDIO","POPCAT","GMEOW","INUVERSE","PUPS",
     ],
     "Oracle": [
         "LINK","BAND","UMA","DIA","PYTH","STORK","SXT","TELL","CHR",
@@ -470,7 +473,7 @@ STABLE_KEYWORDS   = ["USD","EUR","GBP","JPY","CNY","AUD","CHF","GOLD","SILVER","
 SECTORS = {
     "AI": [
         # ── الأساسيات ────────────────────────────
-        "FETUSDT","AGIXUSDT","OCEANUSDT","RENDUSDT","GRTUSDT",
+        "FETUSDT","AGIXUSDT","OCEANUSDT","RENDUSDT","RENDERUSDT","GRTUSDT",
         "TAOAUSDT","ARKMUSDT","PHAUSDT","AIXBTUSDT","NEWTUSDT",
         "NEIROUSDT","AIUSDT","CGPTUSDT","NEUROUSDT","VANAUSDT",
         "DFUSDT","COOKIEUSDT","AIDOGEUSDT","MYRIAUSDT","ALETHUSDT",
@@ -2433,6 +2436,14 @@ def perf_daily_report():
                 st["worst"] = (d["sym"], g)
 
     # بناء الرسالة
+    # تحقق: هل يوجد بيانات كافية؟
+    has_data = any(
+        sys_stats[k]["total_4h"] > 0 or sys_stats[k]["total_1h"] > 0
+        for k in PERF_SYSTEMS
+    )
+    if not has_data:
+        return ""
+
     lines = [
         "━━━━━━━━━━━━━━━━━━",
         "📊 *PERFORMANCE REPORT*",
@@ -5071,6 +5082,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             "👁️ *WATCH ALERT* 💎\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "🔍 *{}* — منطقة سيولة + نشاط! 👀\n".format(sym.replace("USDT","")) +
+            "💵 السعر: `{}`\n".format(fmt_price(price)) +
             "━━━━━━━━━━━━━━━━━━\n"
             "📍 {} | {} `{}×`\n".format(
                 _prox_label, zone_tag, zone_sigma
@@ -5081,7 +5093,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             ) +
             "━━━━━━━━━━━━━━━━━━\n"
             "{}\n".format(_tps_label) +
-            "💰 ATS: `{:.0f}$` 🦐 أفراد\n".format(ats) +
+            "📡 TPS: `{:.2f}` | ATS: `{:.0f}$` 🦐 أفراد\n".format(tps, ats) +
             "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta * 100) +
             "━━━━━━━━━━━━━━━━━━\n"
             "💪 القوة: `{}/100` {}\n".format(score, rarity) +
@@ -5692,6 +5704,267 @@ def track_liquidity_flow(vol_now, change_now):
         send(msg)
         log.info("🚨 FLOW OUT | %s | ratio=%.1fx | chg=%.1f%%",
                  top[0], top[1], top[2])
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   💥 EXPLOSION CATCHER — يصطاد الانفجارات قبل حدوثها
+#   الشروط: حجم يتضاعف + TPS يقفز + VDelta عالي + سعر لم يتحرك
+# ═══════════════════════════════════════════════════════════════════
+
+explosion_alerted    = {}   # type: Dict[str, float]  آخر تنبيه
+explosion_vol_hist   = {}   # type: Dict[str, list]   تاريخ الحجم
+EXPLOSION_COOLDOWN   = 7200  # ساعتان بين تنبيهات نفس العملة
+EXPLOSION_VOL_MULT   = 3.0   # حجم 3× المعدل فجأة
+EXPLOSION_TPS_MULT   = 2.5   # TPS تضاعف 2.5×
+EXPLOSION_VDELTA_MIN = 0.78  # شراء 78%+
+EXPLOSION_MAX_CHANGE = 3.0   # السعر لم يتحرك أكثر من 3%
+
+
+def scan_explosion_catcher(price_map, vol_now, change_now):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    💥 يرصد العملات على وشك الانفجار قبل 5 دقائق
+    = حجم يتضاعف فجأة + TPS يقفز + VDelta عالي + سعر ثابت
+    """
+    now = time.time()
+
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+
+    for sym in all_syms:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        if now - explosion_alerted.get(sym, 0) < EXPLOSION_COOLDOWN: continue
+        if now - coin_alerted.get(sym, 0) < 1800: continue  # لا تكرار مع WATCH
+
+        vol  = vol_now.get(sym, 0)
+        chg  = change_now.get(sym, 0)
+        price = price_map.get(sym, 0)
+
+        if vol < 300_000: continue
+        if abs(chg) > EXPLOSION_MAX_CHANGE: continue  # السعر تحرك = فات الأوان
+
+        # تاريخ الحجم
+        if sym not in explosion_vol_hist:
+            explosion_vol_hist[sym] = []
+        explosion_vol_hist[sym].append(vol)
+        if len(explosion_vol_hist[sym]) > 20:
+            explosion_vol_hist[sym].pop(0)
+
+        hist = explosion_vol_hist[sym]
+        if len(hist) < 5: continue
+
+        avg_vol = sum(hist[:-3]) / len(hist[:-3]) if len(hist) > 3 else vol
+        if avg_vol <= 0: continue
+
+        vol_mult = vol / avg_vol
+
+        # فحص TPS
+        try:
+            stats = get_tps_ats(sym)
+        except Exception:
+            continue
+        if not stats: continue
+
+        tps    = stats.get("tps", 0)
+        ats    = stats.get("ats", 0)
+        vdelta = stats.get("vdelta", 0)
+
+        # فحص TPS التاريخي
+        baseline = tps_baseline.get(sym, tps)
+        tps_mult = tps / baseline if baseline > 0 else 1.0
+
+        # شروط الانفجار
+        if (vol_mult  >= EXPLOSION_VOL_MULT and
+            tps_mult  >= EXPLOSION_TPS_MULT and
+            vdelta    >= EXPLOSION_VDELTA_MIN and
+            abs(chg)  <= EXPLOSION_MAX_CHANGE):
+
+            sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+
+            # قوة الانفجار
+            power = (vol_mult * 0.4) + (tps_mult * 0.4) + (vdelta * 100 * 0.2)
+            if power >= 300:
+                power_label = "💥 انفجار وشيك جداً!!!"
+                power_icon  = "🔴"
+            elif power >= 200:
+                power_label = "🔥 انفجار قريب جداً!"
+                power_icon  = "🟠"
+            else:
+                power_label = "⚡ بوادر انفجار"
+                power_icon  = "🟡"
+
+            msg = (
+                "💥 *EXPLOSION CATCHER* {}\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🎯 *{}* — {}\n"
+                "💵 السعر: `{}` | 24h: `{:+.1f}%` (ثابت ✅)\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📊 الحجم: `{:.1f}×` المعدل 🔥\n"
+                "📡 TPS: `{:.2f}` (`{:.1f}×` المعدل) 🚀\n"
+                "📊 VDelta: `{:.0f}%` شراء 💪\n"
+                "💰 ATS: `{:.0f}$`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🏷️ القطاع: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⚡ _السعر لم يتحرك بعد — فرصة الدخول الآن!_ 🎯"
+            ).format(
+                power_icon,
+                base, power_label,
+                fmt_price(price), chg,
+                vol_mult,
+                tps, tps_mult,
+                vdelta * 100,
+                ats,
+                sector
+            )
+
+            send(msg)
+            explosion_alerted[sym] = now
+            coin_alerted[sym] = now
+            log.info("💥 EXPLOSION | %s | vol=%.1fx | tps=%.1fx | vdelta=%.0f%%",
+                     sym, vol_mult, tps_mult, vdelta * 100)
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   🌊 LIQUIDITY ACCUMULATION TRACKER
+#   يرصد تراكم السيولة على مدى ساعات قبل الانفجار
+#   = يدخل قبل الجميع بساعات 🎯
+# ═══════════════════════════════════════════════════════════════════
+
+liq_accum_history  = {}   # type: Dict[str, list]  تاريخ السيولة لكل عملة
+liq_accum_alerted  = {}   # type: Dict[str, float] آخر تنبيه
+LAT_COOLDOWN       = 14400  # 4 ساعات بين تنبيهات نفس العملة
+LAT_MIN_HOURS      = 2      # ساعتان من التراكم المستمر
+LAT_VOL_GROW       = 1.4    # حجم يرتفع 40%+ تدريجياً
+LAT_VDELTA_MIN     = 0.65   # شراء 65%+ مستمر
+LAT_MAX_CHANGE     = 5.0    # السعر لم يتحرك أكثر من 5%
+LAT_READINGS       = 24     # نحتفظ بـ 24 قراءة (كل 5 دقائق = 2 ساعة)
+
+
+def track_liquidity_accumulation(price_map, vol_now, change_now):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🌊 يرصد تراكم السيولة التدريجي على مدى ساعات
+    = يكتشف الانفجار قبل حدوثه بساعات
+    """
+    now = time.time()
+
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+
+    for sym in all_syms:
+        base  = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        if now - liq_accum_alerted.get(sym, 0) < LAT_COOLDOWN: continue
+
+        vol   = vol_now.get(sym, 0)
+        chg   = change_now.get(sym, 0)
+        price = price_map.get(sym, 0)
+
+        if vol < 200_000: continue
+        if abs(chg) > LAT_MAX_CHANGE: continue  # تحرك كثيراً = فات الأوان
+
+        # تحديث التاريخ
+        if sym not in liq_accum_history:
+            liq_accum_history[sym] = []
+
+        # نجلب TPS/VDelta
+        try:
+            stats = get_tps_ats(sym)
+        except Exception:
+            continue
+        if not stats: continue
+
+        tps    = stats.get("tps", 0)
+        vdelta = stats.get("vdelta", 0.5)
+        ats    = stats.get("ats", 0)
+
+        # نحفظ القراءة
+        liq_accum_history[sym].append({
+            "time":   now,
+            "vol":    vol,
+            "vdelta": vdelta,
+            "tps":    tps,
+            "price":  price,
+        })
+
+        # نحتفظ بآخر LAT_READINGS قراءة
+        if len(liq_accum_history[sym]) > LAT_READINGS:
+            liq_accum_history[sym].pop(0)
+
+        hist = liq_accum_history[sym]
+        if len(hist) < 12: continue  # نحتاج ساعة على الأقل
+
+        # ── تحليل التراكم ──
+        # 1. هل الحجم يرتفع تدريجياً؟
+        first_vol  = sum(h["vol"] for h in hist[:6]) / 6
+        recent_vol = sum(h["vol"] for h in hist[-6:]) / 6
+        vol_growth = recent_vol / first_vol if first_vol > 0 else 1.0
+
+        # 2. هل VDelta مستمر؟
+        avg_vdelta = sum(h["vdelta"] for h in hist[-12:]) / 12
+
+        # 3. هل TPS يرتفع؟
+        first_tps  = sum(h["tps"] for h in hist[:6]) / 6
+        recent_tps = sum(h["tps"] for h in hist[-6:]) / 6
+        tps_growth = recent_tps / first_tps if first_tps > 0.1 else 1.0
+
+        # 4. هل السعر ثابت؟
+        first_price  = hist[0]["price"]
+        price_change = abs(price - first_price) / first_price * 100 if first_price > 0 else 0
+
+        # شروط التراكم
+        if (vol_growth  >= LAT_VOL_GROW and
+            avg_vdelta  >= LAT_VDELTA_MIN and
+            price_change <= LAT_MAX_CHANGE):
+
+            sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+            hours  = len(hist) * 5 / 60  # عدد الساعات التقريبي
+
+            # قوة التراكم
+            accum_score = (vol_growth * 40) + (avg_vdelta * 100 * 0.4) + (tps_growth * 20)
+
+            if accum_score >= 120:
+                strength = "🔴 تراكم ضخم — انفجار قريب جداً!"
+            elif accum_score >= 90:
+                strength = "🟠 تراكم قوي — راقب عن كثب"
+            else:
+                strength = "🟡 تراكم متوسط — ابدأ المراقبة"
+
+            msg = (
+                "🌊 *LIQUIDITY ACCUMULATION*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🎯 *{}* — {}\n"
+                "💵 السعر: `{}` | تغيير: `{:+.1f}%` (ثابت ✅)\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📊 نمو الحجم: `{:.1f}×` خلال `{:.1f}h` ⬆️\n"
+                "📡 TPS نما: `{:.1f}×` المعدل\n"
+                "📊 VDelta متوسط: `{:.0f}%` شراء مستمر 💪\n"
+                "💰 ATS الحالي: `{:.0f}$`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🏷️ القطاع: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⏳ _السيولة تتراكم — انتظر الجوكر للدخول_ 🃏"
+            ).format(
+                base, strength,
+                fmt_price(price), chg,
+                vol_growth, hours,
+                tps_growth,
+                avg_vdelta * 100,
+                ats,
+                sector
+            )
+
+            send(msg)
+            liq_accum_alerted[sym] = now
+            coin_alerted[sym] = now
+
+            # نضيفها لـ whale_watchlist تلقائياً
+            whale_watch_add(sym, ats, avg_vdelta, price)
+
+            log.info("🌊 LAT | %s | vol_growth=%.1fx | vdelta=%.0f%% | hours=%.1f",
+                     sym, vol_growth, avg_vdelta * 100, hours)
 
 
 def check_btc_dominance(vol_now):
@@ -7971,10 +8244,7 @@ def _send_daily_report_body(today, now_utc):
     # ══ Stablecoin Sigma من analyze_smart_money ══
     _sm_data   = _get_smart_money_summary()
     _sm_block  = "\n" + _sm_data if _sm_data else ""
-    _perf_block = perf_daily_report()
     send(msg+"\n"+_brk+"\n"+_trnd+"\n"+_analysis+_sm_block)
-    if _perf_block:
-        send(_perf_block)
     log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
              rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
     # ── نهاية _send_daily_report_body ──
@@ -8474,8 +8744,57 @@ def init_static_watchlist():
         ("PYTHUSDT", "DeFi", "Oracle منافس LINK"),
         ("COOKIEUSDT", "AI", "AI Agent ساخن"),
         ("ROSEUSDT",  "Privacy", "Privacy L1"),
-        ("PEPEUSDT",  "Meme",    "Meme coin — سيولة ضخمة"),
-        ("SHIBUSDT",  "Meme",    "Meme coin — سيولة ضخمة"),
+        # ── Meme Coins — 50 عملة ──────────────────
+        ("DOGEUSDT",    "Meme", "Meme — الأكبر"),
+        ("SHIBUSDT",    "Meme", "Meme — ضخم"),
+        ("PEPEUSDT",    "Meme", "Meme — ضخم"),
+        ("FLOKIUSDT",   "Meme", "Meme — قوي"),
+        ("WIFUSDT",     "Meme", "Meme — SOL"),
+        ("BONKUSDT",    "Meme", "Meme — SOL"),
+        ("BANANAUSDT",  "Meme", "Meme — انفجارات"),
+        ("NEIROUSDT",   "Meme", "Meme — جديد"),
+        ("MOODENGUSDT", "Meme", "Meme — فيل 🐘 Vitalik"),
+        ("PNUTUSDT",    "Meme", "Meme — سنجاب"),
+        ("GOATUSDT",    "Meme", "Meme — AI"),
+        ("ACTUSDT",     "Meme", "Meme — ساخن"),
+        ("TURBOUSUSDT", "Meme", "Meme — Turbo"),
+        ("POPCATUSDT",  "Meme", "Meme — قطة"),
+        ("BRETTUSDT",   "Meme", "Meme — Brett"),
+        ("MEMEUSDT",    "Meme", "Meme — MEME"),
+        ("DOGSUSDT",    "Meme", "Meme — كلاب"),
+        ("CATIUSDT",    "Meme", "Meme — قطة"),
+        ("CHILLGUYUSDT","Meme", "Meme — Chill"),
+        ("GMEUUSDT",    "Meme", "Meme — GME"),
+        ("MOTHERUSDT",  "Meme", "Meme — Mother"),
+        ("LUNAUSDT",    "Meme", "Meme — Luna"),
+        ("BABYDOGEUSDT","Meme", "Meme — BabyDoge"),
+        ("MOGUSDT",     "Meme", "Meme — MOG"),
+        ("BOMEUUSDT",   "Meme", "Meme — BOME"),
+        ("MYROUPUSDT",  "Meme", "Meme — Myro"),
+        ("WOJAKKUSDT",  "Meme", "Meme — Wojak"),
+        ("ANDYUSDT",    "Meme", "Meme — Andy"),
+        ("GIGAUSDT",    "Meme", "Meme — Giga"),
+        ("HARAMBEUSDT", "Meme", "Meme — Harambe"),
+        ("SUNDOGUSDT",  "Meme", "Meme — Sundog"),
+        ("FWOGUSDT",    "Meme", "Meme — Fwog"),
+        ("MICHIUSDT",   "Meme", "Meme — Michi"),
+        ("MAGAUSDT",    "Meme", "Meme — MAGA"),
+        ("PONKEUSDT",   "Meme", "Meme — Ponke"),
+        ("RETARDIOUSDT","Meme", "Meme — جديد"),
+        ("PUPSUSDT",    "Meme", "Meme — Pups"),
+        ("NOOTUSDT",    "Meme", "Meme — Noot"),
+        ("WOOFUSDT",    "Meme", "Meme — Woof"),
+        ("COPEUSDT",    "Meme", "Meme — Cope"),
+        ("CHADUUSDT",   "Meme", "Meme — Chad"),
+        ("FROGUSDT",    "Meme", "Meme — Frog"),
+        ("APEUUSDT",    "Meme", "Meme — Ape"),
+        ("MONKEYUSDT",  "Meme", "Meme — Monkey"),
+        ("PENGUINUSDT", "Meme", "Meme — Penguin"),
+        ("PENGUUSDT",   "Meme", "Meme — Pengu"),
+        ("SLEEPLESSUSDT","Meme","Meme — جديد"),
+        ("HONKUSDT",    "Meme", "Meme — Honk"),
+        ("BOOMERUSDT",  "Meme", "Meme — Boomer"),
+        ("MEOWUSDT",    "Meme", "Meme — Meow"),
     ]
 
     for sym, sector, reason in _static:
