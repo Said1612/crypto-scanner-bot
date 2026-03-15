@@ -8774,7 +8774,6 @@ def init_static_watchlist():
         ("SUNDOGUSDT",  "Meme", "Meme — Sundog"),
         ("FWOGUSDT",    "Meme", "Meme — Fwog"),
         ("MICHIUSDT",   "Meme", "Meme — Michi"),
-        ("MAGAUSDT",    "Meme", "Meme — MAGA"),
         ("PONKEUSDT",   "Meme", "Meme — Ponke"),
         ("CHADUSDT",   "Meme", "Meme — Chad"),
         ("APEUSDT",    "Meme", "Meme — Ape"),
@@ -8845,7 +8844,7 @@ def run():
     global last_sr_alert                     # 🌊 Sector Rotation
     global perf_signals, perf_id_counter     # 📊 Performance Tracker
 
-    log.info("🚀 MAFIO BOT V16 يبدأ...")
+    log.info("🚀 MAFIO BOT V17 يبدأ...")
 
     # ✅ نحذف Webhook ونمسح أي تعارض عند البداية
     try:
@@ -8904,7 +8903,7 @@ def run():
     last_sr_alert   = 0.0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V16*\n"
+        "🤖 *MAFIO BOT SIGNAL V17*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -9152,7 +9151,7 @@ def run():
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            send("⛔ *MAFIO BOT V15* — تم الإيقاف")
+            send("⛔ *MAFIO BOT V17* — تم الإيقاف")
             break
         except Exception as e:
             log.error("خطأ: %s", e, exc_info=True)
