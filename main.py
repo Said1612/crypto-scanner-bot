@@ -96,6 +96,11 @@ EXTRA_COINS = [
     # ── DeFi ──────────────────────────────────
     "AAVEUSDT", "DYDXUSDT", "JOEUSDT",
 
+    # ── عملات فرص مكتشفة ────────────────────────
+    "COSUSDT", "CUSDT", "MBOXUSDT", "TOWNSUSDT",
+    "DEXEUSDT", "SPELLUSDT", "PSGUSDT", "INTUSDT",
+    "HAEDALUSDT", "PHBUSDT",
+
     # ── AI & Robotics — تجميع هادئ قبل الانفجار ──
     "FETUSDT", "AGIXUSDT", "OCEANUSDT", "GRTUSDT",
     "WLDUSDT", "ARKMUSDT", "VIRTUSDT", "ACTUSDT",
@@ -6423,7 +6428,17 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
         _tps_min = 0.2 if sym in EXTRA_COINS else 0.5  # EXTRA=تجميع بطيء | عادية=نشاط حقيقي
-        if score >= 55 and len(signals) >= 2 and stats["tps"] >= _tps_min:
+        _vdelta  = stats["vdelta"]
+        _tps     = stats["tps"]
+        _ats     = stats["ats"]
+
+        # ✅ فلتر "قريبة من الانطلاق":
+        # VDelta قوية >= 75% أو (VDelta معقولة + TPS جيد + ATS معقول)
+        _ready = (
+            _vdelta >= 0.75                          # شراء قوي جداً
+            or (_vdelta >= 0.65 and _tps >= 0.5 and _ats >= 200)  # نشاط متوازن
+        )
+        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
