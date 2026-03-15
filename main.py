@@ -412,9 +412,10 @@ SECTOR_KEYWORDS = {
         "MOG","BABYDOGE","BONK","DOGS","CATI","GOAT","PNUT","ACT",
         "CHILLGUY","TURBO","LUNA","BOME","MOTHER","PONKE","GME","HONK",
         "MYRO","WOJAK","MIGGO","COQ","SLERF","SMOG","BOME","SILLY",
-        "NOOT","WOOF","COPE","CHAD","BASED","FROG","CAT","DOG","APE",
+        "NOOT","WOOF","COPE","BASED","FROG","CAT","DOG","APE",
         "MONKEY","HAMSTER","SQUIRREL","RACCOON","PENGUIN","PENG",
         "BRETT","ANDY","MOO","BAD","HARAMBE","GIGA","APED","LADYS","BABY",
+        "MASKSOL","MASKSOLUSDT",
         "BANANA","PENG","NEIRO","SUNDOG","MOODENG","FWOG","GORK","MICHI","MAGA",
         "MANEKI","BOOMER","MEW","RETARDIO","POPCAT","GMEOW","INUVERSE","PUPS",
     ],
@@ -572,7 +573,7 @@ SECTORS = {
         # ── إضافات V13 ───────────────────────────
         "MYROUSUSDT","WOJAKSUSDT","MIGGOUSDT","COQUSDT","SLERFUSDT",
         "SMOGUSDT","SILLYUSDT","NOOTUSDT","WOOFUSDT","COPEUSDT",
-        "CHADUSDT","BASEDUSDT","FROGUSDT","BRETTUSDT","ANDYUSDT",
+        "BASEDUSDT","FROGUSDT","BRETTUSDT","ANDYUSDT",
         "MOOUSDT","BADUSDT","HARAMBEUSDT","GIGAUSDT","APEDUSDT",
         "LADYSUSDT","MOODENGUSDT","PENGUUSDT","APEUSDT","REFACTAUSDT",
     ],
@@ -5093,7 +5094,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             ) +
             "━━━━━━━━━━━━━━━━━━\n"
             "{}\n".format(_tps_label) +
-            "📡 TPS: `{:.2f}` | ATS: `{:.0f}$` 🦐 أفراد\n".format(tps, ats) +
+            "📡 TPS: `{:.2f}` {} | ATS: `{:.0f}$` {}\n".format(tps, get_tps_label(tps), ats, get_ats_label(ats)) +
             "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta * 100) +
             "━━━━━━━━━━━━━━━━━━\n"
             "💪 القوة: `{}/100` {}\n".format(score, rarity) +
@@ -6326,6 +6327,25 @@ def _btc_1h_tag():
     except Exception:
         return "N/A"
 
+
+
+def get_tps_label(tps):
+    # type: (float) -> str
+    if tps < 0.2:   return "🐌 ضعيف"
+    if tps < 0.5:   return "🐢 بطيء"
+    if tps < 1.0:   return "🟡 عادي"
+    if tps < 3.0:   return "🟢 جيد"
+    if tps < 5.0:   return "🔥 قوي"
+    return "💥 انفجاري"
+
+def get_ats_label(ats):
+    # type: (float) -> str
+    if ats < 100:    return "🦐 أفراد صغار"
+    if ats < 500:    return "🦐 أفراد"
+    if ats < 1500:   return "🐟 متوسط"
+    if ats < 5000:   return "🐋 حيتان صغيرة"
+    if ats < 15000:  return "🐋 حيتان"
+    return "🐋🔥 حيتان ضخمة"
 
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
@@ -8903,6 +8923,7 @@ def load_state():
     global daily_report_sent_date, lz_daily_sent_date
     global daily_gem_count, stable_vol_history, daily_market_vol_history
     global daily_signals
+    global whale_watchlist, coin_signal_count, market_activity_history
 
     # أولاً: Redis
     state = redis_load()
@@ -8961,14 +8982,19 @@ def load_state():
         if isinstance(_dmv, list):
             daily_market_vol_history.extend(_dmv)
         stable_vol_history.update(state.get("stable_vol_history", {}))
+        whale_watchlist.update(state.get("whale_watchlist", {}))
+        coin_signal_count.update(state.get("coin_signal_count", {}))
+        _mah = state.get("market_activity_history", [])
+        if isinstance(_mah, list):
+            market_activity_history.extend(_mah[-30:])
 
         log.info("✅ State loaded | gems=%d | watchlist=%d | ath=%d | BT=%d",
                  len(gem_watchlist), len(watchlist), len(ath_tracker), len(backtest_signals))
 
         send("♻️ *Bot Restarted* — تم استعادة البيانات\n"
-             "💎 Gems: `{}` | 👁️ Watchlist: `{}` | 📊 BT: `{}`\n"
+             "👁️ Watchlist: `{}` | 🐋 جوكر: `{}` | 📊 BT: `{}`\n"
              "⏱️ آخر حفظ: `{:.1f}h` | ☁️ Redis".format(
-                 len(gem_watchlist), len(watchlist),
+                 len(watchlist), len(whale_watchlist),
                  len(backtest_signals), age_hours))
 
     except Exception as e:
@@ -9034,7 +9060,6 @@ def init_static_watchlist():
         ("FWOGUSDT",    "Meme", "Meme — Fwog"),
         ("MICHIUSDT",   "Meme", "Meme — Michi"),
         ("PONKEUSDT",   "Meme", "Meme — Ponke"),
-        ("CHADUSDT",   "Meme", "Meme — Chad"),
         ("APEUSDT",    "Meme", "Meme — Ape"),
         ("PENGUINUSDT", "Meme", "Meme — Penguin"),
         ("PENGUUSDT",   "Meme", "Meme — Pengu"),
