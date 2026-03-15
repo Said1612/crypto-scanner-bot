@@ -5967,6 +5967,265 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
                      sym, vol_growth, avg_vdelta * 100, hours)
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🔍 AUTO SECTOR DISCOVERY
+#   يكتشف قطاعات جديدة تلقائياً عندما عملات كثيرة ترتفع معاً
+# ═══════════════════════════════════════════════════════════════════
+
+discovered_sectors   = {}   # type: Dict[str, dict]  قطاعات مكتشفة
+asd_last_run         = 0.0
+ASD_RUN_EVERY        = 3600   # كل ساعة
+ASD_MIN_COINS        = 5      # 5 عملات+ ترتفع معاً
+ASD_MIN_CHANGE       = 5.0    # 5%+ ارتفاع
+ASD_VOL_MIN          = 500_000
+
+
+def auto_sector_discovery(vol_now, change_now):
+    # type: (Dict, Dict) -> None
+    """
+    🔍 يكتشف قطاعات جديدة تلقائياً
+    = عملات كثيرة ترتفع معاً = قطاع يتشكل
+    """
+    global asd_last_run
+    now = time.time()
+    if now - asd_last_run < ASD_RUN_EVERY:
+        return
+    asd_last_run = now
+
+    # نجلب كل العملات الصاعدة بقوة
+    strong_movers = []
+    for sym, chg in change_now.items():
+        if not sym.endswith("USDT"): continue
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+        vol = vol_now.get(sym, 0)
+        if vol < ASD_VOL_MIN: continue
+        if chg >= ASD_MIN_CHANGE:
+            # هل هي في قطاع معروف؟
+            known = any(sym in coins for coins in SECTORS.values())
+            strong_movers.append({
+                "sym": sym, "chg": chg, "vol": vol, "known": known
+            })
+
+    if len(strong_movers) < ASD_MIN_COINS:
+        return
+
+    # نجد العملات غير المصنفة
+    unknown = [m for m in strong_movers if not m["known"]]
+    known   = [m for m in strong_movers if m["known"]]
+
+    if len(unknown) < 3:
+        return
+
+    # نرتب حسب الارتفاع
+    unknown.sort(key=lambda x: -x["chg"])
+    known.sort(key=lambda x: -x["chg"])
+
+    # نرسل تنبيه اكتشاف
+    unknown_txt = ""
+    for m in unknown[:8]:
+        unknown_txt += "  🆕 *{}* `{:+.1f}%` 💧`{:.1f}M`\n".format(
+            m["sym"].replace("USDT",""), m["chg"], m["vol"]/1_000_000
+        )
+
+    known_txt = ""
+    for m in known[:5]:
+        known_txt += "  📊 *{}* `{:+.1f}%`\n".format(
+            m["sym"].replace("USDT",""), m["chg"]
+        )
+
+    msg = (
+        "🔍 *AUTO SECTOR DISCOVERY*\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📡 اكتشفت `{}` عملة ترتفع معاً!\n"
+        "🆕 غير مصنفة: `{}` عملة\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🆕 *عملات جديدة:*\n"
+        "{}\n"
+        "📊 *عملات معروفة:*\n"
+        "{}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💡 _قطاع جديد يتشكل — راقب هذه العملات_ 👁️"
+    ).format(
+        len(strong_movers),
+        len(unknown),
+        unknown_txt,
+        known_txt or "  لا يوجد\n"
+    )
+
+    send(msg)
+    log.info("🔍 ASD | %d عملة صاعدة | %d جديدة",
+             len(strong_movers), len(unknown))
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   ⚠️ DELISTING HUNTER
+#   يرصد علامات حذف العملة قبل الانهيار
+# ═══════════════════════════════════════════════════════════════════
+
+delisting_alerted  = {}   # type: Dict[str, float]
+DH_COOLDOWN        = 86400   # يوم واحد
+DH_VOL_CRASH       = 0.15    # حجم انهار لـ 15% من المعدل
+DH_PRICE_CRASH     = -30.0   # سعر انهار 30%+ في 24h
+DH_MIN_HISTORY     = 5       # نحتاج 5 قراءات تاريخية
+
+
+def scan_delisting_hunter(vol_now, change_now, price_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    ⚠️ يرصد علامات الحذف:
+    1. حجم ينهار فجأة
+    2. سعر ينهار بدون سبب
+    3. لا سيولة في Order Book
+    """
+    now = time.time()
+
+    for sym in list(candidates):
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        if now - delisting_alerted.get(sym, 0) < DH_COOLDOWN: continue
+
+        vol  = vol_now.get(sym, 0)
+        chg  = change_now.get(sym, 0)
+
+        if vol <= 0: continue
+
+        # تاريخ الحجم
+        hist = coin_vol_history.get(sym, [])
+        if len(hist) < DH_MIN_HISTORY: continue
+
+        avg_vol  = sum(hist) / len(hist)
+        vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+
+        # علامات الحذف
+        signs = []
+
+        if vol_ratio <= DH_VOL_CRASH:
+            signs.append("📉 حجم انهار `{:.0f}%` من المعدل".format(vol_ratio * 100))
+
+        if chg <= DH_PRICE_CRASH:
+            signs.append("🔴 سعر انهار `{:.1f}%` في 24h".format(chg))
+
+        if len(signs) >= 1 and (vol_ratio <= DH_VOL_CRASH or chg <= DH_PRICE_CRASH):
+            price = price_map.get(sym, 0)
+
+            msg = (
+                "⚠️ *DELISTING WARNING*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🚨 *{}* — علامات خطر!\n"
+                "💵 السعر: `{}` | 24h: `{:+.1f}%`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "{}\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🛑 _تحقق فوراً — ممكن يكون حذف قريب!_"
+            ).format(
+                base,
+                fmt_price(price), chg,
+                "\n".join(signs)
+            )
+
+            send(msg)
+            delisting_alerted[sym] = now
+            log.warning("⚠️ DELISTING | %s | vol_ratio=%.2f | chg=%.1f%%",
+                        sym, vol_ratio, chg)
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   🎯 SMALL CAP HUNTER
+#   يصطاد عملات صغيرة على وشك الانفجار
+#   حجم 100K-2M = أسرع انفجاراً = مكسب 50-200%
+# ═══════════════════════════════════════════════════════════════════
+
+sc_hunter_alerted  = {}   # type: Dict[str, float]
+SCH_COOLDOWN       = 7200    # ساعتان
+SCH_VOL_MIN        = 100_000  # 100K minimum
+SCH_VOL_MAX        = 2_000_000  # 2M maximum
+SCH_VOL_SPIKE      = 4.0     # حجم 4× فجأة
+SCH_VDELTA_MIN     = 0.75    # شراء 75%+
+SCH_TPS_MIN        = 0.5     # TPS معقول
+SCH_MAX_CHANGE     = 8.0     # لم يتحرك كثيراً
+
+
+def scan_small_cap_hunter(price_map, vol_now, change_now):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🎯 يصطاد عملات Small Cap على وشك الانفجار
+    = حجم صغير + نشاط غير طبيعي = فرصة كبيرة
+    """
+    now = time.time()
+
+    for sym in list(candidates) + EXTRA_COINS:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        if now - sc_hunter_alerted.get(sym, 0) < SCH_COOLDOWN: continue
+        if now - coin_alerted.get(sym, 0) < 1800: continue
+
+        vol  = vol_now.get(sym, 0)
+        chg  = change_now.get(sym, 0)
+        price = price_map.get(sym, 0)
+
+        # Small Cap فقط
+        if vol < SCH_VOL_MIN or vol > SCH_VOL_MAX: continue
+        if abs(chg) > SCH_MAX_CHANGE: continue
+
+        # تاريخ الحجم
+        hist = coin_vol_history.get(sym, [])
+        if len(hist) < 3: continue
+        avg_vol = sum(hist) / len(hist)
+        vol_spike = vol / avg_vol if avg_vol > 0 else 1.0
+
+        if vol_spike < SCH_VOL_SPIKE: continue
+
+        # TPS/VDelta
+        try:
+            stats = get_tps_ats(sym)
+        except Exception:
+            continue
+        if not stats: continue
+
+        tps    = stats.get("tps", 0)
+        vdelta = stats.get("vdelta", 0)
+        ats    = stats.get("ats", 0)
+
+        if tps    < SCH_TPS_MIN:    continue
+        if vdelta < SCH_VDELTA_MIN: continue
+
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+
+        msg = (
+            "🎯 *SMALL CAP HUNTER*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💎 *{}* — عملة صغيرة على وشك الانفجار!\n"
+            "💵 السعر: `{}` | 24h: `{:+.1f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 حجم: `{:.2f}M` (`{:.1f}×` المعدل) 🔥\n"
+            "📡 TPS: `{:.2f}` | ATS: `{:.0f}$`\n"
+            "📊 VDelta: `{:.0f}%` شراء 💪\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🏷️ القطاع: `{}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚡ _Small Cap = مكسب كبير — لكن SL محكم!_ 🎯"
+        ).format(
+            base,
+            fmt_price(price), chg,
+            vol/1_000_000, vol_spike,
+            tps, ats,
+            vdelta * 100,
+            sector
+        )
+
+        send(msg)
+        sc_hunter_alerted[sym] = now
+        coin_alerted[sym] = now
+        whale_watch_add(sym, ats, vdelta, price)
+        log.info("🎯 SCH | %s | vol=%.2fM | spike=%.1fx | vdelta=%.0f%%",
+                 sym, vol/1_000_000, vol_spike, vdelta*100)
+
+
 def check_btc_dominance(vol_now):
     # type: (Dict) -> None
     """
