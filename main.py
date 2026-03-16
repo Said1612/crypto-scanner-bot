@@ -8204,13 +8204,14 @@ def _send_daily_report_body(today, now_utc):
             whale_signals.append((sym.replace("USDT",""), ratio))
 
     # ══════════════════════════════════════════
-    # 2. نسبة الشراء/البيع بالحجم الحقيقي 📊
+    # 2. نسبة الشراء/البيع الحقيقي (Order Flow) 📊
+    # takerBuyQuoteVolume = شراء فعلي من السوق
     # ══════════════════════════════════════════
-    buy_vol      = 0.0   # حجم العملات الصاعدة
-    sell_vol     = 0.0   # حجم العملات النازلة
+    buy_vol          = 0.0
+    sell_vol         = 0.0
     total_market_vol = 0.0
-    top_gainers  = []
-    top_losers   = []
+    top_gainers      = []
+    top_losers       = []
 
     for t in all_tickers:
         sym = t.get("symbol","")
@@ -8219,18 +8220,23 @@ def _send_daily_report_body(today, now_utc):
         if base in STABLECOINS: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
         try:
-            ch  = float(t["priceChangePercent"])
-            vol = float(t["quoteVolume"])
-            if vol < 100_000: continue   # تجاهل العملات الميتة
+            vol      = float(t.get("quoteVolume", 0))
+            if vol < 100_000: continue
+            # ✅ Order Flow الحقيقي
+            taker_buy = float(t.get("takerBuyQuoteVolume", 0))
+            if taker_buy <= 0:
+                # fallback: نستخدم اتجاه السعر
+                ch = float(t.get("priceChangePercent", 0))
+                taker_buy = vol if ch > 0 else 0
+            taker_sell = vol - taker_buy
+            buy_vol  += taker_buy
+            sell_vol += max(taker_sell, 0)
             total_market_vol += vol
-            if ch > 0:
-                buy_vol += vol
-                if vol > 1_000_000:
-                    top_gainers.append((base, ch, vol))
-            else:
-                sell_vol += vol
-                if vol > 1_000_000:
-                    top_losers.append((base, ch, vol))
+            ch = float(t.get("priceChangePercent", 0))
+            if ch > 0 and vol > 1_000_000:
+                top_gainers.append((base, ch, vol))
+            elif ch < 0 and vol > 1_000_000:
+                top_losers.append((base, ch, vol))
         except (KeyError, ValueError):
             pass
 
