@@ -121,7 +121,7 @@ EXTRA_COINS = [
 ]
 
 TPS_SPIKE      = 3.0     # TPS ارتفع 3× = نشاط غير عادي
-TPS_MAX_CHANGE = 6.0     # 🚫 تجاهل إذا ارتفعت +6% في 24h — الفرصة فاتت
+TPS_MAX_CHANGE = 10.0    # 🔽 تجاهل إذا ارتفعت +10% في 24h (كان 6%)
 ATS_WHALE      = 5000    # صفقة > 5000 USDT = حيتان
 ATS_RETAIL     = 500     # صفقة < 500 USDT  = أفراد
 VDELTA_STRONG  = 0.70    # 70%+ شراء حقيقي
@@ -760,6 +760,7 @@ hidden_accum_alerted = {}  # type: Dict[str, float]  {sym: last_alert_time}
 # 🆕 TPS/ATS Engine
 tps_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
 last_tps_scan    = 0.0  # type: float
+last_whale_check = 0.0  # type: float  ⚡ فحص الحيتان كل دقيقة
 tps_baseline     = {}   # type: Dict[str, float]  {sym: avg_tps_baseline}
 
 # 🔥 LIQUIDITY HUNTER
@@ -4248,33 +4249,8 @@ def auto_expand_sectors():
         log.info("ℹ️ لا عملات جديدة للإضافة — القوائم مكتملة")
         return
 
-    # بناء رسالة Telegram
-    msg = (
-        "🔄 *AUTO EXPAND V12*\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "✅ أُضيف *{}* عملة جديدة\n\n".format(total_added)
-    )
-
-    for sector, coins in added_per_sector.items():
-        if not coins:
-            continue
-        total_in_sector = len(SECTORS[sector])
-        names = ", ".join(c.replace("USDT","") for c in coins[:10])
-        if len(coins) > 10:
-            names += " ... +{}".format(len(coins)-10)
-        msg += (
-            "🏷️ *{sector}* ({total}/50)\n"
-            "  ➕ {names}\n\n"
-        ).format(
-            sector=sector,
-            total=total_in_sector,
-            names=names,
-        )
-
-    msg += "━━━━━━━━━━━━━━━━━━\n"
-    msg += "📋 راجع القائمة وأخبرني بأي تعديل"
-
-    send(msg)
+    # لا نرسل إشعار AUTO EXPAND — يعمل بصمت في الخلفية
+    log.info("🔄 AUTO EXPAND | أُضيف %d عملة جديدة", total_added)
 
     # تحديث hot_symbols بعد التوسع
     global hot_symbols
@@ -4607,9 +4583,9 @@ def refresh_tickers():
 # ══════════════════════════════════════════
 TPS_LIMIT         = 100    # آخر 100 صفقة للتحليل
 TPS_SPIKE         = 3.0    # TPS ارتفع 3× = نشاط غير عادي
-ATS_WHALE         = 5000   # متوسط صفقة > 5000 USDT = حيتان
+ATS_WHALE         = 2000   # 🔽 صفقة > 2000 USDT = حيتان (كان 5000$)
 ATS_RETAIL        = 500    # متوسط صفقة < 500 USDT = أفراد
-VDELTA_STRONG     = 0.70   # 70%+ شراء = ضغط شراء قوي
+VDELTA_STRONG     = 0.65   # 🔽 65%+ شراء (كان 70%) — أكثر حساسية
 TPS_COOLDOWN      = 3600   # ساعة بين تنبيهات نفس العملة
 TPS_SCAN_EVERY    = 300    # كل 5 دقائق
 
@@ -4713,9 +4689,9 @@ lz_tps_alerted    = {}      # type: Dict[str, float]
 # ═══════════════════════════════════════════════════════════════════
 
 WHALE_WATCH_TTL    = 14400   # يراقب العملة 4 ساعات بعد إشارة الأفراد
-WHALE_CHECK_EVERY  = 300     # يتحقق كل 5 دقائق
-WHALE_ATS_MIN      = 3000    # ATS > 3000$ = حيتان دخلوا
-WHALE_VDELTA_MIN   = 0.60    # VDelta 60%+ مع الحيتان
+WHALE_CHECK_EVERY  = 60      # ⚡ يتحقق كل دقيقة (كان 5 دقائق)
+WHALE_ATS_MIN      = 500     # 🔽 ATS > 500$ = حيتان (كان 3000$) — مناسب للـ Altcoins
+WHALE_VDELTA_MIN   = 0.55    # 🔽 VDelta 55%+ (كان 60%) — أكثر حساسية
 
 # قائمة المراقبة: {sym: {time, ats_then, vdelta_then, price_then}}
 whale_watchlist    = {}   # type: Dict[str, Dict]
@@ -4772,7 +4748,14 @@ def scan_whale_confirmation(price_map):
         price  = price_map.get(sym, 0)
 
         # هل دخل الحيتان؟
-        if ats < WHALE_ATS_MIN or vdelta < WHALE_VDELTA_MIN:
+        # ✅ 3 حالات للدخول:
+        # 1. VDelta قوي جداً (80%+) → ادخل بدون شرط ATS
+        # 2. ATS + VDelta كلاهما فوق الحد → دخول عادي
+        # 3. ATS كبير جداً (حوت ضخم) → ادخل حتى لو VDelta متوسط
+        _vdelta_strong = vdelta >= 0.80   # شراء 80%+ = إشارة قوية
+        _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN
+        _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50
+        if not (_vdelta_strong or _normal_entry or _big_whale):
             continue
 
         # حساب التغير منذ إشارة الأفراد
@@ -4840,8 +4823,12 @@ def scan_whale_confirmation(price_map):
             "━━━━━━━━━━━━━━━━━━\n" +
             btcd_line +
             "🏷️ القطاع: `{sec}`\n".format(sec=sector) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "✅ *ادخل الصفقة الآن* 💪\n"
+            "━━━━━━━━━━━━━━━━━━\n" +
+            (
+                "➕ *أضف للصفقة الآن* 💪 _(دخلت مبكراً؟ هذا تأكيد الحيتان)_\n"
+                if coin_signal_count.get(sym, 0) >= 1
+                else "✅ *ادخل الصفقة الآن* 💪\n"
+            ) +
             "🛡️ ضع Stop Loss تحت آخر قاع\n" +
             footer
         )
@@ -5084,30 +5071,54 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
              "على الحافة ⚡")
         )
 
-        msg = (
-            "👁️ *WATCH ALERT* 💎\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "🔍 *{}* — منطقة سيولة + نشاط! 👀\n".format(sym.replace("USDT","")) +
-            "💵 السعر: `{}`\n".format(fmt_price(price)) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "📍 {} | {} `{}×`\n".format(
-                _prox_label, zone_tag, zone_sigma
-            ) +
-            "📊 المنطقة: `{}` ← `{}`\n".format(fmt_price(zone_low), fmt_price(zone_high)) +
-            "⚖️ R/R: `{:.1f}:1` | 🎯 `{}` (+{:.1f}%)\n".format(
-                rr, fmt_price(target), (target-price)/price*100
-            ) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "{}\n".format(_tps_label) +
-            "📡 TPS: `{:.2f}` {} | ATS: `{:.0f}$` {}\n".format(tps, get_tps_label(tps), ats, get_ats_label(ats)) +
-            "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta * 100) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "💪 القوة: `{}/100` {}\n".format(score, rarity) +
-            "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol_now.get(sym,0)/1_000_000) +
-            "🏷️ القطاع: `{}`\n".format(sector) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "⏳ _انتظر الجوكر للدخول_ 🃏"
-        )
+        # ── هل VDelta قوي جداً + R/R ممتاز؟ → ادخل مباشرة ──
+        _direct = vdelta >= 0.80 and rr >= 1.5
+
+        if _direct:
+            msg = (
+                "🚀🟢 *DIRECT ENTRY — ادخل الآن!* 🟢🚀\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💥 *{}* — منطقة سيولة + شراء قوي!\n".format(sym.replace("USDT","")) +
+                "💵 السعر: `{}`\n".format(fmt_price(price)) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📍 {} | {} `{}×`\n".format(_prox_label, zone_tag, zone_sigma) +
+                "📊 المنطقة: `{}` ← `{}`\n".format(fmt_price(zone_low), fmt_price(zone_high)) +
+                "⚖️ R/R: `{:.1f}:1` | 🎯 `{}` (+{:.1f}%)\n".format(
+                    rr, fmt_price(target), (target-price)/price*100) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "{}\n".format(_tps_label) +
+                "📡 TPS: `{:.2f}` | ATS: `{:.0f}$`\n".format(tps, ats) +
+                "📊 VDelta: `{:.0f}%` 🔥 شراء قوي جداً\n".format(vdelta*100) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💪 القوة: `{}/100` {}\n".format(score, rarity) +
+                "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol_now.get(sym,0)/1_000_000) +
+                "🏷️ القطاع: `{}`\n".format(sector) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "✅ *ادخل الآن — VDelta {:.0f}% + R/R {:.1f}:1*\n".format(vdelta*100, rr) +
+                "🛡️ Stop Loss تحت: `{}`".format(fmt_price(zone_low))
+            )
+        else:
+            msg = (
+                "👁️ *WATCH ALERT* 💎\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🔍 *{}* — منطقة سيولة + نشاط! 👀\n".format(sym.replace("USDT","")) +
+                "💵 السعر: `{}`\n".format(fmt_price(price)) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📍 {} | {} `{}×`\n".format(_prox_label, zone_tag, zone_sigma) +
+                "📊 المنطقة: `{}` ← `{}`\n".format(fmt_price(zone_low), fmt_price(zone_high)) +
+                "⚖️ R/R: `{:.1f}:1` | 🎯 `{}` (+{:.1f}%)\n".format(
+                    rr, fmt_price(target), (target-price)/price*100) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "{}\n".format(_tps_label) +
+                "📡 TPS: `{:.2f}` {} | ATS: `{:.0f}$` {}\n".format(tps, get_tps_label(tps), ats, get_ats_label(ats)) +
+                "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta * 100) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💪 القوة: `{}/100` {}\n".format(score, rarity) +
+                "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol_now.get(sym,0)/1_000_000) +
+                "🏷️ القطاع: `{}`\n".format(sector) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⏳ _انتظر الجوكر للدخول_ 🃏"
+            )
 
         send(msg)
         lz_tps_alerted[sym] = now
@@ -6518,11 +6529,13 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         # ✅ فلتر "قريبة من الانطلاق"
         # Bull Mode = فلاتر مخففة
         if BULL_MODE_ACTIVE:
-            _ready = _vdelta >= 0.60  # Bull Mode = 60% يكفي 🚀
+            _ready = _vdelta >= 0.55  # 🔽 Bull Mode = 55% يكفي (كان 60%)
         else:
             _ready = (
-                _vdelta >= 0.70                                        # شراء قوي ✅
+                _vdelta >= 0.80                                        # 💥 شراء 80%+ = ادخل فوراً
+                or _vdelta >= 0.70                                     # شراء قوي ✅
                 or (_vdelta >= 0.65 and _tps >= 0.3 and _ats >= 100)  # تجميع هادئ ✅
+                or (_vdelta >= 0.60 and _ats >= 500)                   # 🔽 ATS متوسط + شراء جيد
             )
         if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready:
             chg = changes_map.get(sym, 0)
@@ -6584,23 +6597,49 @@ def scan_tps_ats(price_map, vol_now, changes_map):
              "💥 نشاط انفجاري"))))
         )
 
-        msg = (
-            "👁️ *WATCH ALERT*\n" +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
-            "💵 السعر: `{}`\n".format(fmt_price(price_map.get(sym, 0))) +
-            "━━━━━━━━━━━━━━━━━━\n" +
-            (_lz_block + "━━━━━━━━━━━━━━━━━━\n" if _lz_block else "") +
-            "{}\n".format(_tps_label) +
-            "📡 TPS:    `{:.2f}` | ATS: `{:.0f}$` 🦐 أفراد\n".format(stats["tps"], stats["ats"]) +
-            "📊 VDelta: `{:.0f}%` شراء\n".format(stats["vdelta"]*100) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "💪 القوة: `{}/100` {}\n".format(score, rarity) +
-            "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol/1_000_000) +
-            "🏷️ القطاع: `{}`\n".format(sector) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "⏳ _انتظر الجوكر للدخول_ 🃏"
-        )
+        # ── هل VDelta قوي جداً؟ → إشارة دخول مباشرة بدون انتظار الجوكر ──
+        _direct_entry = vdelta >= 0.80 and score >= 55
+        _price_now    = price_map.get(sym, 0)
+
+        if _direct_entry:
+            # إشارة دخول مباشرة
+            msg = (
+                "🚀🟢 *DIRECT ENTRY — ادخل الآن!* 🟢🚀\n" +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💥 *{}* — شراء قوي جداً!\n".format(sym.replace("USDT","")) +
+                "━━━━━━━━━━━━━━━━━━\n" +
+                (_lz_block + "━━━━━━━━━━━━━━━━━━\n" if _lz_block else "") +
+                "{}\n".format(_tps_label) +
+                "📡 TPS: `{:.2f}` | ATS: `{:.0f}$`\n".format(stats["tps"], stats["ats"]) +
+                "📊 VDelta: `{:.0f}%` 🔥 شراء قوي جداً\n".format(vdelta*100) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💪 القوة: `{}/100` {}\n".format(score, rarity) +
+                "💰 السعر: `{}`\n".format(fmt_price(_price_now)) +
+                "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol/1_000_000) +
+                "🏷️ القطاع: `{}`\n".format(sector) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "✅ *ادخل الآن — VDelta {:.0f}% كافٍ للدخول!*\n".format(vdelta*100) +
+                "🛡️ ضع Stop Loss تحت آخر قاع"
+            )
+        else:
+            # WATCH عادي — انتظر الجوكر
+            msg = (
+                "👁️ *WATCH ALERT*\n" +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
+                "💵 السعر: `{}`\n".format(fmt_price(_price_now)) +
+                "━━━━━━━━━━━━━━━━━━\n" +
+                (_lz_block + "━━━━━━━━━━━━━━━━━━\n" if _lz_block else "") +
+                "{}\n".format(_tps_label) +
+                "📡 TPS:    `{:.2f}` | ATS: `{:.0f}$` 🦐 أفراد\n".format(stats["tps"], stats["ats"]) +
+                "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta*100) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💪 القوة: `{}/100` {}\n".format(score, rarity) +
+                "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol/1_000_000) +
+                "🏷️ القطاع: `{}`\n".format(sector) +
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⏳ _انتظر الجوكر للدخول_ 🃏"
+            )
         send(msg)
         tps_alerted[sym]  = now
         coin_alerted[sym] = now   # 🔒 يمنع كل الأنظمة من التكرار
@@ -9235,7 +9274,7 @@ def run():
     global gem_watchlist, daily_gem_count
     global explosion_alerted, bottom_price_history, bottom_vol_history
     # 🆕 V16 New Systems
-    global tps_alerted, tps_baseline, last_tps_scan  # ⚡ TPS/ATS
+    global tps_alerted, tps_baseline, last_tps_scan, last_whale_check  # ⚡ TPS/ATS
     global coin_alerted                                # 🔒 Cooldown موحد
     global coin_signal_count                           # 🔢 عداد الإشارات
     global coin_whale_done                             # 🐋 عملات وصل حيتانها
@@ -9495,8 +9534,12 @@ def run():
                 check_liquidity_exit(vol_now, price_map)
                 scan_tps_ats(price_map, vol_now, change_now)
                 scan_lz_tps_fusion(price_map, vol_now, change_now)  # 🎯 الدمج
-                scan_whale_confirmation(price_map)                  # 🐋 تأكيد حيتان
                 last_tps_scan = now
+
+            # 🐋 تأكيد حيتان — كل دقيقة (أسرع من TPS)
+            if now - last_whale_check >= WHALE_CHECK_EVERY:
+                scan_whale_confirmation(price_map)
+                last_whale_check = now
 
             if now - last_lh_scan >= LH_SCAN_EVERY:
                 liquidity_hunter(price_map, vol_now, changes_map)
