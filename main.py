@@ -1353,11 +1353,11 @@ def analyze_btc():
     except (KeyError, ValueError, TypeError):
         pass
 
-    # اتجاه 1h
-    kd1 = get_klines("BTCUSDT", "1h", 4)
+    # اتجاه 1h — آخر شمعة vs قبلها
+    kd1 = get_klines("BTCUSDT", "1h", 3)
     if kd1 and len(kd1["closes"]) >= 2:
         c = kd1["closes"]
-        btc_trend_1h = (c[-1] - c[0]) / c[0] * 100
+        btc_trend_1h = (c[-1] - c[-2]) / c[-2] * 100 if c[-2] > 0 else 0.0
 
     # 🆕 اتجاه 4h — كشف الانهيار السريع
     btc_trend_4h = 0.0
@@ -8261,14 +8261,23 @@ def _send_daily_report_body(today, now_utc):
     # ══════════════════════════════════════════
     # 3. تدفق رأس المال — اليوم vs أمس 💰
     # ══════════════════════════════════════════
-    daily_market_vol_history.append(total_market_vol)
-    if len(daily_market_vol_history) > 7:
-        daily_market_vol_history.pop(0)
+    # نضيف فقط مرة واحدة يومياً
+    _today_vol_key = today
+    if not daily_market_vol_history or (
+        isinstance(daily_market_vol_history[-1], dict) and 
+        daily_market_vol_history[-1].get("date") != _today_vol_key
+    ) or (
+        not isinstance(daily_market_vol_history[-1], dict)
+    ):
+        daily_market_vol_history.append({"date": _today_vol_key, "vol": total_market_vol})
+        if len(daily_market_vol_history) > 7:
+            daily_market_vol_history.pop(0)
 
-    vol_change_pct = None  # None = لا يوجد بيانات بعد
+    vol_change_pct = None
     vol_arrow      = "➡️"
     if len(daily_market_vol_history) >= 2:
-        prev_vol = daily_market_vol_history[-2]
+        _prev = daily_market_vol_history[-2]
+        prev_vol = _prev.get("vol", 0) if isinstance(_prev, dict) else float(_prev)
         if prev_vol > 0:
             vol_change_pct = (total_market_vol - prev_vol) / prev_vol * 100
             vol_arrow = "📈" if vol_change_pct > 5 else "📉" if vol_change_pct < -5 else "➡️"
