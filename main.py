@@ -4715,7 +4715,7 @@ lz_tps_alerted    = {}      # type: Dict[str, float]
 WHALE_WATCH_TTL    = 14400   # يراقب العملة 4 ساعات بعد إشارة الأفراد
 WHALE_CHECK_EVERY  = 300     # يتحقق كل 5 دقائق
 WHALE_ATS_MIN      = 3000    # ATS > 3000$ = حيتان دخلوا
-WHALE_VDELTA_MIN   = 0.65    # VDelta 65%+ مع الحيتان
+WHALE_VDELTA_MIN   = 0.60    # VDelta 60%+ مع الحيتان
 
 # قائمة المراقبة: {sym: {time, ats_then, vdelta_then, price_then}}
 whale_watchlist    = {}   # type: Dict[str, Dict]
@@ -5900,7 +5900,7 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
             liq_accum_history[sym].pop(0)
 
         hist = liq_accum_history[sym]
-        if len(hist) < 12: continue  # نحتاج ساعة على الأقل
+        if len(hist) < 6: continue   # نحتاج 30 دقيقة على الأقل
 
         # ── تحليل التراكم ──
         # 1. هل الحجم يرتفع تدريجياً؟
@@ -6232,6 +6232,89 @@ def scan_small_cap_hunter(price_map, vol_now, change_now):
                  sym, vol/1_000_000, vol_spike, vdelta*100)
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🚀 BULL MODE — وضع السوق الصاعد
+#   عند BTC +2%+ في يوم = نخفف الفلاتر ونصطاد أكثر
+# ═══════════════════════════════════════════════════════════════════
+
+BULL_MODE_ACTIVE    = False  # يتفعل تلقائياً عند صعود BTC
+BULL_BTC_THRESHOLD  = 2.0    # BTC +2%+ = Bull Mode
+BULL_MODE_ALERTED   = False  # أرسلنا تنبيه Bull Mode؟
+
+def update_bull_mode(vol_now=None, change_now=None):
+    # type: (dict, dict) -> None
+    """
+    يحدث حالة Bull Mode بناءً على 3 مصادر:
+    1. Order Flow السوق الكلي (buy_pct >= 65%)
+    2. قطاع ساخن (5+ عملات ترتفع معاً)
+    3. BTC (مؤشر مساعد وليس وحيداً)
+    """
+    global BULL_MODE_ACTIVE, BULL_MODE_ALERTED
+
+    was_active = BULL_MODE_ACTIVE
+    bull_reason = ""
+
+    if vol_now is None or change_now is None:
+        return
+
+    # ── 1. Order Flow السوق الكلي ──
+    buy_vol_total  = 0.0
+    sell_vol_total = 0.0
+    for sym, vol in vol_now.items():
+        if not sym.endswith("USDT"): continue
+        base = sym.replace("USDT","")
+        if base in STABLECOINS: continue
+        chg = change_now.get(sym, 0)
+        taker_buy = vol * 0.7 if chg > 0 else vol * 0.3  # تقدير
+        buy_vol_total  += taker_buy
+        sell_vol_total += vol - taker_buy
+
+    total_vol = buy_vol_total + sell_vol_total
+    buy_pct_now = buy_vol_total / total_vol * 100 if total_vol > 0 else 50
+
+    # ── 2. قطاعات ساخنة ──
+    hot_sector_count = 0
+    hot_sector_name  = ""
+    for sector, coins in SECTORS.items():
+        rising = sum(1 for s in coins if change_now.get(s, 0) >= 3.0)
+        if rising >= 5:
+            hot_sector_count += 1
+            if not hot_sector_name:
+                hot_sector_name = sector
+
+    # ── 3. BTC مساعد ──
+    btc_rising = btc_change_24h >= BULL_BTC_THRESHOLD
+
+    # ── حكم Bull Mode ──
+    if buy_pct_now >= 65:
+        BULL_MODE_ACTIVE = True
+        bull_reason = "Order Flow {:.0f}% شراء 💰".format(buy_pct_now)
+    elif hot_sector_count >= 2:
+        BULL_MODE_ACTIVE = True
+        bull_reason = "{} قطاعات ساخنة 🔥".format(hot_sector_count)
+    elif hot_sector_count >= 1 and btc_rising:
+        BULL_MODE_ACTIVE = True
+        bull_reason = "قطاع {} + BTC {:+.1f}% 📈".format(hot_sector_name, btc_change_24h)
+    else:
+        BULL_MODE_ACTIVE  = False
+        BULL_MODE_ALERTED = False
+
+    # ── تنبيه عند التفعيل ──
+    if BULL_MODE_ACTIVE and not was_active and not BULL_MODE_ALERTED:
+        BULL_MODE_ALERTED = True
+        msg = (
+            "🚀 *BULL MODE مفعّل!*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 السبب: {}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚡ الفلاتر مخففة — VDelta >= 60% يكفي\n"
+            "💡 _السيولة تدخل — اغتنم الفرصة_ 🎯"
+        ).format(bull_reason)
+        send(msg)
+        log.info("🚀 BULL MODE | reason=%s", bull_reason)
+
+
 def check_btc_dominance(vol_now):
     # type: (Dict) -> None
     """
@@ -6432,12 +6515,15 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _tps     = stats["tps"]
         _ats     = stats["ats"]
 
-        # ✅ فلتر "قريبة من الانطلاق":
-        # VDelta قوية >= 75% أو (VDelta معقولة + TPS جيد + ATS معقول)
-        _ready = (
-            _vdelta >= 0.75                          # شراء قوي جداً
-            or (_vdelta >= 0.65 and _tps >= 0.5 and _ats >= 200)  # نشاط متوازن
-        )
+        # ✅ فلتر "قريبة من الانطلاق"
+        # Bull Mode = فلاتر مخففة
+        if BULL_MODE_ACTIVE:
+            _ready = _vdelta >= 0.60  # Bull Mode = 60% يكفي 🚀
+        else:
+            _ready = (
+                _vdelta >= 0.70                                        # شراء قوي ✅
+                or (_vdelta >= 0.65 and _tps >= 0.3 and _ats >= 100)  # تجميع هادئ ✅
+            )
         if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
@@ -8930,6 +9016,10 @@ def save_state():
             "daily_gem_count":          daily_gem_count,
             "stable_vol_history":       stable_vol_history,
             "daily_market_vol_history": daily_market_vol_history,
+            # 🐋 Whale Watchlist — قائمة الجوكر
+            "whale_watchlist":          {k: v for k, v in whale_watchlist.items()},
+            "coin_signal_count":        coin_signal_count,
+            "market_activity_history":  market_activity_history,
         }
         # حفظ محلي
         with open(STATE_FILE, "w") as f:
@@ -9284,7 +9374,9 @@ def run():
             poll_commands()  # استماع لأوامر Telegram
 
             # تحديثات دورية
-            if now - last_btc         >= BTC_EVERY:         analyze_btc()
+            if now - last_btc         >= BTC_EVERY:
+                analyze_btc()
+                update_bull_mode(vol_now, change_now)  # 🚀 تحديث Bull Mode
             if now - last_sectors     >= SECTORS_EVERY:
                 analyze_sectors()
                 detect_sector_rotation()  # 🌊 هل حدث Rotation؟
