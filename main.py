@@ -8244,12 +8244,13 @@ def _send_daily_report_body(today, now_utc):
     buy_pct         = buy_vol  / total_trade_vol * 100 if total_trade_vol > 0 else 50
     sell_pct        = sell_vol / total_trade_vol * 100 if total_trade_vol > 0 else 50
 
-    # للتوافق مع باقي الكود
+    # ✅ rising_pct = نفس buy_pct (Order Flow)
+    # = السيولة الداخلة هي المقياس الحقيقي
     rising_pct  = buy_pct
     falling_pct = sell_pct
-    rising      = int(buy_pct)
-    falling     = int(sell_pct)
-    total_coins = int(total_trade_vol / 1_000_000)  # حجم بالمليون
+    rising      = int(buy_vol / 1_000_000)
+    falling     = int(sell_vol / 1_000_000)
+    total_coins = int(total_trade_vol / 1_000_000)
 
     log.info("📊 Buy/Sell | buy=%.1f%% (%.0fM) | sell=%.1f%% (%.0fM)",
              buy_pct, buy_vol/1_000_000, sell_pct, sell_vol/1_000_000)
@@ -8332,27 +8333,27 @@ def _send_daily_report_body(today, now_utc):
     elif _sell_pressure and _mkt_falling:
         # ضغط بيع + سوق هابط بدون حيتان = بيع عشوائي
         whale_verdict  = "🔴 *ضغط بيع — ابتعد*"
-        whale_desc     = "بيع {:.0f}% من الحجم + {:.0f}% من العملات هابطة — خطر".format(sell_pct, falling_pct)
+        whale_desc     = "بيع {:.0f}% من السيولة — خروج أموال من السوق ⚠️".format(sell_pct)
         whale_action   = "⛔ _لا تدخل — انتظر الاستقرار_"
         whale_icon     = "📉🔴"
 
     elif _buy_pressure and _mkt_rising:
         # شراء + سوق صاعد = جو إيجابي
         whale_verdict  = "🟢 *السوق صاعد — زخم إيجابي*"
-        whale_desc     = "شراء {:.0f}% + {:.0f}% من العملات ترتفع — جو صحي".format(buy_pct, rising_pct)
+        whale_desc     = "شراء {:.0f}% من السيولة — أموال تدخل السوق 💰".format(buy_pct)
         whale_action   = "✅ _يمكن الدخول بحذر_"
         whale_icon     = "📈🟢"
 
     elif _sell_pressure:
         # ضغط بيع فقط بدون انهيار واضح = حذر
         whale_verdict  = "🟡 *ضغط بيع — توخَّ الحذر*"
-        whale_desc     = "بيع {:.0f}% من الحجم — السوق يميل للهبوط".format(sell_pct)
+        whale_desc     = "بيع {:.0f}% من السيولة — ضغط بيعي".format(sell_pct)
         whale_action   = "⚠️ _انتظر قبل الدخول — الضغط البيعي مرتفع_"
         whale_icon     = "🟡🔴"
 
     else:
         whale_verdict  = "🟡 *السوق محايد — انتظر*"
-        whale_desc     = "لا اتجاه واضح | شراء {:.0f}% | بيع {:.0f}%".format(buy_pct, sell_pct)
+        whale_desc     = "سيولة محايدة | شراء {:.0f}% | بيع {:.0f}%".format(buy_pct, sell_pct)
         whale_action   = "⏳ _انتظر إشارة واضحة قبل الدخول_"
         whale_icon     = "🟡"
 
@@ -8422,7 +8423,7 @@ def _send_daily_report_body(today, now_utc):
         "{whale_icon} {verdict}\n"
         "_{desc}_\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 *نسبة الشراء/البيع (بالحجم):*\n"
+        "📊 *تدفق السيولة (Order Flow):*\n"
         "{bar}\n"
         "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol})\n"
         "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol})\n"
