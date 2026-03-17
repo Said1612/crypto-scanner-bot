@@ -1227,6 +1227,185 @@ def rsi_label(rsi):
 #   🆕 V15: COIN VOL HISTORY
 #   تحديث تاريخ حجم كل عملة لحساب vol_ratio التاريخي
 # ═══════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════
+#   DIRECTION ENGINE - محرك ترجيح الاتجاه
+#   1. VW-MACD  (40%) - اتجاه السيولة المرجح بالحجم
+#   2. Weis Wave (40%) - قوة التدخل المؤسسي
+#   3. Vol-RSI   (20%) - زخم معدل بالتقلب
+# ═══════════════════════════════════════════════════════════════
+
+def calc_vwmacd(closes, vols, fast=12, slow=26):
+    if len(closes) < slow or len(vols) < slow:
+        return 0.0
+    try:
+        def vwma(n):
+            pv = sum(closes[-i] * vols[-i] for i in range(1, n+1))
+            v  = sum(vols[-i] for i in range(1, n+1))
+            return pv / v if v > 0 else closes[-1]
+        macd = vwma(fast) - vwma(slow)
+        avg  = sum(closes[-slow:]) / slow
+        return max(-1.0, min(1.0, macd / avg * 100)) if avg > 0 else 0.0
+    except (IndexError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def calc_weis_wave(closes, vols):
+    if len(closes) < 5:
+        return 0.5
+    try:
+        up = sum(vols[i] for i in range(1, len(closes)) if i < len(vols) and closes[i] > closes[i-1])
+        dn = sum(vols[i] for i in range(1, len(closes)) if i < len(vols) and closes[i] < closes[i-1])
+        total = up + dn
+        return round(up / total, 3) if total > 0 else 0.5
+    except (IndexError, ValueError, ZeroDivisionError):
+        return 0.5
+
+
+def calc_vol_rsi(closes, vols, period=14):
+    if len(closes) < period + 2:
+        return 0.5
+    try:
+        deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+        recent = deltas[-period:]
+        gains  = [d for d in recent if d > 0]
+        losses = [-d for d in recent if d < 0]
+        ag = sum(gains)  / period if gains  else 1e-10
+        al = sum(losses) / period if losses else 1e-10
+        return round(1 - 1 / (1 + ag / al), 3)
+    except (IndexError, ValueError, ZeroDivisionError):
+        return 0.5
+
+
+def calc_direction_engine(sym, interval="1h"):
+    # type: (str, str) -> dict
+    kd = get_klines(sym, interval, 60)
+    if not kd or len(kd["closes"]) < 30:
+        return {}
+    closes = kd["closes"]
+    vols   = kd["vols"]
+    vwmacd_s = (calc_vwmacd(closes, vols) + 1) / 2 * 100
+    weis_s   = calc_weis_wave(closes, vols) * 100
+    vrsi_s   = calc_vol_rsi(closes, vols) * 100
+    bull_raw = vwmacd_s * 0.40 + weis_s * 0.40 + vrsi_s * 0.20
+    agree = sum([vwmacd_s > 55, weis_s > 55, vrsi_s > 55])
+    mult  = 1.0 if agree == 3 else (0.85 if agree == 2 else 0.70)
+    conf  = "عالي" if agree == 3 else ("متوسط" if agree == 2 else "منخفض")
+    bull  = round(bull_raw * mult, 1)
+    bear  = round(max(0, (100 - bull_raw) * mult * 0.7), 1)
+    neut  = round(max(0, 100 - bull - bear), 1)
+    if bull >= 70 and agree >= 2:
+        verdict = "توافق مؤسسي - سيولة حقيقية"
+    elif bull >= 60:
+        verdict = "ميل صاعد - انتظر التاكيد"
+    elif bear >= 60:
+        verdict = "ضغط بيعي - احذر"
+    else:
+        verdict = "عرضي - لا اتجاه واضح"
+    return {
+        "bullish_pct": bull, "bearish_pct": bear, "neutral_pct": neut,
+        "confidence": conf, "verdict": verdict, "agree": agree,
+    }
+
+
+def calc_hmm_regime(sym, interval="4h"):
+    # type: (str, str) -> dict
+    kd = get_klines(sym, interval, 100)
+    if not kd or len(kd["closes"]) < 20:
+        return {"regime": "unknown", "regime_ar": "غير محدد",
+                "trending": 33, "ranging": 34, "volatile": 33}
+    closes = kd["closes"]
+    highs  = kd["highs"]
+    lows   = kd["lows"]
+    n      = len(closes)
+    try:
+        first20 = sum(closes[:20]) / 20
+        last20  = sum(closes[-20:]) / 20
+        trend_s = abs(last20 - first20) / first20 * 100 if first20 > 0 else 0
+        atrs    = [(highs[i] - lows[i]) / lows[i] * 100 for i in range(n) if lows[i] > 0]
+        avg_atr = sum(atrs) / len(atrs) if atrs else 0
+        up      = sum(1 for i in range(1, n) if closes[i] > closes[i-1])
+        direct  = abs(up - (n-1-up)) / (n-1) * 100
+        volatile_s = min(100, avg_atr * 10)
+        trending_s = min(100, trend_s * 3 + direct * 0.5)
+        ranging_s  = max(0, 100 - volatile_s * 0.4 - trending_s * 0.4)
+        total = volatile_s + trending_s + ranging_s or 1
+        vp = round(volatile_s / total * 100)
+        tp = round(trending_s / total * 100)
+        rp = 100 - vp - tp
+        if tp >= vp and tp >= rp:
+            reg, reg_ar = "trending", "اتجاهي هادئ"
+        elif vp >= tp and vp >= rp:
+            reg, reg_ar = "volatile", "تقلبات حادة"
+        else:
+            reg, reg_ar = "ranging", "تذبذب عرضي"
+        return {"regime": reg, "regime_ar": reg_ar,
+                "trending": tp, "ranging": rp, "volatile": vp}
+    except (IndexError, ValueError, ZeroDivisionError):
+        return {"regime": "unknown", "regime_ar": "غير محدد",
+                "trending": 33, "ranging": 34, "volatile": 33}
+
+
+def calc_garch_range(sym, interval="1d"):
+    # type: (str, str) -> dict
+    kd = get_klines(sym, interval, 30)
+    if not kd or len(kd["closes"]) < 10:
+        return {}
+    closes = kd["closes"]
+    try:
+        import math
+        lr = [math.log(closes[i] / closes[i-1])
+              for i in range(1, len(closes)) if closes[i-1] > 0]
+        if len(lr) < 5:
+            return {}
+        mean = sum(lr) / len(lr)
+        var  = sum((r - mean)**2 for r in lr) / len(lr)
+        cvar = var * 0.1
+        for r in lr[-5:]:
+            cvar = var * 0.1 + 0.1 * r**2 + 0.85 * cvar
+        pvol = cvar ** 0.5
+        cur  = closes[-1]
+        return {
+            "support":        round(cur * math.exp(mean - pvol), 8),
+            "resistance":     round(cur * math.exp(mean + pvol), 8),
+            "volatility_pct": round(pvol * 100, 2),
+            "current":        cur,
+        }
+    except (ImportError, ValueError, ZeroDivisionError, OverflowError):
+        return {}
+
+
+def build_engine_block(sym):
+    # type: (str) -> str
+    direction = calc_direction_engine(sym, "1h")
+    hmm       = calc_hmm_regime(sym, "4h")
+    garch     = calc_garch_range(sym, "1d")
+    if not direction and not hmm and not garch:
+        return ""
+    out = "=" * 18 + "\n"
+    if direction:
+        bull = direction.get("bullish_pct", 0)
+        bear = direction.get("bearish_pct", 0)
+        neut = direction.get("neutral_pct", 0)
+        bars = "🟢" * int(bull / 20) + "⚪" * (5 - int(bull / 20))
+        out += "📊 *ترجيح الاتجاه:*\n"
+        out += "  {} `{:.0f}%` صاعد | `{:.0f}%` عرضي | `{:.0f}%` هابط\n".format(
+            bars, bull, neut, bear)
+        out += "  {} | ثقة: {}\n".format(
+            direction.get("verdict", ""), direction.get("confidence", ""))
+    if hmm and hmm.get("regime") != "unknown":
+        icons = {"trending": "✅", "ranging": "🔄", "volatile": "⚠️"}
+        icon  = icons.get(hmm.get("regime", ""), "")
+        out += "🏛️ *نظام السوق:* {} {}\n".format(hmm.get("regime_ar", ""), icon)
+    if garch:
+        out += "📉 *GARCH* `{}%` تذبذب\n".format(garch.get("volatility_pct", 0))
+        out += "  دعم:`{}` مقاومة:`{}`\n".format(
+            fmt_price(garch.get("support", 0)),
+            fmt_price(garch.get("resistance", 0)))
+    out += "=" * 18 + "\n"
+    return out
+
+
 def update_coin_vol_history(vol_map):
     # type: (Dict[str, float]) -> None
     """
@@ -4842,6 +5021,11 @@ def scan_whale_confirmation(price_map):
             footer
         )
 
+        # إضافة محرك التحليل للجوكر
+        _joker_engine = build_engine_block(sym)
+        if _joker_engine:
+            msg = msg + "\n" + _joker_engine
+
         send(msg)  # GOLDEN مدمج في msg أعلاه ✅
         if _golden:
             log.info("💎 GOLDEN ENTRY! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, _btcd_val, ats)
@@ -5084,8 +5268,23 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
              "على الحافة ⚡")
         )
 
+        # ── فلتر السيولة الحقيقية ──
+        _dir_lz  = calc_direction_engine(sym, "1h")
+        _hmm_lz  = calc_hmm_regime(sym, "4h")
+        _kd_lz   = get_klines(sym, "1h", 30)
+        _weis_lz = calc_weis_wave(
+            _kd_lz["closes"], _kd_lz["vols"]
+        ) if _kd_lz else 0.5
+        _bull_lz  = _dir_lz.get("bullish_pct", 0) if _dir_lz else 0
+        _regime_lz = _hmm_lz.get("regime", "unknown") if _hmm_lz else "unknown"
+        _real_liq_lz = (
+            _bull_lz  >= 55 and
+            _regime_lz != "volatile" and
+            _weis_lz  >= 0.50
+        )
+
         # ── هل VDelta قوي جداً + R/R ممتاز؟ → ادخل مباشرة ──
-        _direct = vdelta >= 0.80 and rr >= 1.5
+        _direct = vdelta >= 0.80 and rr >= 1.5 and _real_liq_lz
 
         if _direct:
             msg = (
@@ -6619,12 +6818,31 @@ def scan_tps_ats(price_map, vol_now, changes_map):
              "💥 نشاط انفجاري"))))
         )
 
+        # ── فلتر السيولة الحقيقية ──
+        # نحسب المحركات للتحقق من جودة السيولة
+        _direction = calc_direction_engine(sym, "1h")
+        _hmm       = calc_hmm_regime(sym, "4h")
+        _weis      = calc_weis_wave(
+            get_klines(sym, "1h", 30)["closes"] if get_klines(sym, "1h", 30) else [],
+            get_klines(sym, "1h", 30)["vols"]   if get_klines(sym, "1h", 30) else []
+        ) if get_klines(sym, "1h", 30) else 0.5
+
+        # السيولة حقيقية إذا:
+        _bull_pct    = _direction.get("bullish_pct", 0) if _direction else 0
+        _regime      = _hmm.get("regime", "unknown") if _hmm else "unknown"
+        _real_liq    = (
+            _bull_pct  >= 55 and        # محرك الاتجاه إيجابي
+            _regime    != "volatile" and # ليس تقلبات عشوائية
+            _weis      >= 0.50           # حجم صاعد مساوٍ أو غالب
+        )
+
         # ── هل VDelta قوي جداً؟ → إشارة دخول مباشرة بدون انتظار الجوكر ──
-        _direct_entry = vdelta >= 0.80 and score >= 55
+        _direct_entry = vdelta >= 0.80 and score >= 55 and _real_liq
         _price_now    = price_map.get(sym, 0)
 
         if _direct_entry:
             # إشارة دخول مباشرة
+            _engine_block = build_engine_block(sym)
             msg = (
                 "🚀🟢 *DIRECT ENTRY — ادخل الآن!* 🟢🚀\n" +
                 "━━━━━━━━━━━━━━━━━━\n"
@@ -6641,6 +6859,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 "🏷️ القطاع: `{}`\n".format(sector) +
                 "━━━━━━━━━━━━━━━━━━\n"
                 "✅ *ادخل الآن — VDelta {:.0f}% كافٍ للدخول!*\n".format(vdelta*100) +
+                (_engine_block if _engine_block else "") +
                 "🛡️ ضع Stop Loss تحت آخر قاع"
             )
         else:
