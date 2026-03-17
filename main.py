@@ -4635,14 +4635,23 @@ def analyze_tps_ats(sym):
             price  = float(t.get("price", 0))
             qty    = float(t.get("qty",   0))
             ts     = int(t.get("time",    0))
-            is_buy = not t.get("isBuyerMaker", True)
             val    = price * qty
             all_vol += val
             sizes.append(val)
-            if is_buy:
+
+            # ✅ MEXC: isBuyerMaker=True = Maker هو المشتري = صفقة شراء
+            # isBuyerMaker=False = Maker هو البائع = صفقة بيع
+            # إذا غير موجود → نستخدم 0.5 (محايد)
+            buyer_maker = t.get("isBuyerMaker", None)
+            if buyer_maker is True:
                 buy_vol += val
-            else:
+            elif buyer_maker is False:
                 sell_vol += val
+            else:
+                # حقل غير موجود → نقسم بالتساوي
+                buy_vol  += val * 0.5
+                sell_vol += val * 0.5
+
             if now_ms - ts <= window:
                 trade_window += 1
 
