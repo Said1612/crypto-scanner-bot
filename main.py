@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO BOT SIGNAL V16 — UNIFIED ENGINE            ║
+║           MAFIO BOT SIGNAL V20 — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
 ║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -8008,7 +8008,7 @@ def run_daily_liquidity_scan():
             action_txt = "⏳ _راقب — انتظر الإغلاق فوق {:.5f}_".format(sig["zone_high"])
         else:
             sig_icon  = "🌊"
-            sig_title = "DAILY LIQUIDITY SIGNAL V16"
+            sig_title = "DAILY LIQUIDITY SIGNAL V20"
             sig_desc  = "سيولة شرائية — اختراق مؤكد"
             action_txt = "⚡ _إشارة يومية — دخول عند الإغلاق_"
 
@@ -9037,7 +9037,7 @@ def save_state():
     """حفظ كل البيانات المهمة في ملف JSON"""
     try:
         state = {
-            "version":             "V16",
+            "version":             "V20",
             "saved_at":            time.time(),
             # تاريخ الأسعار والأحجام
             "bottom_price_history": bottom_price_history,
@@ -9300,7 +9300,7 @@ def run():
     global last_sr_alert                     # 🌊 Sector Rotation
     global perf_signals, perf_id_counter     # 📊 Performance Tracker
 
-    log.info("🚀 MAFIO BOT V17 يبدأ...")
+    log.info("🚀 MAFIO BOT V20 يبدأ...")
 
     # ✅ نحذف Webhook ونمسح أي تعارض عند البداية
     try:
@@ -9359,7 +9359,7 @@ def run():
     last_sr_alert   = 0.0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V17*\n"
+        "🤖 *MAFIO BOT SIGNAL V20*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
