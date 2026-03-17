@@ -6498,6 +6498,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
         # 🔴 فلتر صارم — VDelta < 55% = 60%+ بيع = لا إشارة أبداً
         if vdelta < 0.55:
+            log.debug("🔴 VDelta رُفض: %s | %.0f%% < 55%%", sym, vdelta*100)
             continue
 
         # baseline تدريجي
@@ -9359,7 +9360,7 @@ def run():
     last_sr_alert   = 0.0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V20*\n"
+        "🤖 *MAFIO BOT SIGNAL V20* ✅ VDelta>=55%\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
