@@ -5002,6 +5002,10 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             score += 8
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
+        # ✅ فلتر أساسي: VDelta >= 55%
+        if vdelta < 0.55:
+            continue
+
         if score < LZ_TPS_SCORE_MIN:
             continue
 
@@ -6537,6 +6541,10 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 or (_vdelta >= 0.65 and _tps >= 0.3 and _ats >= 100)  # تجميع هادئ ✅
                 or (_vdelta >= 0.60 and _ats >= 500)                   # 🔽 ATS متوسط + شراء جيد
             )
+        # ✅ فلتر أساسي: VDelta >= 55% — أكثر من نصف الصفقات شراء
+        if _vdelta < 0.55:
+            continue
+
         if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
