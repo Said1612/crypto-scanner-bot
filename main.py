@@ -4799,53 +4799,65 @@ LH_SCAN_EVERY     = 300   # كل 5 دقائق
 
 def analyze_tps_ats(sym):
     # type: (str) -> Optional[Dict]
-    """يجلب آخر 100 صفقة ويحسب TPS + ATS + VDelta"""
+    """
+    يحسب TPS + ATS + VDelta من مصدرين:
+    1. Trades API — للـ TPS و ATS
+    2. Klines 15m — للـ VDelta (أدق لأن MEXC لا يوفر isBuyerMaker)
+    """
     raw = safe_get(MEXC_TRADES, {"symbol": sym, "limit": TPS_LIMIT})
     if not raw or not isinstance(raw, list) or len(raw) < 10:
         return None
     try:
         now_ms  = int(time.time() * 1000)
         window  = 30000   # آخر 30 ثانية
-        buy_vol = sell_vol = all_vol = 0.0
+        all_vol = 0.0
         trade_window = 0
         sizes   = []
 
         for t in raw:
-            price  = float(t.get("price", 0))
-            qty    = float(t.get("qty",   0))
-            ts     = int(t.get("time",    0))
-            val    = price * qty
+            price = float(t.get("price", 0))
+            qty   = float(t.get("qty",   0))
+            ts    = int(t.get("time",    0))
+            val   = price * qty
             all_vol += val
             sizes.append(val)
-
-            # ✅ MEXC: isBuyerMaker=True = Maker هو المشتري = صفقة شراء
-            # isBuyerMaker=False = Maker هو البائع = صفقة بيع
-            # إذا غير موجود → نستخدم 0.5 (محايد)
-            buyer_maker = t.get("isBuyerMaker", None)
-            if buyer_maker is True:
-                buy_vol += val
-            elif buyer_maker is False:
-                sell_vol += val
-            else:
-                # حقل غير موجود → نقسم بالتساوي
-                buy_vol  += val * 0.5
-                sell_vol += val * 0.5
-
             if now_ms - ts <= window:
                 trade_window += 1
 
         if all_vol <= 0:
             return None
 
-        tps        = trade_window / 30.0
-        ats        = all_vol / len(raw)
-        vdelta     = buy_vol / all_vol if all_vol > 0 else 0.5
+        tps = trade_window / 30.0
+        ats = all_vol / len(raw)
+
+        # ✅ VDelta من Klines — أدق بكثير من isBuyerMaker
+        # شمعة خضراء (Close > Open) = ضغط شراء
+        # شمعة حمراء (Close < Open) = ضغط بيع
+        # الحجم المرجح = أدق من عدد الشموع
+        vdelta = 0.5  # قيمة افتراضية
+        kd = get_klines(sym, "15m", 20)
+        if kd and len(kd["closes"]) >= 10:
+            opens  = kd["opens"]
+            closes = kd["closes"]
+            vols   = kd["vols"]
+            buy_vol_k  = sum(vols[i] for i in range(len(closes))
+                            if closes[i] > opens[i])
+            sell_vol_k = sum(vols[i] for i in range(len(closes))
+                            if closes[i] < opens[i])
+            neutral_k  = sum(vols[i] for i in range(len(closes))
+                            if closes[i] == opens[i])
+            total_k = buy_vol_k + sell_vol_k + neutral_k * 0.5
+            if total_k > 0:
+                vdelta = round((buy_vol_k + neutral_k * 0.5) / total_k, 3)
+
         buyer_type = "🐋 حيتان" if ats >= ATS_WHALE else ("🐟 متوسط" if ats >= 1000 else "🦐 أفراد")
 
         return {
             "tps": round(tps, 2), "ats": round(ats, 2),
-            "vdelta": round(vdelta, 3), "buy_vol": round(buy_vol, 2),
-            "sell_vol": round(sell_vol, 2), "all_vol": round(all_vol, 2),
+            "vdelta": vdelta,
+            "buy_vol": round(buy_vol_k if kd else all_vol * 0.5, 2),
+            "sell_vol": round(sell_vol_k if kd else all_vol * 0.5, 2),
+            "all_vol": round(all_vol, 2),
             "buyer_type": buyer_type,
         }
     except (KeyError, ValueError, ZeroDivisionError, TypeError):
