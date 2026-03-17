@@ -1528,16 +1528,18 @@ def format_murray_block(sym):
     if not mm:
         return ""
 
-    zone  = mm.get("zone_label", "")
-    zname = mm.get("current_zone", "")
-    sup   = fmt_price(mm.get("support", 0))
-    res   = fmt_price(mm.get("resistance", 0))
-    ds    = mm.get("dist_support", 0)
-    dr    = mm.get("dist_resist", 0)
+    zone   = mm.get("zone_label", "")
+    zname  = mm.get("current_zone", "")
+    sup    = fmt_price(mm.get("support", 0))
+    res    = fmt_price(mm.get("resistance", 0))
+    ds     = mm.get("dist_support", 0)
+    dr     = mm.get("dist_resist", 0)
+    # Stop Loss = المستوى الأدنى بمستويين (0/8)
+    sl     = fmt_price(mm.get("key_support", mm.get("support", 0)))
 
     out  = "📐 *Murray Math* منطقة `{}`\n".format(zone)
-    out += "  {} | دعم:`{}` ({:.1f}%) مقاومة:`{}` ({:.1f}%)\n".format(
-        zname, sup, ds, res, dr)
+    out += "  {} | دعم:`{}` مقاومة:`{}`\n".format(zname, sup, res)
+    out += "  🛡️ Stop Loss المقترح: `{}`\n".format(sl)
     return out
 
 
@@ -1570,7 +1572,22 @@ def build_engine_block(sym):
         out += "  دعم:`{}` مقاومة:`{}`\n".format(
             fmt_price(garch.get("support", 0)),
             fmt_price(garch.get("resistance", 0)))
-    if murray:
+    if murray and garch:
+        # نعرض Murray فقط إذا كانت قيمه مختلفة عن GARCH
+        garch_sup = garch.get("support", 0)
+        murray_sup = murray.get("support", 0)
+        diff = abs(garch_sup - murray_sup) / garch_sup * 100 if garch_sup > 0 else 100
+        if diff > 3.0:  # مختلفة بأكثر من 3%
+            mm_block = format_murray_block(sym)
+            if mm_block:
+                out += mm_block
+        else:
+            # فقط أضف المنطقة بدون الأرقام المكررة
+            zone  = murray.get("zone_label", "")
+            zname = murray.get("current_zone", "")
+            if zone:
+                out += "📐 *Murray* منطقة `{}` — {}\n".format(zone, zname)
+    elif murray:
         mm_block = format_murray_block(sym)
         if mm_block:
             out += mm_block
@@ -5597,8 +5614,10 @@ def scan_whale_confirmation(price_map):
             "{}\n".format("🐌 نشاط ضعيف جداً" if tps < 0.5 else ("🐢 نشاط عادي" if tps < 1.0 else ("⚡ نشاط جيد" if tps < 3.0 else ("🔥 نشاط قوي" if tps < 5.0 else "💥 نشاط انفجاري")))) +
             "📡 TPS: `{tps:.2f}` | ATS: `{ats:.0f}$`\n".format(tps=tps, ats=ats) +
             "📊 VDelta: `{vd:.0f}%` شراء حقيقي 🔥\n".format(vd=vdelta*100) +
-            "💰 السعر:  `{pr}` ({chg:+.2f}%)\n".format(
-                pr=fmt_price(price), chg=price_chg) +
+            "💰 السعر:  `{pr}` {chg_txt}\n".format(
+                pr=fmt_price(price),
+                chg_txt=("◼️ لم يتحرك بعد" if abs(price_chg) < 0.01
+                         else "({:+.2f}%)".format(price_chg))) +
             "━━━━━━━━━━━━━━━━━━\n" +
             btcd_line +
             "🏷️ القطاع: `{sec}`\n".format(sec=sector) +
