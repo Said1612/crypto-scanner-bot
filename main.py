@@ -5099,6 +5099,240 @@ def whale_watch_add(sym, ats, vdelta, price):
         log.info("👁️ Whale Watch: %s | ATS=%.0f$ | VD=%.0f%%", sym, ats, vdelta*100)
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🛡️ UNIFIED SIGNAL FILTER — الفلتر النهائي الموحد
+#   كل إشارة يجب أن تمر من هنا قبل الإرسال
+#   يحل مشكلة تضارب الأنظمة نهائياً
+# ═══════════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   🔍 ACCUMULATION DETECTOR — كشف التجميع المبكر
+#   يرصد التجميع الهادئ قبل الانفجار بـ 2-6 ساعات
+#   المؤشرات:
+#   1. حجم متصاعد تدريجياً (وليس انفجار فجائي)
+#   2. سعر ثابت أو صاعد قليلاً
+#   3. VDelta مستمر >= 60% على عدة شموع
+#   4. Higher Lows على 1h
+# ═══════════════════════════════════════════════════════════════════
+
+def detect_accumulation(sym):
+    # type: (str) -> dict
+    """
+    يكشف التجميع المبكر قبل الانفجار
+    يعيد: score, phase, details
+    phase: none | early | active | ready
+    """
+    kd1h = get_klines(sym, "1h", 24)   # آخر 24 ساعة
+    kd15 = get_klines(sym, "15m", 48)  # آخر 12 ساعة
+
+    if not kd1h or len(kd1h["closes"]) < 12:
+        return {"score": 0, "phase": "none", "details": {}}
+
+    closes1h = kd1h["closes"]
+    vols1h   = kd1h["vols"]
+    opens1h  = kd1h["opens"]
+    lows1h   = kd1h["lows"]
+    n        = len(closes1h)
+
+    score   = 0
+    details = {}
+
+    try:
+        # ── 1. حجم متصاعد تدريجياً ──────────────
+        # نقسم على 3 فترات: قديم / وسط / حديث
+        third   = n // 3
+        vol_old = sum(vols1h[:third])     / third if third > 0 else 0
+        vol_mid = sum(vols1h[third:2*third]) / third if third > 0 else 0
+        vol_new = sum(vols1h[2*third:])   / max(n - 2*third, 1)
+
+        # التجميع = حجم يتصاعد تدريجياً (وليس قفزة فجائية)
+        gradual_increase = (vol_mid > vol_old * 1.1 and
+                           vol_new > vol_mid * 1.1 and
+                           vol_new < vol_old * 5.0)   # ليس انفجاراً
+
+        if gradual_increase:
+            score += 30
+            details["vol_gradient"] = "✅ حجم يتصاعد تدريجياً"
+        else:
+            details["vol_gradient"] = "❌"
+
+        # ── 2. سعر ثابت أو صاعد قليلاً ──────────
+        price_change = (closes1h[-1] - closes1h[-12]) / closes1h[-12] * 100 if closes1h[-12] > 0 else 0
+        if -3.0 <= price_change <= 8.0:
+            score += 20
+            details["price_stability"] = "✅ سعر مستقر {:.1f}%".format(price_change)
+        else:
+            details["price_stability"] = "❌ {:.1f}%".format(price_change)
+
+        # ── 3. VDelta مستمر >= 60% ────────────────
+        if kd15 and len(kd15["closes"]) >= 20:
+            c15 = kd15["closes"]
+            o15 = kd15["opens"]
+            v15 = kd15["vols"]
+            # حساب VDelta لكل شمعة
+            vd_candles = []
+            for i in range(len(c15)):
+                if c15[i] > o15[i]:
+                    vd_candles.append(1.0)   # شمعة شراء
+                elif c15[i] < o15[i]:
+                    vd_candles.append(0.0)   # شمعة بيع
+                else:
+                    vd_candles.append(0.5)
+
+            # VDelta المستمر = معدل آخر 20 شمعة
+            avg_vd = sum(vd_candles[-20:]) / 20
+            if avg_vd >= 0.60:
+                score += 25
+                details["vdelta_continuous"] = "✅ VDelta مستمر {:.0f}%".format(avg_vd*100)
+            else:
+                details["vdelta_continuous"] = "❌ VDelta {:.0f}%".format(avg_vd*100)
+        else:
+            avg_vd = 0.5
+            details["vdelta_continuous"] = "⚠️ بيانات غير كافية"
+
+        # ── 4. Higher Lows (قيعان صاعدة) ─────────
+        recent_lows = lows1h[-8:]
+        hl_count = sum(1 for i in range(1, len(recent_lows))
+                      if recent_lows[i] >= recent_lows[i-1] * 0.998)
+        hl_ratio = hl_count / (len(recent_lows) - 1) if len(recent_lows) > 1 else 0
+
+        if hl_ratio >= 0.60:
+            score += 25
+            details["higher_lows"] = "✅ قيعان صاعدة {:.0f}%".format(hl_ratio*100)
+        else:
+            details["higher_lows"] = "❌ {:.0f}%".format(hl_ratio*100)
+
+        # ── تحديد المرحلة ────────────────────────
+        if score >= 80:
+            phase = "ready"      # جاهز للانطلاق
+            phase_ar = "جاهز للانطلاق 🚀"
+        elif score >= 60:
+            phase = "active"     # تجميع نشط
+            phase_ar = "تجميع نشط 🔥"
+        elif score >= 35:
+            phase = "early"      # تجميع مبكر
+            phase_ar = "تجميع مبكر 👁️"
+        else:
+            phase = "none"
+            phase_ar = "لا تجميع"
+
+        return {
+            "score":    score,
+            "phase":    phase,
+            "phase_ar": phase_ar,
+            "details":  details,
+            "avg_vd":   round(avg_vd * 100, 1),
+            "price_chg": round(price_change, 2),
+        }
+
+    except (IndexError, ValueError, ZeroDivisionError):
+        return {"score": 0, "phase": "none", "phase_ar": "خطأ", "details": {}}
+
+
+def check_trend_filter(sym, change_24h):
+    # type: (str, float) -> tuple
+    """
+    فلتر اتجاه السوق — يمنع الدخول في ترند هابط
+    يعيد: (passed, reason)
+    """
+    # 1. تغيير 24h شديد السلبية
+    if change_24h < -10.0:
+        return False, "هبوط حاد {:.1f}%".format(change_24h)
+
+    # 2. فحص EMA على 4h
+    kd = get_klines(sym, "4h", 20)
+    if kd and len(kd["closes"]) >= 15:
+        closes = kd["closes"]
+        ema15  = sum(closes[-15:]) / 15
+        ema5   = sum(closes[-5:])  / 5
+
+        # EMA5 تحت EMA15 = ترند هابط
+        if ema5 < ema15 * 0.97:
+            return False, "EMA هابط على 4h"
+
+    # 3. فحص إذا ارتفع كثيراً (Pump) — فات الأوان
+    if change_24h > 20.0:
+        return False, "Pump مكتمل {:.1f}%".format(change_24h)
+
+    return True, "OK"
+
+
+
+def unified_signal_check(sym, vdelta, ats, vol, change_24h, signal_type="WATCH"):
+    # type: (str, float, float, float, float, str) -> tuple
+    """
+    الفلتر النهائي الموحد — يعيد (passed, reason)
+    
+    signal_type: WATCH | ENTRY | JOKER
+    
+    يفحص 6 شروط:
+    1. VDelta minimum
+    2. السوق ليس DANGER
+    3. العملة ليست في ترند هابط قوي
+    4. الحجم كافٍ
+    5. ليست في منتصف Pump
+    6. MTF لا يتعارض
+    """
+    reasons = []
+
+    # ── 1. VDelta ──────────────────────────────
+    min_vd = {
+        "WATCH":  0.66,
+        "ENTRY":  0.75,
+        "JOKER":  0.65,
+    }.get(signal_type, 0.66)
+
+    if vdelta < min_vd:
+        return False, "VDelta {:.0f}% < {:.0f}%".format(vdelta*100, min_vd*100)
+
+    # ── 2. حالة السوق ──────────────────────────
+    if market_state == "DANGER" and signal_type != "JOKER":
+        return False, "السوق DANGER"
+
+    # ── 3. الترند الهابط القوي ─────────────────
+    # تغيير 24h أقل من -8% = ترند هابط قوي
+    if change_24h < -8.0:
+        return False, "ترند هابط قوي {:.1f}%".format(change_24h)
+
+    # ── 4. الحجم الكافي ────────────────────────
+    min_vol = {
+        "WATCH":  500_000,
+        "ENTRY":  1_000_000,
+        "JOKER":  500_000,
+    }.get(signal_type, 500_000)
+
+    if vol < min_vol:
+        return False, "حجم ضعيف {:.0f}K".format(vol/1000)
+
+    # ── 5. Fake Pump — ارتفاع مفاجئ كبير ──────
+    # إذا ارتفع أكثر من 15% في 24h = فات الأوان
+    if change_24h > 15.0:
+        return False, "Pump مكتمل {:.1f}%".format(change_24h)
+
+    # ── 6. MTF Check (سريع) ────────────────────
+    # نفحص فقط EMA السريع على 4h
+    kd4h = get_klines(sym, "4h", 20)
+    if kd4h and len(kd4h["closes"]) >= 10:
+        closes = kd4h["closes"]
+        ema10  = sum(closes[-10:]) / 10
+        # السعر تحت EMA10 على 4h = ترند هابط
+        if closes[-1] < ema10 * 0.97 and signal_type == "WATCH":
+            return False, "تحت EMA 4h — ترند هابط"
+
+    return True, "OK"
+
+
+def should_send_signal(sym, vdelta, ats, vol, change_24h, signal_type="WATCH"):
+    # type: (str, float, float, float, float, str) -> bool
+    """واجهة بسيطة للفلتر — True = أرسل | False = لا ترسل"""
+    passed, reason = unified_signal_check(sym, vdelta, ats, vol, change_24h, signal_type)
+    if not passed:
+        log.info("🛡️ FILTER_REJECT [%s] %s | %s", signal_type, sym, reason)
+    return passed
+
+
 def scan_whale_confirmation(price_map):
     # type: (Dict) -> None
     """
@@ -7020,10 +7254,13 @@ def scan_tps_ats(price_map, vol_now, changes_map):
              "💥 نشاط انفجاري"))))
         )
 
-        # ── فلتر السيولة الحقيقية + MTF ──
+        # ── فلتر السيولة الحقيقية + MTF + Trend + Accumulation ──
         _direction = calc_direction_engine(sym, "1h")
         _hmm       = calc_hmm_regime(sym, "4h")
         _mtf       = calc_mtf_analysis(sym)
+        # فلتر الاتجاه وكشف التجميع
+        _trend_ok, _trend_reason = check_trend_filter(sym, chg24)
+        _accum = detect_accumulation(sym)
         _weis      = calc_weis_wave(
             get_klines(sym, "1h", 30)["closes"] if get_klines(sym, "1h", 30) else [],
             get_klines(sym, "1h", 30)["vols"]   if get_klines(sym, "1h", 30) else []
@@ -7034,12 +7271,15 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _regime      = _hmm.get("regime", "unknown") if _hmm else "unknown"
         _mtf_bias    = _mtf.get("bias", "neutral") if _mtf else "neutral"
         _mtf_conflict = _mtf.get("conflict", False) if _mtf else False
+        _accum_phase  = _accum.get("phase", "none") if _accum else "none"
         _real_liq    = (
-            _bull_pct  >= 55 and         # محرك الاتجاه إيجابي
-            _regime    != "volatile" and  # ليس تقلبات عشوائية
-            _weis      >= 0.50 and        # حجم صاعد مساوٍ أو غالب
-            _mtf_bias  != "bearish" and   # MTF ليس هابطاً
-            not _mtf_conflict             # لا تضارب بين الأطر
+            _bull_pct  >= 55 and              # محرك الاتجاه إيجابي
+            _regime    != "volatile" and       # ليس تقلبات عشوائية
+            _weis      >= 0.50 and             # حجم صاعد مساوٍ أو غالب
+            _mtf_bias  != "bearish" and        # MTF ليس هابطاً
+            not _mtf_conflict and              # لا تضارب بين الأطر
+            _trend_ok and                      # الترند ليس هابطاً
+            _accum_phase  != "none"            # يوجد تجميع فعلي
         )
 
         # ── هل VDelta قوي جداً؟ → إشارة دخول مباشرة بدون انتظار الجوكر ──
@@ -7049,6 +7289,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         if _direct_entry:
             # إشارة دخول مباشرة
             _engine_block = build_engine_block(sym)
+            _accum_txt = "🔍 *التجميع:* {} (نقاط: {})\n".format(
+                _accum.get("phase_ar",""), _accum.get("score",0)) if _accum else ""
             msg = (
                 "🚀🟢 *DIRECT ENTRY — ادخل الآن!* 🟢🚀\n" +
                 "━━━━━━━━━━━━━━━━━━\n"
@@ -7065,6 +7307,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 "🏷️ القطاع: `{}`\n".format(sector) +
                 "━━━━━━━━━━━━━━━━━━\n"
                 "✅ *ادخل الآن — VDelta {:.0f}% كافٍ للدخول!*\n".format(vdelta*100) +
+                (_accum_txt if _accum_txt else "") +
                 (_engine_block if _engine_block else "") +
                 (format_mtf_block(sym) if format_mtf_block(sym) else "") +
                 "🛡️ ضع Stop Loss تحت آخر قاع"
