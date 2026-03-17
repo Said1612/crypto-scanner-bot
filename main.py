@@ -4983,7 +4983,8 @@ def scan_whale_confirmation(price_map):
             )
 
         # ── BTC.D tag للدمج مع ENTRY ──
-        _btcd_val  = get_btc_dominance(vol_now) if vol_now else 0.0
+        _btcd_vol  = {t["symbol"]: float(t.get("quoteVolume",0)) for t in all_tickers} if all_tickers else {}
+        _btcd_val  = get_btc_dominance(_btcd_vol) if _btcd_vol else 0.0
         _btcd_fall = (len(btcd_history) >= 2 and _btcd_val > 0 and
                       _btcd_val < btcd_history[0] - 1.0)
         _alt_now   = _btcd_val > 0 and _btcd_val < BTCD_ALT_THRESHOLD
