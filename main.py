@@ -5373,10 +5373,11 @@ def scan_whale_confirmation(price_map):
         # 1. VDelta قوي جداً (80%+) → ادخل بدون شرط ATS
         # 2. ATS + VDelta كلاهما فوق الحد → دخول عادي
         # 3. ATS كبير جداً (حوت ضخم) → ادخل حتى لو VDelta متوسط
-        _vdelta_strong = vdelta >= 0.80   # شراء 80%+ = إشارة قوية
-        _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN
-        _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50
-        if not (_vdelta_strong or _normal_entry or _big_whale):
+        _vdelta_strong = vdelta >= 0.80                           # مسار 1: VDelta قوي جداً
+        _early_entry   = ats >= 300  and vdelta >= 0.70          # مسار 2: دخول مبكر (ATS منخفض لكن VDelta عالٍ)
+        _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN  # مسار 3: عادي
+        _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50     # مسار 4: حوت ضخم
+        if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale):
             continue
 
         # حساب التغير منذ إشارة الأفراد
