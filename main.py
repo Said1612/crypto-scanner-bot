@@ -864,7 +864,19 @@ def send(msg, personal_only=False):
 
     personal_only=True → الشخصي فقط (للأوامر الخاصة)
     """
-    if "YOUR" in TELEGRAM_TOKEN:
+    # ✅ فلتر VDelta عالمي — يمنع أي WATCH بـ VDelta < 66%
+    # يفحص الرسالة مباشرة قبل الإرسال
+    if 'WATCH ALERT' in msg and 'نشاط مشبوه' in msg:
+        import re as _re
+        vd_match = _re.search(r'VDelta[:\s*`]+(\d+)%', msg)
+        if vd_match:
+            vd_val = int(vd_match.group(1))
+            if vd_val < 66:
+                log.info("🚫 send() BLOCKED: VDelta=%d%% < 66%% | %s",
+                         vd_val, msg[:50])
+                return
+
+    if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
         log.info("[TELEGRAM] %s", msg[:80])
         return
 
