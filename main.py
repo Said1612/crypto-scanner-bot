@@ -4691,7 +4691,7 @@ lz_tps_alerted    = {}      # type: Dict[str, float]
 WHALE_WATCH_TTL    = 14400   # يراقب العملة 4 ساعات بعد إشارة الأفراد
 WHALE_CHECK_EVERY  = 60      # ⚡ يتحقق كل دقيقة (كان 5 دقائق)
 WHALE_ATS_MIN      = 500     # 🔽 ATS > 500$ = حيتان (كان 3000$) — مناسب للـ Altcoins
-WHALE_VDELTA_MIN   = 0.55    # 🔽 VDelta 55%+ (كان 60%) — أكثر حساسية
+WHALE_VDELTA_MIN   = 0.65    # VDelta 65%+
 
 # قائمة المراقبة: {sym: {time, ats_then, vdelta_then, price_then}}
 whale_watchlist    = {}   # type: Dict[str, Dict]
@@ -5002,8 +5002,8 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             score += 8
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
-        # ✅ فلتر أساسي: VDelta >= 55%
-        if vdelta < 0.55:
+        # ✅ فلتر أساسي: VDelta >= 65%
+        if vdelta < 0.65:
             continue
 
         if score < LZ_TPS_SCORE_MIN:
@@ -6496,9 +6496,9 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         ats    = stats["ats"]
         vdelta = stats["vdelta"]
 
-        # 🔴 فلتر صارم — VDelta < 55% = 60%+ بيع = لا إشارة أبداً
-        if vdelta < 0.55:
-            log.debug("🔴 VDelta رُفض: %s | %.0f%% < 55%%", sym, vdelta*100)
+        # 🔴 فلتر صارم — VDelta < 65% = لا إشارة أبداً
+        if vdelta < 0.65:
+            log.debug("🔴 VDelta رُفض: %s | %.0f%% < 65%%", sym, vdelta*100)
             continue
 
         # baseline تدريجي
@@ -6538,16 +6538,16 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         # ✅ فلتر "قريبة من الانطلاق"
         # Bull Mode = فلاتر مخففة
         if BULL_MODE_ACTIVE:
-            _ready = _vdelta >= 0.55  # 🔽 Bull Mode = 55% يكفي (كان 60%)
+            _ready = _vdelta >= 0.65  # Bull Mode = 65% يكفي
         else:
             _ready = (
                 _vdelta >= 0.80                                        # 💥 شراء 80%+ = ادخل فوراً
                 or _vdelta >= 0.70                                     # شراء قوي ✅
                 or (_vdelta >= 0.65 and _tps >= 0.3 and _ats >= 100)  # تجميع هادئ ✅
-                or (_vdelta >= 0.60 and _ats >= 500)                   # 🔽 ATS متوسط + شراء جيد
+                or (_vdelta >= 0.65 and _ats >= 500)                   # ATS متوسط + شراء جيد
             )
-        # ✅ فلتر أساسي: VDelta >= 55% — أكثر من نصف الصفقات شراء
-        if _vdelta < 0.55:
+        # ✅ فلتر أساسي: VDelta >= 65%
+        if _vdelta < 0.65:
             continue
 
         if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready:
