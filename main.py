@@ -1406,6 +1406,177 @@ def build_engine_block(sym):
     return out
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📊 MULTI-TIMEFRAME ANALYSIS — تحليل متعدد الأطراف الزمنية
+#   يفحص 3 أطر: 15m (قصير) + 1h (متوسط) + 4h (طويل)
+#   المنطق: الإطار الكبير يحكم — إذا تعارض مع الصغير = خصم
+# ═══════════════════════════════════════════════════════════════════
+
+def calc_mtf_analysis(sym):
+    # type: (str) -> dict
+    """
+    تحليل متعدد الأطراف الزمنية
+    يعيد:
+    - score: نقاط التوافق 0-100
+    - verdict: حكم نهائي
+    - bias: اتجاه غالب (bullish/bearish/neutral)
+    - details: تفاصيل كل إطار
+    """
+    results = {}
+
+    # حساب الاتجاه لكل إطار
+    for interval, weight, label in [
+        ("15m", 0.20, "15m"),   # قصير المدى — وزن 20%
+        ("1h",  0.40, "1h"),    # متوسط المدى — وزن 40%
+        ("4h",  0.40, "4h"),    # طويل المدى — وزن 40%
+    ]:
+        kd = get_klines(sym, interval, 50)
+        if not kd or len(kd["closes"]) < 20:
+            results[interval] = {"bull": 50, "weight": weight, "label": label}
+            continue
+
+        closes = kd["closes"]
+        vols   = kd["vols"]
+        opens  = kd["opens"]
+        highs  = kd["highs"]
+        lows   = kd["lows"]
+        n      = len(closes)
+
+        # 1. اتجاه السعر
+        price_trend = (closes[-1] - closes[-10]) / closes[-10] * 100 if closes[-10] > 0 else 0
+
+        # 2. موقع السعر من المتوسط المتحرك (EMA20)
+        ema20 = sum(closes[-20:]) / 20
+        above_ema = closes[-1] > ema20
+
+        # 3. Volume Confirmation
+        buy_vol  = sum(vols[i] for i in range(n) if closes[i] > opens[i])
+        sell_vol = sum(vols[i] for i in range(n) if closes[i] < opens[i])
+        total_v  = buy_vol + sell_vol
+        vol_bull = buy_vol / total_v if total_v > 0 else 0.5
+
+        # 4. Higher Lows (اتجاه صاعد)
+        recent_lows = lows[-10:]
+        higher_lows = sum(1 for i in range(1, len(recent_lows))
+                         if recent_lows[i] > recent_lows[i-1])
+        hl_ratio = higher_lows / (len(recent_lows) - 1) if len(recent_lows) > 1 else 0.5
+
+        # تجميع النقاط
+        bull_score = (
+            (50 + price_trend * 2) * 0.30 +   # اتجاه السعر
+            (100 if above_ema else 0) * 0.25 + # فوق/تحت EMA
+            vol_bull * 100 * 0.25 +             # حجم شرائي
+            hl_ratio * 100 * 0.20               # Higher Lows
+        )
+        bull_score = max(0, min(100, bull_score))
+
+        results[interval] = {
+            "bull": round(bull_score, 1),
+            "weight": weight,
+            "label": label,
+            "above_ema": above_ema,
+            "price_trend": round(price_trend, 2),
+            "vol_bull": round(vol_bull * 100, 1),
+        }
+
+    if not results:
+        return {"score": 50, "verdict": "غير محدد", "bias": "neutral", "details": {}}
+
+    # ── حساب التوافق بين الأطر ──
+    weighted_bull = sum(r["bull"] * r["weight"] for r in results.values())
+
+    # ── فلتر التضارب الزمني ──
+    # إذا 4h هابط لكن 15m صاعد = خصم الإشارة القصيرة
+    bull_4h  = results.get("4h",  {}).get("bull", 50)
+    bull_1h  = results.get("1h",  {}).get("bull", 50)
+    bull_15m = results.get("15m", {}).get("bull", 50)
+
+    # تضارب: الإطار الصغير عكس الكبير
+    conflict_4h_15m = (bull_4h < 40 and bull_15m > 65)
+    conflict_4h_1h  = (bull_4h < 40 and bull_1h  > 65)
+
+    # خصم عند التضارب
+    if conflict_4h_15m and conflict_4h_1h:
+        weighted_bull *= 0.60  # تضارب شديد
+        conflict_note = "⚠️ تضارب حاد — 4h هابط"
+    elif conflict_4h_15m:
+        weighted_bull *= 0.80  # تضارب خفيف
+        conflict_note = "🟡 تضارب خفيف"
+    else:
+        conflict_note = ""
+
+    # توافق: كل الأطر في نفس الاتجاه
+    all_bullish = bull_4h > 60 and bull_1h > 60 and bull_15m > 60
+    all_bearish = bull_4h < 40 and bull_1h < 40 and bull_15m < 40
+
+    if all_bullish:
+        weighted_bull = min(100, weighted_bull * 1.10)  # مكافأة التوافق
+
+    # الحكم النهائي
+    score = round(weighted_bull, 1)
+
+    if score >= 70 and all_bullish:
+        verdict = "🟢 توافق كامل — دخول قوي"
+        bias    = "bullish"
+    elif score >= 65:
+        verdict = "🟢 صاعد — دخول جيد"
+        bias    = "bullish"
+    elif score >= 55:
+        verdict = "🟡 ميل صاعد — دخول حذر"
+        bias    = "neutral"
+    elif score <= 35:
+        verdict = "🔴 هابط — لا تدخل"
+        bias    = "bearish"
+    else:
+        verdict = "⚪ عرضي — انتظر"
+        bias    = "neutral"
+
+    if conflict_note:
+        verdict = conflict_note + " | " + verdict
+
+    return {
+        "score":   score,
+        "verdict": verdict,
+        "bias":    bias,
+        "details": results,
+        "all_bullish": all_bullish,
+        "conflict": bool(conflict_note),
+    }
+
+
+def format_mtf_block(sym):
+    # type: (str) -> str
+    """يبني بلوك MTF للإشارة"""
+    mtf = calc_mtf_analysis(sym)
+    if not mtf:
+        return ""
+
+    details = mtf.get("details", {})
+    score   = mtf.get("score", 50)
+    verdict = mtf.get("verdict", "")
+
+    # شريط التوافق
+    bar = "🟢" * int(score / 20) + "⚪" * (5 - int(score / 20))
+
+    out  = "📈 *MTF Analysis:*\n"
+    out += "  {} `{:.0f}%` توافق\n".format(bar, score)
+
+    # تفاصيل كل إطار
+    icons = {"15m": "⚡", "1h": "🕐", "4h": "📊"}
+    for iv in ["4h", "1h", "15m"]:
+        d = details.get(iv, {})
+        if not d:
+            continue
+        bull = d.get("bull", 50)
+        icon = icons.get(iv, "")
+        trend_icon = "🟢" if bull >= 65 else ("🔴" if bull <= 40 else "🟡")
+        out += "  {} {} `{:.0f}%`\n".format(icon, iv, bull)
+
+    out += "  {}\n".format(verdict)
+    return out
+
+
 def update_coin_vol_history(vol_map):
     # type: (Dict[str, float]) -> None
     """
@@ -4903,7 +5074,7 @@ def whale_watch_add(sym, ats, vdelta, price):
     """يضيف عملة لقائمة مراقبة الحيتان"""
     global whale_watchlist
     # ✅ فلتر VDelta — لا نضيف عملات بيعها أكثر من شرائها
-    if vdelta < 0.55:
+    if vdelta < 0.60:
         log.debug("🚫 whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
         return
     if sym not in whale_watchlist:
@@ -5214,7 +5385,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
         # ✅ فلتر أساسي: VDelta >= 65%
-        if vdelta < 0.65:
+        if vdelta < 0.66:
             continue
 
         if score < LZ_TPS_SCORE_MIN:
@@ -6724,8 +6895,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         vdelta = stats["vdelta"]
 
         # 🔴 فلتر صارم — VDelta < 65% = لا إشارة أبداً
-        if vdelta < 0.65:
-            log.info("🔴 VDELTA_REJECT: %s | %.0f%% < 65%%", sym, vdelta*100)
+        if vdelta < 0.66:
+            log.info("🔴 VDELTA_REJECT: %s | %.0f%% < 66%%", sym, vdelta*100)
             continue
 
         # baseline تدريجي
@@ -6774,7 +6945,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 or (_vdelta >= 0.65 and _ats >= 500)                   # ATS متوسط + شراء جيد
             )
         # ✅ فلتر أساسي: VDelta >= 65%
-        if _vdelta < 0.65:
+        if _vdelta < 0.66:
             continue
 
         if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready:
@@ -6837,10 +7008,10 @@ def scan_tps_ats(price_map, vol_now, changes_map):
              "💥 نشاط انفجاري"))))
         )
 
-        # ── فلتر السيولة الحقيقية ──
-        # نحسب المحركات للتحقق من جودة السيولة
+        # ── فلتر السيولة الحقيقية + MTF ──
         _direction = calc_direction_engine(sym, "1h")
         _hmm       = calc_hmm_regime(sym, "4h")
+        _mtf       = calc_mtf_analysis(sym)
         _weis      = calc_weis_wave(
             get_klines(sym, "1h", 30)["closes"] if get_klines(sym, "1h", 30) else [],
             get_klines(sym, "1h", 30)["vols"]   if get_klines(sym, "1h", 30) else []
@@ -6849,10 +7020,14 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         # السيولة حقيقية إذا:
         _bull_pct    = _direction.get("bullish_pct", 0) if _direction else 0
         _regime      = _hmm.get("regime", "unknown") if _hmm else "unknown"
+        _mtf_bias    = _mtf.get("bias", "neutral") if _mtf else "neutral"
+        _mtf_conflict = _mtf.get("conflict", False) if _mtf else False
         _real_liq    = (
-            _bull_pct  >= 55 and        # محرك الاتجاه إيجابي
-            _regime    != "volatile" and # ليس تقلبات عشوائية
-            _weis      >= 0.50           # حجم صاعد مساوٍ أو غالب
+            _bull_pct  >= 55 and         # محرك الاتجاه إيجابي
+            _regime    != "volatile" and  # ليس تقلبات عشوائية
+            _weis      >= 0.50 and        # حجم صاعد مساوٍ أو غالب
+            _mtf_bias  != "bearish" and   # MTF ليس هابطاً
+            not _mtf_conflict             # لا تضارب بين الأطر
         )
 
         # ── هل VDelta قوي جداً؟ → إشارة دخول مباشرة بدون انتظار الجوكر ──
@@ -6879,6 +7054,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 "━━━━━━━━━━━━━━━━━━\n"
                 "✅ *ادخل الآن — VDelta {:.0f}% كافٍ للدخول!*\n".format(vdelta*100) +
                 (_engine_block if _engine_block else "") +
+                (format_mtf_block(sym) if format_mtf_block(sym) else "") +
                 "🛡️ ضع Stop Loss تحت آخر قاع"
             )
         else:
@@ -9607,7 +9783,7 @@ def run():
     last_sr_alert   = 0.0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V20* ✅ VDelta>=65% 🔥\n"
+        "🤖 *MAFIO BOT SIGNAL V20* ✅ VDelta>=66% 🔥 MTF✅\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
