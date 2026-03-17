@@ -4902,6 +4902,10 @@ def whale_watch_add(sym, ats, vdelta, price):
     # type: (str, float, float, float) -> None
     """يضيف عملة لقائمة مراقبة الحيتان"""
     global whale_watchlist
+    # ✅ فلتر VDelta — لا نضيف عملات بيعها أكثر من شرائها
+    if vdelta < 0.55:
+        log.debug("🚫 whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
+        return
     if sym not in whale_watchlist:
         whale_watchlist[sym] = {
             "time":        time.time(),
@@ -5018,6 +5022,7 @@ def scan_whale_confirmation(price_map):
             "━━━━━━━━━━━━━━━━━━\n" +
             evolution_line +
             "{}\n".format("🐌 نشاط ضعيف جداً" if tps < 0.5 else ("🐢 نشاط عادي" if tps < 1.0 else ("⚡ نشاط جيد" if tps < 3.0 else ("🔥 نشاط قوي" if tps < 5.0 else "💥 نشاط انفجاري")))) +
+            "📡 TPS: `{tps:.2f}` | ATS: `{ats:.0f}$`\n".format(tps=tps, ats=ats) +
             "📊 VDelta: `{vd:.0f}%` شراء حقيقي 🔥\n".format(vd=vdelta*100) +
             "💰 السعر:  `{pr}` ({chg:+.2f}%)\n".format(
                 pr=fmt_price(price), chg=price_chg) +
