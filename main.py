@@ -6661,6 +6661,7 @@ def get_ats_label(ats):
 
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
+    log.info("🔒 scan_tps_ats V20 — VDelta filter >= 65%%")
     """
     يفحص أفضل 40 عملة بالحجم
     يبحث عن: TPS spike + ATS حيتان + VDelta قوي
