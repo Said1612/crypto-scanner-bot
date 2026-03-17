@@ -6496,6 +6496,10 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         ats    = stats["ats"]
         vdelta = stats["vdelta"]
 
+        # 🔴 فلتر صارم — VDelta < 55% = 60%+ بيع = لا إشارة أبداً
+        if vdelta < 0.55:
+            continue
+
         # baseline تدريجي
         base   = tps_baseline.get(sym, tps)
         ratio  = tps / base if base > 0 else 1.0
