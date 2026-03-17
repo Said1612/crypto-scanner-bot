@@ -142,8 +142,8 @@ PD_MIN_DROP        = 5.0
 PD_LOOKBACK        = 12
 
 # ── Sector Rotation ──────────────────────────────
-SECTOR_HOT_CHANGE  = 2.0       # 🧪 TEST (كان 3.0)
-SECTOR_MIN_RISING  = 50.0      # 🧪 TEST (كان 60.0)
+SECTOR_HOT_CHANGE  = 1.5       # 🔽 كل 1.5%+ يكفي (كان 2.0)
+SECTOR_MIN_RISING  = 40.0      # 🔽 40%+ عملات صاعدة يكفي (كان 50%)
 SECTOR_BONUS       = 15
 
 # ── Volume & Order Book ──────────────────────────
@@ -243,7 +243,7 @@ PRE_MAX_VOL        = MAX_VOL_USDT
 PRICES_EVERY       = 12
 TICKERS_EVERY      = 1800
 BTC_EVERY          = 300   # ⚡ كل 5 دقائق (كان 30)
-SECTORS_EVERY      = 1800
+SECTORS_EVERY      = 600   # ⚡ كل 10 دقائق (كان 30)
 DEEP_SCAN_EVERY    = 3600
 STALE_EVERY        = 3600
 REPORT_EVERY       = 21600
@@ -264,7 +264,7 @@ MOMENTUM_COOLDOWN  = 14400
 # يرصد تدفق السيولة بين القطاعات
 FLOW_WINDOW        = 5         # عدد القراءات للمقارنة (~60 ثانية)
 FLOW_VOL_SURGE     = 1.3       # 🧪 TEST (كان 1.5) — نسبة ارتفاع حجم القطاع
-FLOW_CHANGE_MIN    = 1.0       # 🧪 TEST (كان 2.0) — متوسط تغيير القطاع %
+FLOW_CHANGE_MIN    = 0.5       # 🔽 0.5%+ يكفي (كان 1.0)
 FLOW_EXIT_DROP     = -1.5      # نسبة انخفاض = خروج سيولة من القطاع
 FLOW_ALERT_COOL    = 600       # 🧪 TEST (كان 900) — 10 دقائق cooldown
 FLOW_HISTORY_MAX   = 20        # أقصى تاريخ محفوظ للقطاع
