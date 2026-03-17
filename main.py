@@ -120,7 +120,7 @@ EXTRA_COINS = [
     "NEARUSDT", "SOLUSDT", "AVAXUSDT", "ADAUSDT",
 ]
 
-TPS_SPIKE      = 3.0     # TPS ارتفع 3× = نشاط غير عادي
+TPS_SPIKE      = 2.0     # TPS ارتفع 2× = نشاط غير عادي (كان 3×)
 TPS_MAX_CHANGE = 10.0    # 🔽 تجاهل إذا ارتفعت +10% في 24h (كان 6%)
 ATS_WHALE      = 5000    # صفقة > 5000 USDT = حيتان
 ATS_RETAIL     = 500     # صفقة < 500 USDT  = أفراد
@@ -1289,6 +1289,48 @@ def calc_vol_rsi(closes, vols, period=14):
         return 0.5
 
 
+
+def calc_vdelta_ma(sym, period=10, interval="15m"):
+    # type: (str, int, str) -> float
+    """
+    VDelta Moving Average — متوسط ضغط الشراء على آخر N شمعة
+    أدق بكثير من VDelta اللحظي
+    يكشف التجميع المؤسسي الهادئ
+    """
+    kd = get_klines(sym, interval, period + 5)
+    if not kd or len(kd["closes"]) < period:
+        return 0.5
+    try:
+        closes = kd["closes"]
+        opens  = kd["opens"]
+        vols   = kd["vols"]
+        n      = len(closes)
+
+        # حساب VDelta لكل شمعة مرجحاً بالحجم
+        vd_values = []
+        for i in range(n):
+            v = vols[i] if i < len(vols) else 0
+            if closes[i] > opens[i]:
+                vd_values.append((1.0, v))   # شراء
+            elif closes[i] < opens[i]:
+                vd_values.append((0.0, v))   # بيع
+            else:
+                vd_values.append((0.5, v))   # محايد
+
+        # آخر period شمعة مرجحة بالحجم
+        recent = vd_values[-period:]
+        total_vol  = sum(v for _, v in recent)
+        if total_vol <= 0:
+            return sum(vd for vd, _ in recent) / len(recent)
+
+        weighted_vd = sum(vd * v for vd, v in recent) / total_vol
+        return round(weighted_vd, 3)
+
+    except (IndexError, ValueError, ZeroDivisionError):
+        return 0.5
+
+
+
 def calc_direction_engine(sym, interval="1h"):
     # type: (str, str) -> dict
     kd = get_klines(sym, interval, 60)
@@ -1387,11 +1429,125 @@ def calc_garch_range(sym, interval="1d"):
         return {}
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📐 MURRAY MATH — مستويات الدعم والمقاومة الرياضية
+#   تقسم النطاق السعري إلى 8 مستويات متساوية
+#   0/8 = دعم قوي جداً | 4/8 = محور | 8/8 = مقاومة قوية جداً
+# ═══════════════════════════════════════════════════════════════════
+
+def calc_murray_math(sym, interval="1d"):
+    # type: (str, str) -> dict
+    """
+    Murray Math — مستويات الدعم والمقاومة الرياضية
+    يعيد: levels, current_level, support, resistance, zone
+    """
+    kd = get_klines(sym, interval, 64)
+    if not kd or len(kd["closes"]) < 20:
+        return {}
+    try:
+        highs  = kd["highs"]
+        lows   = kd["lows"]
+        closes = kd["closes"]
+
+        # أعلى وأدنى نقطة في النطاق
+        highest = max(highs[-64:]) if len(highs) >= 64 else max(highs)
+        lowest  = min(lows[-64:])  if len(lows)  >= 64 else min(lows)
+        current = closes[-1]
+
+        if highest <= lowest:
+            return {}
+
+        # تقريب النطاق لأقرب قوة من 2 (Murray Math)
+        price_range = highest - lowest
+        import math
+        scale = math.pow(10, math.floor(math.log10(price_range)))
+        mm_range = math.ceil(price_range / scale) * scale
+
+        # حساب المستويات الـ 8
+        step = mm_range / 8
+        base = math.floor(lowest / scale) * scale
+
+        levels = {}
+        labels = ["-1/8","0/8","1/8","2/8","3/8","4/8","5/8","6/8","7/8","8/8","9/8"]
+        for i, label in enumerate(labels):
+            levels[label] = round(base + (i - 1) * step, 8)
+
+        # تحديد موقع السعر الحالي
+        current_zone = "محايد"
+        nearest_support = levels["0/8"]
+        nearest_resist  = levels["8/8"]
+        zone_label = "4/8"
+
+        for i in range(len(labels) - 1):
+            l1 = levels[labels[i]]
+            l2 = levels[labels[i+1]]
+            if l1 <= current <= l2:
+                zone_label = labels[i]
+                nearest_support = l1
+                nearest_resist  = l2
+
+                # تحديد قوة المنطقة
+                if labels[i] in ["0/8", "8/8"]:
+                    current_zone = "منطقة انعكاس قوية جداً"
+                elif labels[i] in ["1/8", "7/8"]:
+                    current_zone = "منطقة اختراق"
+                elif labels[i] == "4/8":
+                    current_zone = "محور رئيسي"
+                elif labels[i] in ["2/8", "6/8"]:
+                    current_zone = "دعم/مقاومة قوية"
+                elif labels[i] in ["3/8", "5/8"]:
+                    current_zone = "منطقة تجميع"
+                break
+
+        # مسافة من أقرب مستوى
+        dist_to_support = abs(current - nearest_support) / current * 100 if current > 0 else 0
+        dist_to_resist  = abs(nearest_resist - current)  / current * 100 if current > 0 else 0
+
+        return {
+            "levels":          levels,
+            "current":         current,
+            "zone_label":      zone_label,
+            "current_zone":    current_zone,
+            "support":         round(nearest_support, 8),
+            "resistance":      round(nearest_resist, 8),
+            "dist_support":    round(dist_to_support, 2),
+            "dist_resist":     round(dist_to_resist, 2),
+            "key_support":     round(levels.get("4/8", nearest_support), 8),
+            "key_resist":      round(levels.get("8/8", nearest_resist), 8),
+        }
+
+    except (ImportError, ValueError, ZeroDivisionError, OverflowError):
+        return {}
+
+
+def format_murray_block(sym):
+    # type: (str) -> str
+    """يبني بلوك Murray Math للإشارة"""
+    mm = calc_murray_math(sym)
+    if not mm:
+        return ""
+
+    zone  = mm.get("zone_label", "")
+    zname = mm.get("current_zone", "")
+    sup   = fmt_price(mm.get("support", 0))
+    res   = fmt_price(mm.get("resistance", 0))
+    ds    = mm.get("dist_support", 0)
+    dr    = mm.get("dist_resist", 0)
+
+    out  = "📐 *Murray Math* منطقة `{}`\n".format(zone)
+    out += "  {} | دعم:`{}` ({:.1f}%) مقاومة:`{}` ({:.1f}%)\n".format(
+        zname, sup, ds, res, dr)
+    return out
+
+
+
 def build_engine_block(sym):
     # type: (str) -> str
     direction = calc_direction_engine(sym, "1h")
     hmm       = calc_hmm_regime(sym, "4h")
     garch     = calc_garch_range(sym, "1d")
+    murray    = calc_murray_math(sym, "1d")
     if not direction and not hmm and not garch:
         return ""
     out = "=" * 18 + "\n"
@@ -1414,6 +1570,10 @@ def build_engine_block(sym):
         out += "  دعم:`{}` مقاومة:`{}`\n".format(
             fmt_price(garch.get("support", 0)),
             fmt_price(garch.get("resistance", 0)))
+    if murray:
+        mm_block = format_murray_block(sym)
+        if mm_block:
+            out += mm_block
     out += "=" * 18 + "\n"
     return out
 
@@ -4944,7 +5104,7 @@ def refresh_tickers():
 # TPS/ATS + Volume Delta
 # ══════════════════════════════════════════
 TPS_LIMIT         = 100    # آخر 100 صفقة للتحليل
-TPS_SPIKE         = 3.0    # TPS ارتفع 3× = نشاط غير عادي
+TPS_SPIKE         = 2.0    # TPS ارتفع 2× = نشاط غير عادي (كان 3×)
 ATS_WHALE         = 2000   # 🔽 صفقة > 2000 USDT = حيتان (كان 5000$)
 ATS_RETAIL        = 500    # متوسط صفقة < 500 USDT = أفراد
 VDELTA_STRONG     = 0.65   # 🔽 65%+ شراء (كان 70%) — أكثر حساسية
@@ -5013,13 +5173,13 @@ def analyze_tps_ats(sym):
         tps = trade_window / 30.0
         ats = all_vol / len(raw)
 
-        # ✅ VDelta من Klines — أدق بكثير من isBuyerMaker
-        # شمعة خضراء (Close > Open) = ضغط شراء
-        # شمعة حمراء (Close < Open) = ضغط بيع
-        # الحجم المرجح = أدق من عدد الشموع
-        vdelta = 0.5  # قيمة افتراضية
-        kd = get_klines(sym, "15m", 20)
-        if kd and len(kd["closes"]) >= 10:
+        # ✅ VDelta MA — متوسط مرجح بالحجم على آخر 10 شموع 15m
+        # أدق من VDelta اللحظي — يكشف التجميع الحقيقي
+        vdelta = calc_vdelta_ma(sym, period=10, interval="15m")
+        kd = get_klines(sym, "15m", 15)
+        buy_vol_k  = 0.0
+        sell_vol_k = 0.0
+        if kd and len(kd["closes"]) >= 5:
             opens  = kd["opens"]
             closes = kd["closes"]
             vols   = kd["vols"]
@@ -5027,11 +5187,6 @@ def analyze_tps_ats(sym):
                             if closes[i] > opens[i])
             sell_vol_k = sum(vols[i] for i in range(len(closes))
                             if closes[i] < opens[i])
-            neutral_k  = sum(vols[i] for i in range(len(closes))
-                            if closes[i] == opens[i])
-            total_k = buy_vol_k + sell_vol_k + neutral_k * 0.5
-            if total_k > 0:
-                vdelta = round((buy_vol_k + neutral_k * 0.5) / total_k, 3)
 
         buyer_type = "🐋 حيتان" if ats >= ATS_WHALE else ("🐟 متوسط" if ats >= 1000 else "🦐 أفراد")
 
@@ -5062,7 +5217,7 @@ def analyze_tps_ats(sym):
 # إعدادات الدمج
 LZ_TPS_PROXIMITY  = 0.015   # السعر قريب من المنطقة بـ 1.5%
 LZ_TPS_COOLDOWN   = 14400   # 4 ساعات بين تنبيهات نفس العملة
-LZ_TPS_SCORE_MIN  = 70      # حد أدنى للنقاط
+LZ_TPS_SCORE_MIN  = 60      # حد أدنى للنقاط (كان 70)
 lz_tps_alerted    = {}      # type: Dict[str, float]
 
 # ═══════════════════════════════════════════════════════════════════
@@ -6382,7 +6537,7 @@ explosion_vol_hist   = {}   # type: Dict[str, list]   تاريخ الحجم
 EXPLOSION_COOLDOWN   = 7200  # ساعتان بين تنبيهات نفس العملة
 EXPLOSION_VOL_MULT   = 3.0   # حجم 3× المعدل فجأة
 EXPLOSION_TPS_MULT   = 2.5   # TPS تضاعف 2.5×
-EXPLOSION_VDELTA_MIN = 0.78  # شراء 78%+
+EXPLOSION_VDELTA_MIN = 0.72  # شراء 72%+ (كان 78%)
 EXPLOSION_MAX_CHANGE = 3.0   # السعر لم يتحرك أكثر من 3%
 
 
@@ -6810,7 +6965,7 @@ SCH_COOLDOWN       = 7200    # ساعتان
 SCH_VOL_MIN        = 100_000  # 100K minimum
 SCH_VOL_MAX        = 2_000_000  # 2M maximum
 SCH_VOL_SPIKE      = 4.0     # حجم 4× فجأة
-SCH_VDELTA_MIN     = 0.75    # شراء 75%+
+SCH_VDELTA_MIN     = 0.68    # شراء 68%+ (كان 75%)
 SCH_TPS_MIN        = 0.5     # TPS معقول
 SCH_MAX_CHANGE     = 8.0     # لم يتحرك كثيراً
 
