@@ -5581,7 +5581,8 @@ def scan_whale_confirmation(price_map):
 
 
 
-        _j_tier   = get_tier_settings(vol_now.get(sym, 0) if hasattr(vol_now, 'get') else 0)
+        _j_vol    = float(next((t.get("quoteVolume",0) for t in all_tickers if t.get("symbol")==sym), 0)) if all_tickers else 0
+        _j_tier   = get_tier_settings(_j_vol)
         _j_ats    = _j_tier["ats_min"]
 
         _vdelta_strong = vdelta >= 0.80 and ats >= max(150, _j_ats)  # مسار 1
