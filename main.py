@@ -1550,7 +1550,14 @@ def format_murray_block(sym):
     ds     = mm.get("dist_support", 0)
     dr     = mm.get("dist_resist", 0)
 
-    sl     = fmt_price(mm.get("key_support", mm.get("support", 0)))
+    # Stop Loss = الدعم تحت السعر الحالي (وليس 4/8 دائماً)
+    current = mm.get("current", 0)
+    sl_raw  = mm.get("support", 0)  # أقرب دعم تحت السعر
+    # تأكد أن SL أقل من السعر
+    if sl_raw >= current * 0.99 and current > 0:
+        # إذا الدعم أعلى أو قريب من السعر → نستخدم -3%
+        sl_raw = current * 0.97
+    sl = fmt_price(sl_raw)
 
     out  = "📐 *Murray Math* منطقة `{}`\n".format(zone)
     out += "  {} | دعم:`{}` مقاومة:`{}`\n".format(zname, sup, res)
