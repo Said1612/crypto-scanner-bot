@@ -1012,7 +1012,7 @@ def poll_commands():
                         txt += "  • *" + s.replace("USDT","") + "* | مرحلة " + str(v.get("stage",1)) + "\n"
                     send(txt)
             elif text_lower in ("/btc", "/بتكوين"):
-                _icon = {"SAFE":"🟢","CAUTION":"🔴","DANGER":"🚨"}.get(market_state,"📊")
+                _icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🚨"}.get(market_state,"📊")
                 _btps = ("  🐋 TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%`".format(
                     btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
                     btc_tps_stats.get("vdelta",0.5)*100
@@ -2032,6 +2032,12 @@ def analyze_btc():
 
     if btc_signal <= danger_enter or btc_trend_1h <= -2.0 or _crash_4h:
         suggested = "DANGER"
+        # اذا حيتان يشترون بقوة → CAUTION بدل DANGER
+        _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+        _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
+        if _btc_vd >= 0.65 and _btc_ats >= 2000:
+            suggested = "CAUTION"
+            log.info("BTC VD=%.0f%% ATS=%.0f$ DANGER->CAUTION", _btc_vd*100, _btc_ats)
     elif btc_signal <= caution_enter or _crash_1h:
         suggested = "CAUTION"
     elif btc_signal >= caution_exit:
@@ -2075,7 +2081,7 @@ def analyze_btc():
             log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
             return
         last_market_report = time.time()
-        icons = {"SAFE": "🟢", "CAUTION": "🔴", "DANGER": "🚨"}
+        icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}
         notes = {
             "SAFE":    "✅ كل الإشارات مفعّلة",
             "CAUTION": "⚠️ Gold فقط (Score 88+)",
@@ -2833,7 +2839,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
             rsi_str=" " + rsi_str if rsi_str else "",
         )
 
-    mkt_icon = {"SAFE": "🟢", "CAUTION": "🔴", "DANGER": "🚨"}.get(market_state, "⚪")
+    mkt_icon = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}.get(market_state, "⚪")
 
 
     good_rsi_count = sum(1 for c in top10 if 0 <= c["rsi"] <= RSI_IDEAL_MAX)
@@ -8688,7 +8694,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
     elif isp:               stype = "⚡ VOLUME SPIKE"
     else:                   stype = "📊 SIGNAL"
 
-    mkt_icon = {"SAFE":"🟢","CAUTION":"🔴","DANGER":"🚨"}.get(market_state,"⚪")
+    mkt_icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🚨"}.get(market_state,"⚪")
 
     send(
         "👑 *MAFIO BOT V14*\n"
@@ -9809,7 +9815,7 @@ def _send_daily_report_body(today, now_utc):
         _display_state = "CAUTION"
     elif market_state == "SAFE" and sell_pct >= 90:
         _display_state = "DANGER"
-    _mkt_icons = {"SAFE": "🟢", "CAUTION": "🔴", "DANGER": "🚨"}
+    _mkt_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}
     _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
 
     _btc1h = btc_trend_1h  # الافتراضي
