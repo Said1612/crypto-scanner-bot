@@ -1012,7 +1012,7 @@ def poll_commands():
                         txt += "  • *" + s.replace("USDT","") + "* | مرحلة " + str(v.get("stage",1)) + "\n"
                     send(txt)
             elif text_lower in ("/btc", "/بتكوين"):
-                _icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"📊")
+                _icon = {"SAFE":"🟢","CAUTION":"🔴","DANGER":"🚨"}.get(market_state,"📊")
                 _btps = ("  🐋 TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%`".format(
                     btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
                     btc_tps_stats.get("vdelta",0.5)*100
@@ -1536,6 +1536,62 @@ def calc_murray_math(sym, interval="1d"):
         return {}
 
 
+
+def calc_smart_targets(sym, price):
+    # type: (str, float) -> dict
+    if price <= 0:
+        return {}
+
+    # جلب مستويات Murray و GARCH
+    mm   = calc_murray_math(sym, "1d")
+    garch = calc_garch_range(sym, "1d")
+
+    targets = []
+
+    # مقاومات Murray فوق السعر الحالي
+    if mm and mm.get("levels"):
+        for label, level in sorted(mm["levels"].items(), key=lambda x: x[1]):
+            if level > price * 1.03:  # فوق السعر بـ 3%+
+                pct = (level - price) / price * 100
+                targets.append({"price": round(level, 8), "pct": round(pct, 1),
+                                "label": "Murray {}".format(label)})
+            if len(targets) >= 3:
+                break
+
+    # إذا لا توجد مقاومات كافية → نستخدم GARCH + نسب ثابتة
+    if len(targets) < 1 and garch:
+        res = garch.get("resistance", 0)
+        if res > price:
+            pct = (res - price) / price * 100
+            targets.append({"price": round(res, 8), "pct": round(pct, 1),
+                            "label": "GARCH"})
+
+    # تكملة بنسب ثابتة إذا لا توجد مقاومات كافية
+    fixed = [1.10, 1.20, 1.35]
+    for mult in fixed:
+        if len(targets) >= 3:
+            break
+        t = round(price * mult, 8)
+        pct = (mult - 1) * 100
+        # فقط إذا لم يوجد هدف قريب منه
+        if not any(abs(x["price"] - t) / t < 0.03 for x in targets):
+            targets.append({"price": t, "pct": round(pct, 1), "label": ""})
+
+    # Stop Loss = دعم Murray أو GARCH تحت السعر
+    sl = price * 0.96  # افتراضي -4%
+    if mm and mm.get("support", 0) < price * 0.99:
+        sl = mm["support"]
+    elif garch and garch.get("support", 0) < price * 0.99:
+        sl = garch["support"]
+
+    sl_pct = (sl - price) / price * 100
+
+    return {
+        "targets": sorted(targets, key=lambda x: x["price"])[:3],
+        "sl":      round(sl, 8),
+        "sl_pct":  round(sl_pct, 1),
+    }
+
 def format_murray_block(sym):
     # type: (str) -> str
     """يبني بلوك Murray Math للإشارة"""
@@ -2019,7 +2075,7 @@ def analyze_btc():
             log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
             return
         last_market_report = time.time()
-        icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
+        icons = {"SAFE": "🟢", "CAUTION": "🔴", "DANGER": "🚨"}
         notes = {
             "SAFE":    "✅ كل الإشارات مفعّلة",
             "CAUTION": "⚠️ Gold فقط (Score 88+)",
@@ -2777,7 +2833,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
             rsi_str=" " + rsi_str if rsi_str else "",
         )
 
-    mkt_icon = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}.get(market_state, "⚪")
+    mkt_icon = {"SAFE": "🟢", "CAUTION": "🔴", "DANGER": "🚨"}.get(market_state, "⚪")
 
 
     good_rsi_count = sum(1 for c in top10 if 0 <= c["rsi"] <= RSI_IDEAL_MAX)
@@ -5677,16 +5733,38 @@ def scan_whale_confirmation(price_map):
                 if coin_signal_count.get(sym, 0) >= 1
                 else "✅ *ادخل الصفقة الآن* 💪\n"
             ) +
-            "🛡️ ضع Stop Loss تحت آخر قاع\n" +
+            "━━━━━━━━━━━━━━━━━━\n" +
+            "🎯 *الأهداف:*\n" +
+            "  1️⃣ `{t1}` (+10%)\n".format(t1=fmt_price(price * 1.10)) +
+            "  2️⃣ `{t2}` (+20%)\n".format(t2=fmt_price(price * 1.20)) +
+            "  3️⃣ `{t3}` (+35%)\n".format(t3=fmt_price(price * 1.35)) +
+            "🛡️ Stop Loss: `{sl}` (-4%)\n".format(sl=fmt_price(price * 0.96)) +
             footer
         )
 
+
+        # الأهداف الذكية عند المقاومات
+        _smart = calc_smart_targets(sym, price)
+        if _smart.get("targets"):
+            _tblock = "━━━━━━━━━━━━━━━━━━\n🎯 *الأهداف عند المقاومات:*\n"
+            _nums = ["1","2","3"]
+            for _ii, _tgt in enumerate(_smart["targets"][:3]):
+                _tblock += "  {}️⃣ `{}` (+{:.0f}%)\n".format(
+                    _nums[_ii], fmt_price(_tgt["price"]), _tgt["pct"])
+            _tblock += "🛡️ *Stop Loss:* `{}` ({:.0f}%)\n".format(
+                fmt_price(_smart.get("sl", price*0.96)),
+                _smart.get("sl_pct", -4))
+            msg = msg + "\n" + _tblock
 
         _joker_engine = build_engine_block(sym)
         if _joker_engine:
             msg = msg + "\n" + _joker_engine
 
-        send(msg)  # GOLDEN مدمج في msg أعلاه ✅
+        send(msg)  # GOLDEN مدمج في msg أعلاه
+        _tgts = calc_smart_targets(sym, price)
+        add_to_exit_watchlist(sym, price, _tgts.get("targets", []))
+        _tgts = calc_smart_targets(sym, price)
+        add_to_exit_watchlist(sym, price, _tgts.get("targets", []))
         if _golden:
             log.info("💎 GOLDEN ENTRY! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, _btcd_val, ats)
         whale_confirmed[sym]  = now
@@ -8603,7 +8681,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
     elif isp:               stype = "⚡ VOLUME SPIKE"
     else:                   stype = "📊 SIGNAL"
 
-    mkt_icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🔴"}.get(market_state,"⚪")
+    mkt_icon = {"SAFE":"🟢","CAUTION":"🔴","DANGER":"🚨"}.get(market_state,"⚪")
 
     send(
         "👑 *MAFIO BOT V14*\n"
@@ -9724,7 +9802,7 @@ def _send_daily_report_body(today, now_utc):
         _display_state = "CAUTION"
     elif market_state == "SAFE" and sell_pct >= 90:
         _display_state = "DANGER"
-    _mkt_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
+    _mkt_icons = {"SAFE": "🟢", "CAUTION": "🔴", "DANGER": "🚨"}
     _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
 
     _btc1h = btc_trend_1h  # الافتراضي
@@ -10598,6 +10676,122 @@ def track_global_liquidity():
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🚨 EXIT SIGNAL — إشارة الخروج
+#   يراقب العملات التي أُرسلت عليها إشارات
+#   ويرسل تحذير خروج عند ظهور سيولة بيع
+# ═══════════════════════════════════════════════════════════════════
+
+exit_watchlist  = {}   # {sym: {"entry": price, "time": ts, "targets": [...]}}
+exit_alerted    = {}   # {sym: ts}
+EXIT_CHECK_EVERY = 120  # كل دقيقتين
+last_exit_check  = 0.0
+
+def scan_exit_signals(price_map, vol_now, changes_map):
+    # type: (dict, dict, dict) -> None
+    global last_exit_check
+    now = time.time()
+    if now - last_exit_check < EXIT_CHECK_EVERY:
+        return
+    last_exit_check = now
+
+    if not exit_watchlist:
+        return
+
+    for sym, data in list(exit_watchlist.items()):
+        if now - exit_alerted.get(sym, 0) < 3600:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        entry   = data.get("entry", price)
+        pnl_pct = (price - entry) / entry * 100 if entry > 0 else 0
+
+        # جلب VDelta الحالي
+        stats   = analyze_tps_ats(sym)
+        if not stats:
+            continue
+
+        vdelta = stats.get("vdelta", 0.5)
+        ats    = stats.get("ats", 0)
+        tps    = stats.get("tps", 0)
+
+        exit_reason = ""
+        exit_urgent = False
+
+        # 1. VDelta انقلب للبيع
+        if vdelta < 0.40:
+            exit_reason = "VDelta انقلب للبيع {:.0f}%".format(vdelta*100)
+            exit_urgent = True
+
+        # 2. سيولة بيع كبيرة (ATS عالي + VDelta منخفض)
+        elif ats >= 500 and vdelta < 0.45:
+            exit_reason = "حيتان يبيعون! ATS {:.0f}$ VDelta {:.0f}%".format(
+                ats, vdelta*100)
+            exit_urgent = True
+
+        # 3. خسارة تجاوزت Stop Loss
+        elif pnl_pct <= -4.0:
+            exit_reason = "Stop Loss -4% مكسور!"
+            exit_urgent = True
+
+        # 4. تحذير مبكر
+        elif vdelta < 0.50 and pnl_pct > 0:
+            exit_reason = "VDelta يضعف {:.0f}% — احمِ أرباحك".format(vdelta*100)
+            exit_urgent = False
+
+        if not exit_reason:
+            continue
+
+        sector = next((s for s,syms in SECTORS.items() if sym in syms), "")
+        icon   = "🚨" if exit_urgent else "⚠️"
+
+        msg = (
+            "{icon} *{'اخرج الآن!' if exit_urgent else 'تحذير خروج'}* {icon}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💥 *{sym}* — {reason}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💰 السعر: `{price}` | P&L: `{pnl:+.1f}%`\n"
+            "📊 VDelta: `{vd:.0f}%` | ATS: `{ats:.0f}$`\n"
+            "🏷️ القطاع: `{sector}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "{action}"
+        ).format(
+            icon=icon,
+            sym=sym.replace("USDT",""),
+            reason=exit_reason,
+            price=fmt_price(price),
+            pnl=pnl_pct,
+            vd=vdelta*100,
+            ats=ats,
+            sector=sector,
+            action="🔴 *اخرج الآن فوراً!*" if exit_urgent else "🟡 *فكر في جني الأرباح*"
+        )
+
+        send(msg)
+        exit_alerted[sym] = now
+        log.info("🚨 EXIT SIGNAL | %s | VD=%.0f%% | PnL=%.1f%% | %s",
+                 sym, vdelta*100, pnl_pct, exit_reason)
+
+        # حذف من القائمة إذا خسارة
+        if pnl_pct <= -7.0:
+            exit_watchlist.pop(sym, None)
+
+
+def add_to_exit_watchlist(sym, entry_price, targets=None):
+    # type: (str, float, list) -> None
+    exit_watchlist[sym] = {
+        "entry":   entry_price,
+        "time":    time.time(),
+        "targets": targets or [],
+    }
+    log.info("👁️ EXIT WATCH: %s | entry=%.8f", sym, entry_price)
+
+
+
 def run():
     # type: () -> None
     global all_tickers   # ✅ إصلاح V11: تأكيد أن all_tickers global
@@ -10863,6 +11057,7 @@ def run():
             if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
+            scan_exit_signals(price_map, vol_now, changes_map)
 
 
             update_pump_dump_history(price_map, vol_now)
