@@ -47,7 +47,7 @@ REDIS_URL  = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL"
 REDIS_KEY  = "mafio_state_v16"  # مفتاح الحفظ في Redis
 
 
-# عملات محظورة — لا تدخل Watchlist أبداً
+
 BLOCKED_WATCHLIST = {
     "CULTUSDT",   # حجم ضعيف + ترند هابط
 }
@@ -56,7 +56,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
 CHAT_ID        = os.getenv("CHAT_ID",  "YOUR_CHAT_ID")
 GROUP_ID       = os.getenv("GROUP_ID", "")   # رقم المجموعة (يبدأ بـ -)
 
-# ── إشارات ──────────────────────────────────────
+
 SCORE_MIN          = 55        # 🧪 TEST (كان 65)
 GOLD_MIN           = 88
 SIGNAL2_GAIN       = 2.0
@@ -71,17 +71,17 @@ SL_BASE            = 4.0
 TRAIL_GAIN_TRIGGER = 2.0       # يبدأ التتبع بعد +2%
 TRAIL_DROP_TRIGGER = 1.5       # يخرج إذا نزل 1.5% من القمة
 
-# ── BTC & السوق ──────────────────────────────────
+
 BTC_DANGER_ZONE    = -3.0
 BTC_CAUTION_ZONE   = -1.5
 
-# 🆕 V15: Buffer zones — منع التذبذب بين الحالات
-# منطقة أمان: لا تغيير إلا إذا تجاوز الحد بـ 0.3%
+
+
 BTC_DANGER_BUFFER  = 0.3   # يدخل DANGER عند -3.3% | يخرج عند -2.7%
 BTC_CRASH_4H       = -2.5
 # ── TPS / ATS + Volume Delta ──────────────────────────────────────
 TPS_LIMIT      = 100     # آخر 100 صفقة
-# ── قائمة عملات إضافية ثابتة ─────────────────────────────────────────
+
 EXTRA_COINS = [
     # ── Meme coins ────────────────────────────
     "FLOKIUSDT", "PEPEUSDT", "WIFUSDT", "BOMEUSDT", "MEWUSDT",
@@ -97,17 +97,17 @@ EXTRA_COINS = [
     # ── DeFi ──────────────────────────────────
     "AAVEUSDT", "DYDXUSDT", "JOEUSDT",
 
-    # ── عملات فرص مكتشفة ────────────────────────
+
     "COSUSDT", "CUSDT", "MBOXUSDT", "TOWNSUSDT",
     "DEXEUSDT", "SPELLUSDT", "PSGUSDT", "INTUSDT",
     "HAEDALUSDT", "PHBUSDT",
 
-    # ── AI & Robotics — تجميع هادئ قبل الانفجار ──
+
     "FETUSDT", "AGIXUSDT", "OCEANUSDT", "GRTUSDT",
     "WLDUSDT", "ARKMUSDT", "VIRTUSDT", "ACTUSDT",
     "CGPTUSDT", "NEUROUSDT", "TAOAUSDT", "SWARMAUSDT",
 
-    # ── RWA — تجميع مؤسسي ────────────────────
+
     "ONDOUSDT", "MANTRAUSDT", "CFGUSDT", "PLUMEUSDT",
 
     # ── NeoBank / Payments ────────────────────
@@ -116,7 +116,7 @@ EXTRA_COINS = [
     # ── Oracle ────────────────────────────────
     "LINKUSDT", "BANDUSDT", "SUPRAUSDT", "API3USDT",
 
-    # ── Layer1 إضافية ─────────────────────────
+
     "CFXUSDT", "APTUSDT", "SEIUSDT", "INJUSDT",
     "NEARUSDT", "SOLUSDT", "AVAXUSDT", "ADAUSDT",
 ]
@@ -130,7 +130,7 @@ TPS_COOLDOWN   = 7200    # ساعتان — cooldown موحد لكل الأنظ�
 TPS_SCAN_EVERY = 300     # كل 5 دقائق  # انهيار سريع: BTC ينزل -2.5% في 4 ساعات → DANGER فوري
 BTC_CRASH_1H       = -1.5  # انهيار حاد: BTC ينزل -1.5% في ساعة واحدة → DANGER فوري
 BTC_CAUTION_BUFFER = 0.3   # يدخل CAUTION عند -1.8% | يخرج عند -1.2%
-# عدد المرات المتتالية للتأكيد قبل تغيير الحالة
+
 BTC_CONFIRM_COUNT  = 1     # ⚡ قراءة واحدة فقط (كان 3 = 90 دقيقة)
 
 # ── Supertrend ───────────────────────────────────
@@ -157,12 +157,12 @@ MAX_IMBALANCE      = 3.0
 GREEN_MIN_RATIO    = 0.45
 HIGHER_LOWS_MIN    = 0.60
 
-# ── 🆕 فلتر العملات المشبوهة ─────────────────────
-# عملة حقيقية يجب أن يكون حجمها اليومي كافياً
+
+
 WHALE_MIN_VOL      = 1_000_000   # حجم أدنى 1M USDT للحيتان
 WHALE_MAX_CHANGE   = 25.0        # تجاهل إذا ارتفعت أكثر من 25% (Pump)
 
-# 🆕 Bottom Accumulation — رصد التجميع في القيعان
+
 BOTTOM_PRICE_RANGE   = 1.15   # السعر أقل من 15% فوق القاع
 BOTTOM_VOL_INCREASE  = 1.3    # الحجم أكبر من 1.3× المتوسط
 BOTTOM_MAX_CHANGE    = 5.0    # تغيير يومي أقل من 5%
@@ -171,33 +171,33 @@ BOTTOM_COOLDOWN      = 86400  # 24 ساعة — فقط للعملات في ATH w
 BOTTOM_SCAN_EVERY    = 3600    # فحص كل ساعة
 BOTTOM_MIN_VOL       = 1_000_000 # حجم 24h أدنى 1M USDT — عملات قوية فقط
 
-# 🆕 Volume Explosion — انفجار الحجم بعد التجميع
+
 EXPLOSION_VOL_MULT   = 3.0    # الحجم يتجاوز 3× المتوسط
 EXPLOSION_MIN_DAYS   = 5      # العملة في القاع 5+ أيام قبل الانفجار
 EXPLOSION_COOLDOWN   = 86400  # 24 ساعة — فقط إذا مرت بالمرحلتين 1+2
 EXPLOSION_MAX_CHANGE = 30.0   # لا نريد Pump مسبق أكثر من 30%
 EXPLOSION_MIN_VOL    = 1_000_000 # حجم انفجار أدنى 1M USDT — عملات قوية فقط
 
-# 🆕 ATH Distance Filter — عملات انهارت من قمتها
+
 ATH_DROP_STRONG  = 0.90   # نزلت 90%+ من ATH = فرصة قوية
 ATH_DROP_EXTREME = 0.95   # نزلت 95%+ من ATH = فرصة نادرة
 ATH_MIN_VOL      = 1_000_000  # حجم أدنى 1M USDT
 ATH_COOLDOWN     = 86400  # 24 ساعة — مرة واحدة يومياً لكل عملة
 ATH_SCAN_EVERY   = 7200   # فحص كل ساعتين — أفضل 3 فقط يومياً
 
-# 🆕 Hot Market Scanner — يعمل فوراً بدون تاريخ
+
 HOT_MIN_CHANGE   = 12.0   # تغيير 12%+ في 24h — جودة أعلى
 HOT_MIN_VOL      = 1_000_000 # حجم 1M+ — عملات قوية فقط
 HOT_COOLDOWN     = 14400  # 4 ساعات بين التنبيهات
 HOT_SCAN_EVERY   = 3600   # فحص كل ساعة
 
-# 🆕 Realtime Liquidity Scanner — الأسرع والأهم
+
 RT_SCAN_EVERY    = 900    # كل 15 دقيقة
 RT_VOL_SPIKE     = 2.0    # حجم 2× المتوسط = سيولة غير عادية
 RT_MIN_VOL       = 1_000_000 # 1M+ فقط — جودة أعلى
 RT_COOLDOWN      = 21600  # 6 ساعات بين تنبيهات نفس العملة
 
-# 🆕 Liquidity Watchlist — مراقبة السيولة للدخول
+
 WL_ENTRY_MOVE    = 3.0    # تحرك 3%+ = إشعار دخول
 WL_ENTRY_VOL     = 1.5    # حجم 1.5× baseline = تأكيد
 WL_MAX_SIZE      = 30     # أقصى 30 عملة في القائمة
@@ -205,7 +205,7 @@ WL_EXPIRY        = 86400  # عملة تبقى 24 ساعة بدون تحرك ثم
 WL_ENTRY_COOL    = 14400  # 4 ساعات بين إشعارات الدخول لنفس العملة
 WL_CHECK_EVERY   = 60     # فحص الـ watchlist كل دقيقة
 
-# 🆕 Trailing Stop — حماية الأرباح
+
 TS_TRAIL_PCT     = 15.0   # إذا نزل 15% من القمة = بيع
 TS_MIN_PROFIT    = 10.0   # لا نفعّل الـ trailing إلا بعد +10%
 TS_BREAKEVEN     = 10.0   # عند +10% → نحرك الستوب لنقطة الدخول
@@ -217,11 +217,11 @@ TS_DANGER_CLOSE  = -3.0   # السوق DANGER + العملة نازلة -3%
 
 TS_SELL_COOL     = 3600   # ساعة بين إشعارات البيع لنفس العملة
 
-# 🆕 Early Detection — رصد مبكر قبل الانفجار
+
 RT_PRICE_MOVE    = 2.0    # حركة سعر 2%+ مع السيولة
 HOT_MAX_CHANGE   = 50.0   # تجاهل Pump أكثر من 50%
 WHALE_MIN_PRICE    = 0.000001    # تجاهل العملات بسعر أقل من 0.000001 (شبه صفر)
-# عملات مشبوهة بالاسم — يتم تجاهلها دائماً
+
 SUSPICIOUS_KEYWORDS = [
     "STABLE","PEGGED","WRAPPED","BRIDGE",
     "EUR","GBP","CNY","JPY",   # عملات مربوطة بعملات أجنبية
@@ -234,13 +234,13 @@ BO_FLAT_MAX        = 15.0
 BO_VOL_SURGE       = 3.0
 BO_NEAR_LOW        = 30.0
 
-# ── فلتر مسبق ────────────────────────────────────
+
 PRE_MIN_CHANGE     = -5.0
 PRE_MAX_CHANGE     = 80.0
 PRE_MIN_VOL        = MIN_VOL_USDT
 PRE_MAX_VOL        = MAX_VOL_USDT
 
-# ── توقيتات الدورات ──────────────────────────────
+
 PRICES_EVERY       = 12
 TICKERS_EVERY      = 1800
 BTC_EVERY          = 300   # ⚡ كل 5 دقائق (كان 30)
@@ -262,7 +262,7 @@ MOMENTUM_MIN_VOL   = 500_000
 MOMENTUM_COOLDOWN  = 14400
 
 # ── 🆕 Sector Flow Tracker ───────────────────────
-# يرصد تدفق السيولة بين القطاعات
+
 FLOW_WINDOW        = 5         # عدد القراءات للمقارنة (~60 ثانية)
 FLOW_VOL_SURGE     = 1.3       # 🧪 TEST (كان 1.5) — نسبة ارتفاع حجم القطاع
 FLOW_CHANGE_MIN    = 0.5       # 🔽 0.5%+ يكفي (كان 1.0)
@@ -279,7 +279,7 @@ SR_TOP_COINS      = 5      # أفضل عملات في القطاع المنتع�
 # ── 🆕 Auto Expand ───────────────────────────────
 EXPAND_EVERY       = 86400     # إعادة توسيع القوائم كل 24 ساعة
 
-# ── 🆕 Smart Top10 — اصطياد قبل الانفجار ────────
+
 TOP10_CHANGE_MIN   = 0.0      # تغيير 24h أدنى — لم تنزل
 TOP10_CHANGE_MAX   = 8.0      # 🧪 TEST (كان 5.0) — توسيع النطاق
 TOP10_VOL_RATIO    = 1.2      # 🧪 TEST (كان 1.5) — تخفيف شرط الحجم
@@ -288,7 +288,7 @@ TOP10_MIN_VOL      = 150_000  # حجم 24h أدنى للقبول
 TOP10_COOLDOWN     = 1800     # 30 دقيقة cooldown لنفس القطاع
 TOP10_COUNT        = 10       # عدد العملات في الإشعار
 
-# أوزان نقاط الترتيب
+
 W_VOL_RATIO    = 40   # الأهم: حجم مرتفع فجأة
 W_HOT_SECTOR   = 25   # قطاع ساخن + Flow داخل
 W_REBOUND_LOW  = 20   # قريب من القاع
@@ -300,7 +300,7 @@ RSI_OVERBOUGHT    = 70        # فوق هذا = مرفوض (overbought)
 RSI_OVERSOLD      = 30        # تحت هذا = ممتاز (فرصة)
 RSI_IDEAL_MAX     = 60        # RSI مثالي للدخول قبل الانفجار
 
-# ── 🆕 V15: Vol History (تاريخي لكل عملة) ─────────
+
 VOL_HISTORY_MAX   = 10        # عدد القراءات (10 × 12ث = 2 دقيقة)
 VOL_HISTORY_MIN   = 3         # أدنى عدد قراءات للمقارنة الصادقة
 
@@ -311,10 +311,10 @@ BACKTEST_CHECK_24H = 86400    # 24 ساعة
 BACKTEST_FEE       = 0.2      # 🆕 V15: رسوم التداول الواقعية (0.1% دخول + 0.1% خروج)
 
 # ══════════════════════════════════════════════════════════════
-# 🆕 V16: LIQUIDITY ZONES — مناطق السيولة اليومية
+
 # ══════════════════════════════════════════════════════════════
-# منطق: إغلاق يومي فوق Zone = سيولة شرائية ✅
-#        إغلاق يومي تحت Zone = سيولة بيعية  ❌
+
+
 LZ_TOUCHES_MIN     = 3        # أدنى عدد لمسات للمنطقة (= Sigma)
 LZ_TOUCHES_RARE    = 8        # نادر جداً 🐋🔥
 LZ_VOL_MULT        = 1.5      # الحجم يجب أن يكون 1.5× المعدل
@@ -344,14 +344,14 @@ MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
 MEXC_TRADES = "https://api.mexc.com/api/v3/trades"  # ⚡ TPS/ATS
 
 EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
-            # عملات مشبوهة أو مستقرة تظهر في النتائج
+
             "EURUSDT","STABLEUSDT","UCNUSDT","VERMUSDT",
             "BDXUSDT","POLXUSDT","MBGUSDT","L3USDT","VERMUSDT",
-            # عملات خصوصية محظورة من Binance — لا حيتان فيها
+
             "XMRUSDT","DASHUSDT","ZCASHUSDT","SCRTUSDT",
 }
 
-# حد أقصى لإشارات نفس العملة يومياً
+
 MAX_COIN_SIGNALS = 2  # إشارة #1 راقب + إشارة #2 ادخل — لا ثالثة (Cooldown 2h)
 
 # ── 🆕 Auto Expand Sectors ───────────────────────
@@ -359,8 +359,8 @@ SECTOR_TARGET      = 50       # الهدف: 50 عملة لكل قطاع
 EXPAND_MIN_VOL     = 100_000  # حجم 24h أدنى للقبول (100k USDT)
 EXPAND_MAX_VOL     = 500_000_000  # حجم أقصى
 
-# الكلمات المفتاحية لكل قطاع — للتصنيف التلقائي
-# كلما زادت الكلمات، زادت دقة التصنيف
+
+
 SECTOR_KEYWORDS = {
     "AI": [
         "AI","GPT","AGI","NEURAL","AGENT","BRAIN","MIND","THINK",
@@ -478,32 +478,32 @@ LEVERAGE_KEYWORDS = ["3L","3S","5L","5S","BULL","BEAR","UP","DOWN","LONG","SHORT
 STABLE_KEYWORDS   = ["USD","EUR","GBP","JPY","CNY","AUD","CHF","GOLD","SILVER","PAX","DAI","FRAX"]
 
 # ═══════════════════════════════════════════════
-#   SECTORS — 12 قطاع × 50 عملة
+
 # ═══════════════════════════════════════════════
 SECTORS = {
     "AI": [
-        # ── الأساسيات ────────────────────────────
+
         "FETUSDT","AGIXUSDT","OCEANUSDT","RENDUSDT","RENDERUSDT","GRTUSDT",
         "TAOAUSDT","ARKMUSDT","PHAUSDT","AIXBTUSDT","NEWTUSDT",
         "NEIROUSDT","AIUSDT","CGPTUSDT","NEUROUSDT","VANAUSDT",
         "DFUSDT","COOKIEUSDT","AIDOGEUSDT","MYRIAUSDT","ALETHUSDT",
         "WLDUSDT","KAIAUSDT","GRIFFAINUSDT","VIRTUSDT","SWARMAUSDT",
         "SENTIENTUSDT","MASKUSDT","AKTOUSDT","NUMUSDT","MEAIUSDT","MIRAUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "KAITOUSDT","PAALUSDT","QUBICUSDT","SLEEPLESSUSDT","AITECHUSDT",
         "DEAIUSDT","SEKAIUSDT","BUZZUSDT","ALTERUSDT","COGNIUSDT",
         "EZAIUSDT","NAUAUSDT","TAOUSSDT","AGENTUSDT","AIGENUSDT",
         "BRAINUSDT","THINKUSDT","SMARTAIUSDT","FAIUSDT","DAINUSDT",
     ],
     "RWA": [
-        # ── الأساسيات ────────────────────────────
+
         "ONDOUSDT","CFGUSDT","RSRUSDT","MPLXUSDT","REALUSDT",
         "TRSTUSDT","PROMUSDT","IDUSDT","MANTRAUSDT","XDCUSDT",
         "LQTYUSDT","SPXUSDT","ONPUSDT","VAIUSDT","GOLDUSDT",
         "TBLUSDT","PARCLUSDT","REXUSDT","HONEUSDT","OPENUSDT",
         "LANDXUSDT","CREDIXUSDT","POLIXUSDT","TRUEUSDT","MTVUSDT",
         "PROPUSDT","REUSDT","TPROTUSDT","STBTCUSDT","CULTUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "POLYXUSDT","CENTUSDT","TOUCANUSDT","COORESTUSDT","REALIOУСDT",
         "LOFTYUSDT","MAPLEUSDT","GOLDFINCHUSDT","DEXTUSDT","BRICSUSDT",
         "ESTATEUSDT","REALTUSDT","DINOUSDT","FLOWXUSDT","ACHUSDT",
@@ -513,42 +513,42 @@ SECTORS = {
         "PLUMEUSDT","CANTONUSDT","ASSETUSDT","TOKENYUSDT","DIGIASSETUSDT",
     ],
     "Gaming": [
-        # ── الأساسيات ────────────────────────────
+
         "AXSUSDT","SANDUSDT","MANAUSDT","ILVUSDT","GMTUSDT",
         "YGGUSDT","SLPUSDT","GALAUSDT","RONUSDT","IMXUSDT",
         "BEAMUSDT","PIXELUSDT","NOTUSDT","XAIUSDT","ALICEUSDT",
         "RAREUSDT","MOBAUSDT","PORTALUSDT","CHZUSDT","PGXUSDT",
         "HEROESUSDT","BEXUSDT","GOMAUSDT","ACEUSDT","METAUSDT",
         "WAXPUSDT","GALUSDT","VIDYAUSDT","ELFUSDT","TWTUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "GHSTUSDT","TOWERUSDT","REVVUSDT","NFTXUSDT","MOBOXUSDT",
         "SKILLUSDT","DERACEUSDT","WARSUSDT","BATTLEUSDT","LEGENDUSDT",
         "KARTUSDT","CHAMPUSDT","WINUSDT","SUPERUSDT","GODSUSDT",
         "AURYUSDT","ATLASUSDT","POLISUSDT","PVUUSDT","REALMUSDT","MAGICUSDT",
     ],
     "DeFi": [
-        # ── الأساسيات ────────────────────────────
+
         "UNIUSDT","AAVEUSDT","CAKEUSDT","SUSHIUSDT","COMPUSDT",
         "MKRUSDT","CRVUSDT","LDOUSDT","1INCHUSDT","C98USDT",
         "DYDXUSDT","GMXUSDT","JUPUSDT","RAYUSDT","ORCAUSDT",
         "PENDLEUSDT","EIGENUSDT","ETHFIUSDT","IDEXUSDT","REZUSDT",
         "SYRUPUSDT","BONEUSDT","CVXUSDT","FRAXUSDT","FXSUSDT",
         "TRIBEUSDT","RADUSDT","ALPACAUSDT","RAMPUSDT","WOOUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "SNXUSDT","KNCUSDT","BALUSDT","BIFIUSDT","PERPUSDT",
         "JOEUSDT","SPIRITUSDT","VELODROMEUSDT","AERODROMEUSDT","THENAUSDT",
         "KYBERUSDT","BANCORUSDT","QUICKUSDT","SOLARUSDT","CAMELOTUSDT",
         "RAMSESUSDT","STERLINGUSDT","DODOUSDT","WIGOUSDT","APESWAPUSDT",
     ],
     "Layer1": [
-        # ── الأساسيات ────────────────────────────
+
         "AVAXUSDT","ADAUSDT","ATOMUSDT","NEARUSDT","FTMUSDT",
         "ALGOUSDT","ICPUSDT","APTUSDT","SUIUSDT","SEIUSDT",
         "INJUSDT","KASUSDT","TONUSDT","HBARUSDT","EGLDUSDT",
         "ZILUSDT","ONEUSDT","CFXUSDT","JASMYUSDT","LSKUSDT",
         "QNTUSDT","CELOUSDT","FLOWUSDT","MINAUSDT","KAVAUSDT",
         "VETUSDT","ONTUSDT","WAVESUSDT","XTZUSDT","NEOUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "SAGAUSDT","ZETAUSDT","VENOMUSDT","FUSEUSDT","SUPRAUSDT",
         "INITIAUSDT","STORYUSDT","MOVEMENTUSDT","MONADUSDT","BERACHAINUSDT",
         "ECLIPSEUSDT","SYSUSDT","COTIUSDT","RLCUSDT","TRACUSDT",
@@ -556,13 +556,13 @@ SECTORS = {
         "CONCORDUSDT","NOLAUSDT","PALLADAUSDT","DFINITYUSDT","COSMOSUSDT",
     ],
     "Layer2": [
-        # ── الأساسيات ────────────────────────────
+
         "POLUSDT","OPUSDT","ARBUSDT","ZKUSDT","STRKUSDT",
         "LRCUSDT","METISUSDT","MANTAUSDT","SCROLLUSDT","MNTUSDT",
         "MERLUSDT","ALTUSDT","WUSDT","ZROUSDT","LINEAUSDT",
         "TAIKOUSDT","MODUSDT","CELRUSDT","SKLUSDT","OMGUSDT",
         "SSVUSDT","NEONUSDT","ZKCUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "BLASTUSDT","MODEUSDT","MINTUSDT","ZORAUSDT","CYBERUSDT",
         "ANCIENT8USDT","KINTOУСDT","REDSTONEUSDT","LUMIAУСDT","ZKFAIRUSDT",
         "ZKLINKUSDT","ZKMEUSDT","ANYONEUSDT","ERGUSDT","SCRUSDT",
@@ -573,13 +573,13 @@ SECTORS = {
         "AXLUSDT","WORMHOLEUSDT","LAYERZUSDT","HYPERLANEUSDT","CELERУСDT",
     ],
     "Meme": [
-        # ── الأساسيات ────────────────────────────
+
         "DOGEUSDT","SHIBUSDT","PEPEUSDT","FLOKIUSDT","WIFUSDT",
         "BOMUSDT","MEMEUSDT","TUROUSDT","POPCATUSDT","MOGUSDT",
         "BABYDOGEUSDT","BONKUSDT","DOGSUSDT","CATIUSDT","GOATUSDT",
         "PNUTUSDT","ACTUSDT","CHILLGUYUSDT","TURBOUSDT","LUNAUSDT",
         "BOMEUSDT","MOTHERUSDT","PONKEUSDT","GMEUSDT","HONKUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "MYROUSUSDT","WOJAKSUSDT","MIGGOUSDT","COQUSDT","SLERFUSDT",
         "SMOGUSDT","SILLYUSDT","NOOTUSDT","WOOFUSDT","COPEUSDT",
         "BASEDUSDT","FROGUSDT","BRETTUSDT","ANDYUSDT",
@@ -587,12 +587,12 @@ SECTORS = {
         "LADYSUSDT","MOODENGUSDT","PENGUUSDT","APEUSDT","REFACTAUSDT",
     ],
     "Oracle": [
-        # ── الأساسيات ────────────────────────────
+
         "LINKUSDT","BANDUSDT","UMAUSDT","DIAUSDT","PYTHUSDT",
         "STORKUSDT","SXTUSDT","TELLOUSDT","CHRUSDT","PROSUSDT",
         "IOUSDT","ORAOUSDT","ACXUSDT","ATLUSDT","SUPRUSDT",
         "ORAIUSDT","TRUFUSDT","PRIMUSDT","DMTUSDT","REPUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "API3USDT","FLUXUSDT","IOSTUSDT","NESTUSDT","DOSUSDT",
         "WITNETUSDT","RAZORUSDT","UMBRELLAУСDT","FIOUSDT","BIOUSDT",
         "HUMAUSDT","TRUTHUSDT","LAZIOUSDT","OOKIUSDT","DORGUSDT",
@@ -602,15 +602,15 @@ SECTORS = {
         "ORACLIZEUSDT","AUGUR2USDT","REALITUUSDT","TRUEBITUSDT","CHRONICLEUSDT",
     ],
     "Privacy": [
-        # ── الأساسيات ────────────────────────────
+
         "XMRUSDT","DASHUSDT","SCRTUSDT","ROSEUSDT","ZECUSDT",
         "RAILUSDT","DUSKUSDT","ZENUSDT","COINUSDT","CTXCUSDT",
-        # ── من صور MEXC ──────────────────────────
+
         "PHAUSDT","TORNUSDT","FIROUSDT","SCUSDT","HOPRUSDT",
         "LATUSDT","ERGUSDT","PIVXUSDT","ALEOUSDT","PARTUSDT",
         "ZEPHUSDT","ARRUSDT","NYMUSDT","COTIUSDT","RLCUSDT",
         "TRACUSDT","MINAUSDT","XELUSDT","HMNDUSDT","CHEQOUSDT",
-        # ── Privacy إضافية معروفة ────────────────
+
         "OXENUSDT","BEAMXUSDT","GRINUSDT","NAVCUSDT","HAVENUSDT",
         "PANTHERUSDT","PRVCUSDT","ANONUSDT","IRONUSDT","SAFEUSDT",
         "XCMUSDT","LTZUSDT","ZENNUSDT","AZROUSDT","NYMOUSDT",
@@ -619,11 +619,11 @@ SECTORS = {
         "ERGOUSDT","PIRATEUSDT","BCHPUSDT","ARRRUSDT","MAVUSDT",
     ],
     "Storage": [
-        # ── الأساسيات ────────────────────────────
+
         "FILUSDT","ARUSDT","STORJUSDT","SCUSDT","BLZUSDT",
         "HOTUSDT","CKBUSDT","AIOZUSDT","KYVEUSDT","ALEPHUSDT",
         "DATAUSDT","SIACOINUSDT","LAMBUSDT","BTTCUSDT","PEAQUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "ANKRUSDT","CRUSTUSDT","MEMOUSDT","BTFSUSDT","SWARMUSDT",
         "BUNDLRUSDT","AKASHUSDT","FLUXUSDT","STORXUSDT","BLUZELLEUSDT",
         "SPHERONUSDT","JACKALUSDT","CERAMICUSDT","ESTUARYUSDT","LIGHTHOUSEUSDT",
@@ -634,12 +634,12 @@ SECTORS = {
         "NETWORKUSDT","CHAINPOLUSDT","DSHAREUSDT",
     ],
     "DePIN": [
-        # ── الأساسيات ────────────────────────────
+
         "IOTAUSDT","HNTUSDT","LPTUSDT","NTRNUSDT","GPUUSDT",
         "PONDUSDT","DAWNUSDT","WIFIUSDT","OXTUSDT","RDNTUSDT",
         "GRASSUSDT","IONUSDT","TIAUSDT","CUDOSUSDT","IOTXUSDT",
         "POKTUSDT","DOTUSDT","XNETUSDT","MOBIUSDT","NOSANAUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "HIVEMAPPERUSDT","HIVELLOUSDT","NATIXUSDT","DIMOUSDT","NUBILAUSDT",
         "REACTUSDT","GEODNETUSDT","SOARXUSDT","NGLAUSDT","PINGUSDT",
         "ROAMUSDT","NODELUSDT","CPOOLUSDT","SHDWUSDT","HELIUMUSDT",
@@ -649,11 +649,11 @@ SECTORS = {
         "RNDRNETUSDT","POWERLEDGERUSDT","ORIGINTRAILUSDT","DATAUSDT2",
     ],
     "Old": [
-        # ── الأساسيات ────────────────────────────
+
         "LTCUSDT","ETCUSDT","LUNCUSDT","BCHUSDT","EOSUSDT",
         "TRXUSDT","QTUMUSDT","RVNUSDT","ARKUSDT","DCRUSDT",
         "DGBUSDT","ZRXUSDT","NEOUSDT","ONTUSDT","VETUSDT",
-        # ── إضافات V13 ───────────────────────────
+
         "STEEMUSDT","NMRUSDT","XEMUSDT","WAVESUSDT","ICXUSDT",
         "BATUSDT","SNTUSDT","GNTUSDT","FUNUSDT","POWRUSDT",
         "GTOUSDT","APPCUSDT","REPUSDT","OMGUSDT","BTGUSDT",
@@ -666,16 +666,16 @@ SECTORS = {
         "TOKENOMYUSDT","BRDUSDT","CREDITCOINUSDT","DGTXUSDT","BITCIUSDT",
     ],
 
-    # ── قطاعات جديدة V16 ──────────────────────────────────────
+
     "Robotics": [
-        # روبوتات + AI جسدي
+
         "WLDUSDT","RENDUSDT","FETUSDT","AGIXUSDT","OCEANUSDT",
         "AKTOUSDT","NUMERAIUSDT","ARKMUSDT","PHAUSDT","CUDOSUSDT",
         "CGPTUSDT","NEUROUSDT","VIRTUSDT","SWARMAUSDT","MEAIUSDT",
     ],
 
     "NeoBank": [
-        # مدفوعات + بنوك رقمية + X402
+
         "XLMUSDT","XRPUSDT","PYTHUSDT","STRKUSDT","COTIUSDT",
         "REQUSDT","PAYUSDT","SOLOUSDT","BRLUSDT",
         "SPRMUSDT","PAYPUSDT","MNTLUSDT","NEXOUSDT","WIREXUSDT",
@@ -686,7 +686,7 @@ SECTORS = {
     ],
 
     "Quantum": [
-        # حوسبة كمية
+
         "QNTUSDT","QTUMUSDT","IONQUSDT","QUAIUSDT","KVANTUSDT",
         "QUIPUSDT","QUANTUMUSDT","QKCUSDT","ALEPHUSDT","NQUUSDT",
     ],
@@ -726,7 +726,7 @@ market_state        = "SAFE"
 last_market_report  = 0.0    # آخر إرسال تقرير السوق
 MARKET_REPORT_EVERY = 14400  # كل 4 ساعات فقط
 
-# 🆕 V15: Buffer counters — عداد التأكيد قبل تغيير الحالة
+
 _btc_danger_count  = 0   # عدد المرات المتتالية تحت DANGER
 _btc_caution_count = 0   # عدد المرات المتتالية تحت CAUTION
 _btc_safe_count    = 0   # عدد المرات المتتالية فوق SAFE
@@ -750,7 +750,7 @@ last_smart_money  = 0.0
 last_expand       = 0.0    # 🆕 آخر توسيع تلقائي للقوائم
 last_daily_report = 0.0    # 🆕 V15: آخر تقرير يومي عند 00:00 UTC
 
-# 🆕 V15: تاريخ حجم السوق اليومي للمقارنة
+
 daily_market_vol_history = []  # type: List[float]   [أمس, اليوم]
 
 # 🆕 FlowEntry Features
@@ -763,7 +763,7 @@ daily_report_sent_date   = ""  # type: str            تاريخ آخر تقري
 lz_alerted         = {}   # type: Dict[str, float]  {sym: last_alert_time}
 lz_daily_sent_date = ""   # type: str               تاريخ آخر فحص يومي
 
-# 🆕 V16: Hidden Accumulation — كشف التجميع الخفي
+
 hidden_accum_alerted = {}  # type: Dict[str, float]  {sym: last_alert_time}
 
 # 🆕 TPS/ATS Engine
@@ -785,7 +785,7 @@ last_tps_scan= 0.0   # type: float
 lh_alerted   = {}    # type: Dict[str, float]  {sym: last_alert_time}
 last_lh_scan = 0.0   # type: float  ← قيمة ابتدائية على مستوى الملف
 
-# 📋 Small Caps — قائمة العملات الصغيرة
+
 small_caps        = []   # type: List[str]   قائمة ديناميكية
 last_sc_refresh   = 0.0  # type: float       آخر تحديث للقائمة
 sc_alerted        = {}   # type: Dict[str, float]  {sym: last_alert_time}
@@ -798,10 +798,10 @@ price_prev         = {}   # type: Dict[str, float]
 momentum_alerted   = {}   # type: Dict[str, float]
 momentum_stage     = {}   # type: Dict[str, Dict]
 
-# 🆕 قائمة المراقبة — قطاع ساخن + تجميع حيتان
+
 watchlist          = {}   # type: Dict[str, Dict]
 
-# 🆕 Snapshot أسعار كل ساعة — لحساب تغيير حقيقي
+
 price_snapshot     = {}   # type: Dict[str, float]  {sym: price_1h_ago}
 price_snapshot_time = 0.0
 
@@ -813,7 +813,7 @@ sector_flow_state    = {}  # type: Dict[str, str]            {sector: "IN"/"OUT"
 last_sr_alert        = 0.0 # type: float  آخر تنبيه Sector Rotation
 top10_alerted        = {}  # type: Dict[str, float]          {sector: last_top10_alert_time}
 
-# 🆕 V15: تاريخ حجم كل عملة للمقارنة التاريخية
+
 coin_vol_history     = {}  # type: Dict[str, List[float]]   {sym: [vol1, vol2, ...]}
 
 # 🆕 Bottom Accumulation State
@@ -841,7 +841,7 @@ daily_signals    = {"date": "", "count": 0}  # عداد يومي شامل
 last_rt_scan     = 0.0
 last_bottom_scan     = 0.0
 
-# 🆕 V15: Backtesting — تتبع إشارات Top10
+
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
 
 api_calls_total    = 0
@@ -873,14 +873,14 @@ def send(msg, personal_only=False):
 
     personal_only=True → الشخصي فقط (للأوامر الخاصة)
     """
-    # ✅ فلتر VDelta عالمي — يمنع WATCH بـ VDelta منخفض
-    # يفحص الرسالة مباشرة قبل الإرسال
+
+
     if 'WATCH ALERT' in msg and 'نشاط مشبوه' in msg:
         import re as _re
         vd_match = _re.search(r'VDelta[:\s*`]+(\d+)%', msg)
         if vd_match:
             vd_val = int(vd_match.group(1))
-            # تحديد الحد حسب الحجم في الرسالة
+
             vol_match = _re.search(r'حجم[:\s*`]+([\d\.]+)M', msg)
             vol_m = float(vol_match.group(1)) if vol_match else 1.0
             vol_usdt = vol_m * 1_000_000
@@ -913,7 +913,7 @@ def send(msg, personal_only=False):
 
 
 
-# ── Telegram offset لتتبع الرسائل ────────────────
+
 _tg_offset = 0
 
 
@@ -926,7 +926,7 @@ def poll_commands():
             TELEGRAM_TOKEN, _tg_offset)
         r = requests.get(url, timeout=10)
         if r.status_code == 409:
-            # 409 = تعارض — نحذف Webhook تلقائياً
+
             log.warning("⚠️ getUpdates 409 — حذف Webhook تلقائياً")
             try:
                 requests.get(
@@ -949,25 +949,25 @@ def poll_commands():
             log.info("📨 getUpdates: %d رسالة جديدة", len(updates))
         for update in updates:
             _tg_offset = update["update_id"] + 1
-            # دعم message و channel_post
+
             msg = update.get("message") or update.get("channel_post") or {}
             text = msg.get("text", "").strip()
-            # تحويل للأحرف الصغيرة فقط للمقارنة
+
             text_lower = text.lower()
             chat_id = str(msg.get("chat", {}).get("id", ""))
             log.info("📨 update: chat_id=%s text='%s'", chat_id, text)
-            # قبول من CHAT_ID الشخصي أو GROUP_ID
+
             allowed = [str(CHAT_ID)]
             if GROUP_ID and GROUP_ID != "YOUR_GROUP_ID":
                 allowed.append(str(GROUP_ID))
             if chat_id not in allowed:
                 log.warning("⛔ chat_id غير معروف: %s | allowed: %s", chat_id, allowed)
                 continue
-            # أوامر
+
             if text_lower in ("/report", "/تقرير"):
                 log.info("📤 /report طُلب من chat_id=%s", chat_id)
                 send("\U0001f4e4 جاري إعداد التقرير...")
-                # ✅ نجلب all_tickers مباشرة إذا كانت فارغة
+
                 global all_tickers
                 if not all_tickers:
                     log.info("📤 /report: all_tickers فارغة — نجلبها الآن")
@@ -1046,7 +1046,7 @@ def poll_commands():
                 perf_daily_report()
 
             elif text_lower in ("/hunter", "/صياد"):
-                # آخر 5 إشارات من Liquidity Hunter
+
                 from collections import OrderedDict
                 _recent = sorted(
                     [(s, v) for s, v in perf_track.items()],
@@ -1083,7 +1083,7 @@ def poll_commands():
 
             elif text_lower in ("/stop", "/ايقاف"):
                 send("⏸️ تم إيقاف التنبيهات مؤقتاً — اكتب /start للعودة")
-                # نضع flag
+
                 import builtins
                 builtins._mafio_paused = True
 
@@ -1152,7 +1152,7 @@ def safe_get(url, params=None, retries=3):
             _now = time.time()
             _elapsed = _now - api_minute_reset
             if _elapsed >= 60:
-                # معدل حقيقي = عدد الطلبات / الوقت الفعلي بالدقائق
+
                 _rate = int(api_calls_minute / (_elapsed / 60))
                 log.info("📡 API: %d طلب/دقيقة | إجمالي: %d",
                          _rate, api_calls_total)
@@ -1217,7 +1217,7 @@ def clear_expired_cache():
 
 # ═══════════════════════════════════════════════
 #   🆕 V15: RSI CALCULATOR
-#   حساب RSI بدون مكتبات خارجية — على كلوز prices
+
 # ═══════════════════════════════════════════════
 def calc_rsi(closes, period=RSI_PERIOD):
     # type: (list, int) -> float
@@ -1252,14 +1252,14 @@ def rsi_label(rsi):
 
 # ═══════════════════════════════════════════════
 #   🆕 V15: COIN VOL HISTORY
-#   تحديث تاريخ حجم كل عملة لحساب vol_ratio التاريخي
+
 # ═══════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════
-#   DIRECTION ENGINE - محرك ترجيح الاتجاه
-#   1. VW-MACD  (40%) - اتجاه السيولة المرجح بالحجم
-#   2. Weis Wave (40%) - قوة التدخل المؤسسي
-#   3. Vol-RSI   (20%) - زخم معدل بالتقلب
+
+
+
+
 # ═══════════════════════════════════════════════════════════════
 
 def calc_vwmacd(closes, vols, fast=12, slow=26):
@@ -1321,7 +1321,7 @@ def calc_vdelta_ma(sym, period=10, interval="15m"):
         vols   = kd["vols"]
         n      = len(closes)
 
-        # حساب VDelta لكل شمعة مرجحاً بالحجم
+
         vd_values = []
         for i in range(n):
             v = vols[i] if i < len(vols) else 0
@@ -1332,7 +1332,7 @@ def calc_vdelta_ma(sym, period=10, interval="15m"):
             else:
                 vd_values.append((0.5, v))   # محايد
 
-        # آخر period شمعة مرجحة بالحجم
+
         recent = vd_values[-period:]
         total_vol  = sum(v for _, v in recent)
         if total_vol <= 0:
@@ -1446,9 +1446,9 @@ def calc_garch_range(sym, interval="1d"):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   📐 MURRAY MATH — مستويات الدعم والمقاومة الرياضية
-#   تقسم النطاق السعري إلى 8 مستويات متساوية
-#   0/8 = دعم قوي جداً | 4/8 = محور | 8/8 = مقاومة قوية جداً
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 def calc_murray_math(sym, interval="1d"):
@@ -1465,7 +1465,7 @@ def calc_murray_math(sym, interval="1d"):
         lows   = kd["lows"]
         closes = kd["closes"]
 
-        # أعلى وأدنى نقطة في النطاق
+
         highest = max(highs[-64:]) if len(highs) >= 64 else max(highs)
         lowest  = min(lows[-64:])  if len(lows)  >= 64 else min(lows)
         current = closes[-1]
@@ -1473,13 +1473,13 @@ def calc_murray_math(sym, interval="1d"):
         if highest <= lowest:
             return {}
 
-        # تقريب النطاق لأقرب قوة من 2 (Murray Math)
+
         price_range = highest - lowest
         import math
         scale = math.pow(10, math.floor(math.log10(price_range)))
         mm_range = math.ceil(price_range / scale) * scale
 
-        # حساب المستويات الـ 8
+
         step = mm_range / 8
         base = math.floor(lowest / scale) * scale
 
@@ -1488,7 +1488,7 @@ def calc_murray_math(sym, interval="1d"):
         for i, label in enumerate(labels):
             levels[label] = round(base + (i - 1) * step, 8)
 
-        # تحديد موقع السعر الحالي
+
         current_zone = "محايد"
         nearest_support = levels["0/8"]
         nearest_resist  = levels["8/8"]
@@ -1502,7 +1502,7 @@ def calc_murray_math(sym, interval="1d"):
                 nearest_support = l1
                 nearest_resist  = l2
 
-                # تحديد قوة المنطقة
+
                 if labels[i] in ["0/8", "8/8"]:
                     current_zone = "منطقة انعكاس قوية جداً"
                 elif labels[i] in ["1/8", "7/8"]:
@@ -1515,7 +1515,7 @@ def calc_murray_math(sym, interval="1d"):
                     current_zone = "منطقة تجميع"
                 break
 
-        # مسافة من أقرب مستوى
+
         dist_to_support = abs(current - nearest_support) / current * 100 if current > 0 else 0
         dist_to_resist  = abs(nearest_resist - current)  / current * 100 if current > 0 else 0
 
@@ -1549,7 +1549,7 @@ def format_murray_block(sym):
     res    = fmt_price(mm.get("resistance", 0))
     ds     = mm.get("dist_support", 0)
     dr     = mm.get("dist_resist", 0)
-    # Stop Loss = المستوى الأدنى بمستويين (0/8)
+
     sl     = fmt_price(mm.get("key_support", mm.get("support", 0)))
 
     out  = "📐 *Murray Math* منطقة `{}`\n".format(zone)
@@ -1588,7 +1588,7 @@ def build_engine_block(sym):
             fmt_price(garch.get("support", 0)),
             fmt_price(garch.get("resistance", 0)))
     if murray and garch:
-        # نعرض Murray فقط إذا كانت قيمه مختلفة عن GARCH
+
         garch_sup = garch.get("support", 0)
         murray_sup = murray.get("support", 0)
         diff = abs(garch_sup - murray_sup) / garch_sup * 100 if garch_sup > 0 else 100
@@ -1597,7 +1597,7 @@ def build_engine_block(sym):
             if mm_block:
                 out += mm_block
         else:
-            # فقط أضف المنطقة بدون الأرقام المكررة
+
             zone  = murray.get("zone_label", "")
             zname = murray.get("current_zone", "")
             if zone:
@@ -1612,9 +1612,9 @@ def build_engine_block(sym):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   📊 MULTI-TIMEFRAME ANALYSIS — تحليل متعدد الأطراف الزمنية
-#   يفحص 3 أطر: 15m (قصير) + 1h (متوسط) + 4h (طويل)
-#   المنطق: الإطار الكبير يحكم — إذا تعارض مع الصغير = خصم
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 def calc_mtf_analysis(sym):
@@ -1629,7 +1629,7 @@ def calc_mtf_analysis(sym):
     """
     results = {}
 
-    # حساب الاتجاه لكل إطار
+
     for interval, weight, label in [
         ("15m", 0.20, "15m"),   # قصير المدى — وزن 20%
         ("1h",  0.40, "1h"),    # متوسط المدى — وزن 40%
@@ -1647,10 +1647,10 @@ def calc_mtf_analysis(sym):
         lows   = kd["lows"]
         n      = len(closes)
 
-        # 1. اتجاه السعر
+
         price_trend = (closes[-1] - closes[-10]) / closes[-10] * 100 if closes[-10] > 0 else 0
 
-        # 2. موقع السعر من المتوسط المتحرك (EMA20)
+
         ema20 = sum(closes[-20:]) / 20
         above_ema = closes[-1] > ema20
 
@@ -1660,13 +1660,13 @@ def calc_mtf_analysis(sym):
         total_v  = buy_vol + sell_vol
         vol_bull = buy_vol / total_v if total_v > 0 else 0.5
 
-        # 4. Higher Lows (اتجاه صاعد)
+
         recent_lows = lows[-10:]
         higher_lows = sum(1 for i in range(1, len(recent_lows))
                          if recent_lows[i] > recent_lows[i-1])
         hl_ratio = higher_lows / (len(recent_lows) - 1) if len(recent_lows) > 1 else 0.5
 
-        # تجميع النقاط
+
         bull_score = (
             (50 + price_trend * 2) * 0.30 +   # اتجاه السعر
             (100 if above_ema else 0) * 0.25 + # فوق/تحت EMA
@@ -1687,20 +1687,20 @@ def calc_mtf_analysis(sym):
     if not results:
         return {"score": 50, "verdict": "غير محدد", "bias": "neutral", "details": {}}
 
-    # ── حساب التوافق بين الأطر ──
+
     weighted_bull = sum(r["bull"] * r["weight"] for r in results.values())
 
-    # ── فلتر التضارب الزمني ──
-    # إذا 4h هابط لكن 15m صاعد = خصم الإشارة القصيرة
+
+
     bull_4h  = results.get("4h",  {}).get("bull", 50)
     bull_1h  = results.get("1h",  {}).get("bull", 50)
     bull_15m = results.get("15m", {}).get("bull", 50)
 
-    # تضارب: الإطار الصغير عكس الكبير
+
     conflict_4h_15m = (bull_4h < 40 and bull_15m > 65)
     conflict_4h_1h  = (bull_4h < 40 and bull_1h  > 65)
 
-    # خصم عند التضارب
+
     if conflict_4h_15m and conflict_4h_1h:
         weighted_bull *= 0.60  # تضارب شديد
         conflict_note = "⚠️ تضارب حاد — 4h هابط"
@@ -1710,14 +1710,14 @@ def calc_mtf_analysis(sym):
     else:
         conflict_note = ""
 
-    # توافق: كل الأطر في نفس الاتجاه
+
     all_bullish = bull_4h > 60 and bull_1h > 60 and bull_15m > 60
     all_bearish = bull_4h < 40 and bull_1h < 40 and bull_15m < 40
 
     if all_bullish:
         weighted_bull = min(100, weighted_bull * 1.10)  # مكافأة التوافق
 
-    # الحكم النهائي
+
     score = round(weighted_bull, 1)
 
     if score >= 70 and all_bullish:
@@ -1760,13 +1760,13 @@ def format_mtf_block(sym):
     score   = mtf.get("score", 50)
     verdict = mtf.get("verdict", "")
 
-    # شريط التوافق
+
     bar = "🟢" * int(score / 20) + "⚪" * (5 - int(score / 20))
 
     out  = "📈 *MTF Analysis:*\n"
     out += "  {} `{:.0f}%` توافق\n".format(bar, score)
 
-    # تفاصيل كل إطار
+
     icons = {"15m": "⚡", "1h": "🕐", "4h": "📊"}
     for iv in ["4h", "1h", "15m"]:
         d = details.get(iv, {})
@@ -1808,7 +1808,7 @@ def get_coin_vol_ratio(sym, current_vol):
     hist = coin_vol_history.get(sym, [])
     if len(hist) < VOL_HISTORY_MIN:
         return 1.0   # لا يوجد تاريخ كافٍ — نعتبره طبيعياً
-    # نستخدم السابقات فقط (بدون الحالية)
+
     prev = hist[:-1] if len(hist) > 1 else hist
     avg  = sum(prev) / len(prev)
     if avg <= 0:
@@ -1848,20 +1848,20 @@ def is_suspicious(sym, price=0.0, vol=0.0, change=0.0):
     if is_stablecoin(sym, price, change):
         return True
 
-    # 2. كلمات مشبوهة في الاسم
+
     for kw in SUSPICIOUS_KEYWORDS:
         if kw in base:
             return True
 
-    # 3. حجم منخفض جداً = سهل التلاعب
+
     if vol < WHALE_MIN_VOL:
         return True
 
-    # 4. سعر قريب من الصفر = Micro Cap
+
     if 0 < price < WHALE_MIN_PRICE:
         return True
 
-    # 5. ارتفاع كبير جداً = Pump مكتمل (فات الوقت)
+
     if change > WHALE_MAX_CHANGE:
         return True
 
@@ -1885,7 +1885,7 @@ def pre_filter(sym, change, vol, price=0.0):
 
 # ═══════════════════════════════════════════════
 #   BTC MARKET ANALYSIS
-#   🐛 إصلاح V11: استخدام params={"symbol":"BTCUSDT"} بدل endpoint منفصل
+
 # ═══════════════════════════════════════════════
 def analyze_btc():
     # type: () -> None
@@ -1893,7 +1893,7 @@ def analyze_btc():
     global last_market_report
     global eth_change_24h
 
-    # ✅ الإصلاح: نجلب بيانات BTC بالـ symbol param وليس بـ endpoint مختلف
+
     data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
     if not data:
         return
@@ -1908,20 +1908,20 @@ def analyze_btc():
     except (KeyError, ValueError, TypeError):
         pass
 
-    # اتجاه 1h — آخر شمعة vs قبلها
+
     kd1 = get_klines("BTCUSDT", "1h", 3)
     if kd1 and len(kd1["closes"]) >= 2:
         c = kd1["closes"]
         btc_trend_1h = (c[-1] - c[-2]) / c[-2] * 100 if c[-2] > 0 else 0.0
 
-    # 🆕 اتجاه 4h — كشف الانهيار السريع
+
     btc_trend_4h = 0.0
     kd4 = get_klines("BTCUSDT", "4h", 3)
     if kd4 and len(kd4["closes"]) >= 2:
         c4 = kd4["closes"]
         btc_trend_4h = (c4[-1] - c4[0]) / c4[0] * 100
 
-    # 🆕 جلب ETH 24h
+
     eth_data = safe_get(MEXC_24H, {"symbol": "ETHUSDT"})
     if eth_data:
         try:
@@ -1934,7 +1934,7 @@ def analyze_btc():
         except (KeyError, ValueError, TypeError):
             pass
 
-    # 🆕 TPS/ATS لـ BTC و ETH
+
     global btc_tps_stats, eth_tps_stats
     _btc_tps = analyze_tps_ats("BTCUSDT")
     if _btc_tps:
@@ -1944,29 +1944,29 @@ def analyze_btc():
         eth_tps_stats = _eth_tps
 
     # ══════════════════════════════════════════════
-    # 🆕 V15: Buffer System — منع التذبذب
-    # الحدود مع Buffer:
-    #   DANGER:  يدخل عند < -3.3% | يخرج عند > -2.7%
-    #   CAUTION: يدخل عند < -1.8% | يخرج عند > -1.2%
-    #   SAFE:    يدخل عند > -1.2%
+
+
+
+
+
     # ══════════════════════════════════════════════
     global _btc_danger_count, _btc_caution_count, _btc_safe_count
 
-    # حدود الدخول (أصعب)
+
     danger_enter  = BTC_DANGER_ZONE  - BTC_DANGER_BUFFER   # -3.3%
     caution_enter = BTC_CAUTION_ZONE - BTC_CAUTION_BUFFER  # -1.8%
 
-    # حدود الخروج (أسهل — منطقة Buffer)
+
     danger_exit   = BTC_DANGER_ZONE  + BTC_DANGER_BUFFER   # -2.7%
     caution_exit  = BTC_CAUTION_ZONE + BTC_CAUTION_BUFFER  # -1.2%
 
     btc_signal = btc_change_24h
 
-    # 🆕 كشف الانهيار السريع — بغض النظر عن 24h
+
     _crash_4h = btc_trend_4h <= BTC_CRASH_4H   # انهار -2.5% في 4 ساعات
     _crash_1h = btc_trend_1h  <= BTC_CRASH_1H  # انهار -1.5% في ساعة
 
-    # حدد الحالة المقترحة
+
     if btc_signal <= danger_enter or btc_trend_1h <= -2.0 or _crash_4h:
         suggested = "DANGER"
     elif btc_signal <= caution_enter or _crash_1h:
@@ -1974,10 +1974,10 @@ def analyze_btc():
     elif btc_signal >= caution_exit:
         suggested = "SAFE"
     else:
-        # في منطقة Buffer — ابقَ على الحالة الحالية
+
         suggested = market_state
 
-    # عداد التأكيد — يحتاج BTC_CONFIRM_COUNT مرات متتالية
+
     if suggested == "DANGER":
         _btc_danger_count  += 1
         _btc_caution_count  = 0
@@ -1991,10 +1991,10 @@ def analyze_btc():
         _btc_danger_count   = 0
         _btc_caution_count  = 0
     else:
-        # Buffer zone — لا تغيير في العدادات
+
         pass
 
-    # تطبيق التغيير فقط بعد BTC_CONFIRM_COUNT مرات
+
     old = market_state
     if _btc_danger_count  >= BTC_CONFIRM_COUNT:
         market_state = "DANGER"
@@ -2002,12 +2002,12 @@ def analyze_btc():
         market_state = "CAUTION"
     elif _btc_safe_count    >= BTC_CONFIRM_COUNT:
         market_state = "SAFE"
-    # else: ابقَ على الحالة الحالية
+
 
     last_btc = time.time()
 
     if old != market_state:
-        # ── cooldown 4 ساعات ──
+
         if time.time() - last_market_report < MARKET_REPORT_EVERY:
             log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
             return
@@ -2018,7 +2018,7 @@ def analyze_btc():
             "CAUTION": "⚠️ Gold فقط (Score 88+)",
             "DANGER":  "🔴 إشارات القطاعات الساخنة فقط",
         }
-        # بناء قسم TPS/ATS للرسالة
+
         def _tps_line(stats, sym):
             # type: (Dict, str) -> str
             if not stats:
@@ -2106,7 +2106,7 @@ def analyze_sectors():
 
         avg_ch     = sum(changes) / len(changes)
         rising_pct = sum(1 for c in changes if c > 0) / len(changes) * 100
-        # ✅ sector_vol_history قد يكون list (من Flow Tracker) أو float
+
         _prev = sector_vol_history.get(sector, total_vol)
         if isinstance(_prev, list):
             prev_vol = _prev[-1] if _prev else total_vol
@@ -2156,8 +2156,8 @@ def analyze_sectors():
 
 # ═══════════════════════════════════════════════
 #   🆕 SECTOR FLOW TRACKER V11
-#   يرصد تدفق السيولة بين القطاعات في الوقت الحقيقي
-#   يعمل كل 12 ثانية — بدون طلبات API إضافية!
+
+
 # ═══════════════════════════════════════════════
 def update_sector_flow(ticker_map):
     # type: (Dict) -> None
@@ -2187,7 +2187,7 @@ def update_sector_flow(ticker_map):
 
         avg_ch = sum(changes) / len(changes)
 
-        # حفظ اللقطة
+
         if sector not in sector_vol_snapshots:
             sector_vol_snapshots[sector] = []
         if sector not in sector_change_snapshots:
@@ -2196,7 +2196,7 @@ def update_sector_flow(ticker_map):
         sector_vol_snapshots[sector].append(total_vol)
         sector_change_snapshots[sector].append(avg_ch)
 
-        # الاحتفاظ بآخر FLOW_HISTORY_MAX لقطة فقط
+
         if len(sector_vol_snapshots[sector]) > FLOW_HISTORY_MAX:
             sector_vol_snapshots[sector].pop(0)
         if len(sector_change_snapshots[sector]) > FLOW_HISTORY_MAX:
@@ -2222,11 +2222,11 @@ def analyze_sector_flow():
         vols    = sector_vol_snapshots.get(sector, [])
         changes = sector_change_snapshots.get(sector, [])
 
-        # نحتاج على الأقل FLOW_WINDOW لقطات للمقارنة
+
         if len(vols) < FLOW_WINDOW or len(changes) < FLOW_WINDOW:
             continue
 
-        # آخر لقطة vs متوسط السابقات
+
         recent_vol  = vols[-1]
         prev_avg_vol = sum(vols[-FLOW_WINDOW:-1]) / (FLOW_WINDOW - 1)
         if prev_avg_vol <= 0:
@@ -2236,13 +2236,13 @@ def analyze_sector_flow():
         recent_ch   = changes[-1]
         avg_ch_prev = sum(changes[-FLOW_WINDOW:-1]) / (FLOW_WINDOW - 1)
 
-        # ── رصد دخول السيولة ──────────────────────
+
         is_inflow = (
             vol_ratio >= FLOW_VOL_SURGE and
             recent_ch >= FLOW_CHANGE_MIN
         )
 
-        # ── رصد خروج السيولة ──────────────────────
+
         is_outflow = (
             vol_ratio < (1.0 / FLOW_VOL_SURGE) and  # انخفض الحجم
             recent_ch <= FLOW_EXIT_DROP
@@ -2270,7 +2270,7 @@ def analyze_sector_flow():
         else:
             sector_flow_state[sector] = "NEUTRAL"
 
-    # ── إرسال تنبيهات الدخول ──────────────────────
+
     for info in inflows:
         sector = info["sector"]
         last_alert = sector_flow_alerted.get(sector, 0)
@@ -2279,7 +2279,7 @@ def analyze_sector_flow():
 
         sector_flow_alerted[sector] = now
 
-        # أفضل عملات في هذا القطاع الآن
+
         coins_in_sector = SECTORS.get(sector, [])
         top_coins = []
         tmap = {t["symbol"]: t for t in all_tickers}
@@ -2297,7 +2297,7 @@ def analyze_sector_flow():
         for name, ch, vol in top_coins[:5]:
             top_txt += "  • *{}* `+{:.1f}%` vol:`{:,.0f}`\n".format(name, ch, vol)
 
-        # هل القطاع ساخن أصلاً؟
+
         is_hot = sector in hot_sectors
         hot_tag = " 🔥 *SECTOR HOT*" if is_hot else ""
 
@@ -2326,8 +2326,8 @@ def analyze_sector_flow():
         )
         log.info("💸 Flow IN | %s | ratio=%.2f | ch=%.1f%%", sector, info["vol_ratio"], info["ch"])
 
-        # 🆕 V14: إطلاق Smart Top10 فوراً بعد إشعار الدخول
-        # نحتاج ticker_map — نبنيه من all_tickers
+
+
         if all_tickers:
             tmap      = {t["symbol"]: t for t in all_tickers}
             p_map     = {}
@@ -2347,14 +2347,14 @@ def analyze_sector_flow():
                     pass
             smart_top10_alert(sector, tmap, p_map, v_map, c_map, h_map, l_map)
 
-    # ── إرسال تنبيهات الخروج ──────────────────────
+
     if outflows:
         out_txt = ""
         for info in outflows:
             out_txt += "  📤 *{}* حجم:`{}×` ch:`{:.1f}%`\n".format(
                 info["sector"], info["vol_ratio"], info["ch"])
 
-        # لا ترسل إشعار خروج إذا أُرسل مؤخراً لجميع القطاعات
+
         any_new = any(
             now - sector_flow_alerted.get(i["sector"], 0) >= FLOW_ALERT_COOL
             for i in outflows
@@ -2379,8 +2379,8 @@ def analyze_sector_flow():
 
 # ═══════════════════════════════════════════════════════════════════
 #   🌊 SECTOR ROTATION DETECTOR
-#   يكتشف عندما تخرج الأموال من قطاع وتدخل قطاعاً آخر
-#   ويرسل تنبيه واحد مركّز يربط الحدثين معاً
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 def detect_sector_rotation():
@@ -2399,7 +2399,7 @@ def detect_sector_rotation():
     if not sector_vol_snapshots:
         return
 
-    # احسب التغير لكل قطاع بناءً على snapshots
+
     sector_pct = {}
     sector_vol_abs = {}
     for sector, vols in sector_vol_snapshots.items():
@@ -2416,7 +2416,7 @@ def detect_sector_rotation():
     if not sector_pct:
         return
 
-    # فرّق بين الداخل والخارج
+
     entering = sorted(
         [(s, p) for s, p in sector_pct.items() if p >= SR_MIN_IN],
         key=lambda x: -x[1]
@@ -2426,20 +2426,20 @@ def detect_sector_rotation():
         key=lambda x: x[1]
     )
 
-    # يجب وجود الاثنين لإرسال Rotation
+
     if not entering or not leaving:
         return
 
     last_sr_alert = now
 
-    # ── بناء الرسالة ──────────────────────────────
-    # قسم الخروج
+
+
     out_lines = ""
     for s, p in leaving[:3]:
         vol = sector_vol_abs.get(s, 0)
         out_lines += "  ⬇️ *{}* `{:+.1f}%` ({:.1f}M)\n".format(s, p, vol)
 
-    # قسم الدخول + أفضل عملات
+
     in_lines   = ""
     opp_lines  = ""  # الفرص المحددة
 
@@ -2450,7 +2450,7 @@ def detect_sector_rotation():
         icon = "🔥" if p >= 25 else "✅"
         in_lines += "  ⬆️ *{}* `{:+.1f}%` ({:.1f}M) {}\n".format(s, p, vol, icon)
 
-    # أفضل فرص في القطاع الأول الداخل
+
     top_sector = entering[0][0]
     coins      = SECTORS.get(top_sector, [])
     top_coins  = []
@@ -2461,7 +2461,7 @@ def detect_sector_rotation():
             ch  = float(tmap[sym]["priceChangePercent"])
             vol = float(tmap[sym]["quoteVolume"])
             pr  = float(tmap[sym]["lastPrice"])
-            # فلتر: حجم > 200K + تغيير إيجابي أو محايد (لم يرتفع كثيراً بعد)
+
             if vol >= 200_000 and ch <= 15:
                 top_coins.append((sym.replace("USDT",""), ch, vol, pr))
         except (KeyError, ValueError):
@@ -2471,7 +2471,7 @@ def detect_sector_rotation():
 
     for name, ch, vol, pr in top_coins[:SR_TOP_COINS]:
         chg_icon = "🟢" if ch > 0 else "⚪"
-        # جلب VDelta وATS للعملة
+
         sym_full = name + "USDT"
         _s = analyze_tps_ats(sym_full)
         vd_txt  = " | VD:`{:.0f}%`".format(_s["vdelta"]*100) if _s else ""
@@ -2479,7 +2479,7 @@ def detect_sector_rotation():
         opp_lines += "  {} *{}* `{:+.1f}%`{}{}\n".format(
             chg_icon, name, ch, vd_txt, ats_txt)
 
-    # حكم ذكي
+
     top_in_pct  = entering[0][1]
     top_out_pct = leaving[0][1]
     if top_in_pct >= 30:
@@ -2489,7 +2489,7 @@ def detect_sector_rotation():
     else:
         verdict = "👀 *تدفق بدأ — راقب التأكيد*"
 
-    # هل السوق يدعم؟
+
     mkt_note = ""
     if market_state == "SAFE":
         mkt_note = "✅ السوق SAFE — يدعم الدخول"
@@ -2520,7 +2520,7 @@ def detect_sector_rotation():
              [s for s, _ in leaving[:3]],
              [s for s, _ in entering[:3]])
 
-    # ✅ تحديث hot_sectors تلقائياً بناءً على انتقال السيولة
+
     global hot_sectors, hot_symbols
     for s, p in entering[:3]:
         if s not in hot_sectors:
@@ -2542,7 +2542,7 @@ def get_flow_summary():
     if not sector_vol_snapshots:
         return "➡️ لا تدفق واضح — جاري جمع البيانات\n"
 
-    # احسب التغير لكل قطاع
+
     sector_changes = []
     for sector, vols in sector_vol_snapshots.items():
         if len(vols) < 2:
@@ -2558,7 +2558,7 @@ def get_flow_summary():
     if not sector_changes:
         return "➡️ لا تدفق واضح\n"
 
-    # رتّب: الأكثر دخولاً أولاً
+
     sector_changes.sort(key=lambda x: -x[1])
     entering = [(s, p, v, d) for s, p, v, d in sector_changes if p >= 8]
     leaving  = [(s, p, v, d) for s, p, v, d in sector_changes if p <= -8]
@@ -2579,7 +2579,7 @@ def get_flow_summary():
         for s, p, v, d in leaving[:3]:
             txt += "  ⬇️ {} `{:+.0f}%` ({:.1f}M)\n".format(s, p, d)
 
-    # خلاصة ذكية
+
     if entering and leaving:
         top_in  = entering[0][0]
         top_out = leaving[0][0]
@@ -2600,8 +2600,8 @@ def get_flow_summary():
 
 # ═══════════════════════════════════════════════
 #   🆕 SMART TOP10 ALERT V14
-#   اصطياد أفضل 10 عملات في القطاع قبل الانفجار
-#   يُستدعى فوراً عند رصد Sector Flow IN
+
+
 # ═══════════════════════════════════════════════
 def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_map, low_map):
     # type: (str, dict, dict, dict, dict, dict, dict) -> None
@@ -2631,7 +2631,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
 
     now = time.time()
 
-    # cooldown: لا ترسل نفس القطاع كل 30 دقيقة
+
     if now - top10_alerted.get(sector, 0) < TOP10_COOLDOWN:
         return
 
@@ -2639,7 +2639,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
     scored   = []
 
     for sym in coins:
-        # ── فلاتر أساسية ───────────────────────
+
         if sym not in price_map: continue
         if sym in tracked: continue
         if sym in momentum_stage: continue
@@ -2654,50 +2654,50 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
         if vol < TOP10_MIN_VOL: continue
         if price <= 0 or low_24h <= 0: continue
 
-        # ── الفلتر الذهبي: 0% < تغيير < 5% ────
+
         if ch < TOP10_CHANGE_MIN: continue
         if ch > TOP10_CHANGE_MAX: continue
 
-        # ── 🆕 V15: vol_ratio تاريخي للعملة نفسها ──
+
         vol_ratio = get_coin_vol_ratio(sym, vol)
         if vol_ratio < TOP10_VOL_RATIO: continue
 
-        # ── قريب من القاع ──────────────────────
+
         rebound = (price - low_24h) / low_24h * 100 if low_24h > 0 else 99
         if rebound > TOP10_REBOUND_MAX: continue
 
-        # ── ليس Stablecoin أو Leverage ─────────
+
         base = sym.replace("USDT", "")
         if base in STABLECOINS: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
 
         # ── 🆕 V15: RSI Filter ──────────────────
-        # نجلب RSI من كلوز 15m (من الكاش إذا متاح)
+
         rsi_val = -1.0
         kd_rsi  = get_klines(sym, "15m", RSI_PERIOD + 2)
         if kd_rsi and len(kd_rsi["closes"]) >= RSI_PERIOD + 1:
             rsi_val = calc_rsi(kd_rsi["closes"])
-            # ارفض العملات في ذروة الشراء
+
             if rsi_val > RSI_OVERBOUGHT:
                 log.debug("🔴 RSI رفض: %s RSI=%.1f", sym, rsi_val)
                 continue
 
-        # ── حساب النقاط (100 نقطة) ─────────────
-        # 1. حجم مرتفع فجأة (40 نقطة) — تاريخي الآن
+
+
         vol_score = min(vol_ratio / 5.0, 1.0) * W_VOL_RATIO
 
-        # 2. قطاع ساخن + Flow داخل (25 نقطة)
+
         is_hot    = sym in hot_symbols
         flow_in   = sector_flow_state.get(sector, "NEUTRAL") == "IN"
         hot_score = W_HOT_SECTOR if (is_hot and flow_in) else (W_HOT_SECTOR * 0.5 if is_hot else 0)
 
-        # 3. قريب من القاع (20 نقطة)
+
         rebound_score = max(0, (TOP10_REBOUND_MAX - rebound) / TOP10_REBOUND_MAX) * W_REBOUND_LOW
 
-        # 4. تغيير صغير = لم ينطلق بعد (15 نقطة)
+
         change_score = max(0, (TOP10_CHANGE_MAX - ch) / TOP10_CHANGE_MAX) * W_CHANGE_SMALL
 
-        # 🆕 مكافأة RSI منخفض (يصل إلى +5 نقاط إضافية)
+
         rsi_bonus = 0.0
         if rsi_val > 0:
             if rsi_val <= RSI_OVERSOLD:    rsi_bonus = 5.0
@@ -2725,17 +2725,17 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
         log.info("🔍 Top10 [%s]: لا عملات تحقق الشروط", sector)
         return
 
-    # ترتيب تنازلي حسب النقاط
+
     scored.sort(key=lambda x: -x["score"])
     top10 = scored[:TOP10_COUNT]
 
     top10_alerted[sector] = now
 
-    # ── 🆕 V15: تسجيل كل عملة في Backtest ──────
+
     for c in top10:
         register_backtest(c["sym"], c["price"], sector)
 
-    # ── بناء رسالة Telegram المحسّنة ────────────
+
     flow_vol = sector_vol_snapshots.get(sector, [])
     vol_surge_txt = ""
     if len(flow_vol) >= 2 and flow_vol[-2] > 0:
@@ -2772,7 +2772,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
 
     mkt_icon = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}.get(market_state, "⚪")
 
-    # إحصاء كم عملة RSI جيد
+
     good_rsi_count = sum(1 for c in top10 if 0 <= c["rsi"] <= RSI_IDEAL_MAX)
     rsi_summary    = " | 🟢 `{}/{} RSI جيد`".format(good_rsi_count, len(top10)) if good_rsi_count > 0 else ""
 
@@ -2810,7 +2810,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
 
 # ═══════════════════════════════════════════════
 #   🆕 V15: BACKTESTING ENGINE
-#   يتتبع إشارات Top10 ويقيس أداءها بعد 1h/4h/24h
+
 # ═══════════════════════════════════════════════
 def register_backtest(sym, price, sector):
     # type: (str, float, str) -> None
@@ -2848,7 +2848,7 @@ def check_backtest(price_map):
         gain_raw = (price - entry) / entry * 100
         gain     = round(gain_raw - BACKTEST_FEE, 2)
 
-        # حفظ النتائج فقط — بدون إرسال فردي
+
         if not data["checked_1h"] and elapsed >= BACKTEST_CHECK_1H:
             data["checked_1h"] = True
             data["result_1h"]  = gain
@@ -2894,15 +2894,15 @@ def get_backtest_stats():
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   📊 PERFORMANCE TRACKER — تتبع أداء كل نظام بشكل مستقل
-#   يسجل كل إشارة مع مصدرها ويقيس نتائجها
+
+
 # ═══════════════════════════════════════════════════════════════════
 
-# مستودع الأداء — {signal_id: {...}}
+
 perf_signals = {}   # type: Dict[str, Dict]
 perf_id_counter = 0 # type: int
 
-# أسماء الأنظمة
+
 PERF_SYSTEMS = {
     "quick":    "⚡ Quick Signals",
     "lh_big":   "🔥 Liquidity Hunter",
@@ -2935,7 +2935,7 @@ def perf_register(sym, price, system, score=0, signals_desc=""):
         "is_small_cap": is_small,
         "score":        score,
         "signals_desc": signals_desc,
-        # نتائج
+
         "result_1h":    None,
         "result_4h":    None,
         "result_24h":   None,
@@ -2950,7 +2950,7 @@ def perf_register(sym, price, system, score=0, signals_desc=""):
 def perf_check(price_map=None):
     # type: (Dict) -> None
     """يتحقق من نتائج الإشارات المسجلة عند 1h/4h/24h"""
-    # إذا لم يُمرَّر price_map نبنيه من all_tickers
+
     if not price_map:
         if not all_tickers:
             return
@@ -2975,7 +2975,7 @@ def perf_check(price_map=None):
         if not data["checked_24h"] and elapsed >= 86400:
             data["checked_24h"] = True
             data["result_24h"]  = gain
-            # احذف بعد 48 ساعة لتوفير الذاكرة
+
         if elapsed >= 172800:
             del perf_signals[sid]
 
@@ -2989,7 +2989,7 @@ def perf_daily_report():
     if not perf_signals:
         return ""
 
-    # جمع نتائج كل نظام
+
     sys_stats = {k: {"wins_1h":0,"total_1h":0,"wins_4h":0,"total_4h":0,
                      "best":None,"worst":None,"gains_4h":[]} 
                  for k in PERF_SYSTEMS}
@@ -3016,8 +3016,8 @@ def perf_daily_report():
             if st["worst"] is None or g < st["worst"][1]:
                 st["worst"] = (d["sym"], g)
 
-    # بناء الرسالة
-    # تحقق: هل يوجد بيانات كافية؟
+
+
     has_data = any(
         sys_stats[k]["total_4h"] > 0 or sys_stats[k]["total_1h"] > 0
         for k in PERF_SYSTEMS
@@ -3042,7 +3042,7 @@ def perf_daily_report():
         total_signals += st["total_4h"]
         total_wins    += st["wins_4h"]
 
-        # نسبة النجاح
+
         if st["total_4h"] > 0:
             wr   = round(st["wins_4h"] / st["total_4h"] * 100)
             avg  = sum(g for _, g in st["gains_4h"]) / len(st["gains_4h"])
@@ -3057,7 +3057,7 @@ def perf_daily_report():
 
         lines.append(line)
 
-        # أفضل وأسوأ إشارة
+
         if st["best"]:
             lines.append(
                 "  🏆 أفضل: *{}* `{:+.1f}%`  |  💀 أسوأ: *{}* `{:+.1f}%`".format(
@@ -3066,7 +3066,7 @@ def perf_daily_report():
                 )
             )
 
-    # الملخص الكلي
+
     if total_signals > 0:
         total_wr = round(total_wins / total_signals * 100)
         lines += [
@@ -3113,14 +3113,14 @@ def register_signal():
 
 
 # ═══════════════════════════════════════════════
-# TRAILING STOP SYSTEM — حماية الأرباح الذكية
+
 # ═══════════════════════════════════════════════
 
 def ts_register_entry(sym, entry_price, sector="Unknown"):
     # type: (str, float, str) -> None
     """تسجيل صفقة جديدة في نظام الـ Trailing Stop"""
     global ts_positions
-    # جلب الحجم الحالي كمرجع
+
     _vol_ref = float(next((t["quoteVolume"] for t in all_tickers if t["symbol"]==sym), "0"))
     ts_positions[sym] = {
         "entry":     entry_price,
@@ -3157,33 +3157,33 @@ def check_trailing_stops():
         stop   = pos["stop"]
         locked = pos["locked"]
 
-        # حساب الربح الحالي
+
         profit_pct = (price / entry - 1) * 100
         peak_pct   = (peak  / entry - 1) * 100
 
-        # ══ تحديث القمة ══
+
         if price > peak:
             ts_positions[sym]["peak"] = price
             peak     = price
             peak_pct = (peak / entry - 1) * 100
 
-            # ══ تحريك الستوب مع القمة ══
+
             new_stop = stop
 
             if peak_pct >= TS_LOCK_50:
-                # +50% → نقفل +35%
+
                 new_stop  = entry * 1.35
                 new_locked = 35.0
             elif peak_pct >= TS_LOCK_20:
-                # +20% → نقفل +10%
+
                 new_stop  = entry * 1.10
                 new_locked = 10.0
             elif peak_pct >= TS_BREAKEVEN:
-                # +10% → نرجع لنقطة الدخول
+
                 new_stop  = entry * 1.001
                 new_locked = 0.0
 
-            # Trailing: الستوب دائماً 15% تحت القمة
+
             trail_stop = peak * (1 - TS_TRAIL_PCT / 100)
             new_stop   = max(new_stop, trail_stop)
 
@@ -3193,7 +3193,7 @@ def check_trailing_stops():
                 log.info("📈 TS Updated | %s | peak=+%.1f%% | stop=%.8f",
                          sym, peak_pct, new_stop)
 
-        # ══ فحص الخروج الذكي ══
+
         _ticker = next((t for t in all_tickers if t["symbol"]==sym), None)
         if _ticker and now - ts_sell_alerted.get(sym, 0) > TS_SELL_COOL:
             try:
@@ -3206,20 +3206,20 @@ def check_trailing_stops():
                 _exit_reason = None
                 _exit_icon   = "⚠️"
 
-                # ── الحالة 1: ربح + سيولة تخرج ──
-                # عندنا ربح والسيولة تبدأ بالخروج = اخرج بربح
+
+
                 if _pl > 5.0 and _vol_ratio < 0.5 and market_state in ("DANGER","CAUTION"):
                     _exit_reason = "✅ اخرج بربح — السيولة تخرج"
                     _exit_icon   = "✅"
 
-                # ── الحالة 2: عند نقطة الدخول + سوق خطر ──
-                # السوق DANGER + السيولة تخرج = احمِ رأس المال
+
+
                 elif _pl > -2.0 and _pl < 3.0 and market_state == "DANGER" and _vol_ratio < 0.4:
                     _exit_reason = "🛡️ احمِ رأس المال — السوق خطر"
                     _exit_icon   = "🛡️"
 
-                # ── الحالة 3: خسارة + سوق خطر + سيولة تهرب ──
-                # الأسوأ = اخرج فوراً بخسارة محدودة
+
+
                 elif _pl < -3.0 and market_state == "DANGER" and _vol_ratio < 0.4:
                     _exit_reason = "🔴 اخرج — السوق ينهار"
                     _exit_icon   = "🔴"
@@ -3246,10 +3246,10 @@ def check_trailing_stops():
                              sym, _pl, _vol_ratio, market_state)
             except: pass
 
-        # ══ فحص الستوب ══
+
         stop = ts_positions[sym]["stop"]
         if price <= stop:
-            # ضرب الستوب!
+
             if now - ts_sell_alerted.get(sym, 0) < TS_SELL_COOL:
                 continue
 
@@ -3291,7 +3291,7 @@ def check_trailing_stops():
             log.info("🔴 SELL SIGNAL | %s | profit=%.1f%% | peak=+%.1f%%",
                      sym, profit_pct, peak_pct)
 
-            # احذف الصفقة بعد البيع
+
             del ts_positions[sym]
 
 
@@ -3301,15 +3301,15 @@ def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
     """يضيف عملة لقائمة المراقبة عند رصد سيولة غير عادية"""
     global watchlist, wl_price_snapshot
 
-    # تحقق من القائمة المحظورة
+
     _blocked = {"CULTUSDT"}  # عملات محظورة
     if sym in _blocked:
         log.debug("🚫 WL Blocked | %s", sym)
         return
 
-    # لا تجاوز الحد الأقصى
+
     if len(watchlist) >= WL_MAX_SIZE:
-        # احذف الأقدم
+
         oldest = min(watchlist, key=lambda s: watchlist[s].get("since", 0))
         del watchlist[oldest]
         wl_price_snapshot.pop(oldest, None)
@@ -3341,7 +3341,7 @@ def check_watchlist_entries():
     to_remove  = []
 
     for sym, info in list(watchlist.items()):
-        # ── انتهت صلاحية العملة (24h بدون تحرك) ──
+
         if info.get("priority") == "STATIC":
             pass  # الثابتة لا تنتهي أبداً
         elif now - info.get("since", now) > WL_EXPIRY:
@@ -3361,22 +3361,22 @@ def check_watchlist_entries():
         entry_price = wl_price_snapshot.get(sym, price)
         if entry_price <= 0: continue
 
-        # ── حساب التحرك منذ الإضافة ────────────
+
         move_since_add = (price - entry_price) / entry_price * 100
 
-        # ── شرط الدخول ──────────────────────────
-        # تحرك 3%+ للأعلى منذ الإضافة
-        # STATIC تحتاج تحرك أقل للتنبيه (2% بدل 3%)
+
+
+
         _min_move = 2.0 if info.get("priority") == "STATIC" else WL_ENTRY_MOVE
         if move_since_add < _min_move: continue
-        # لا ترسل إذا الحجم ضعيف جداً
+
         _cur_vol = float(next((t["quoteVolume"] for t in all_tickers if t["symbol"]==sym), "0"))
         if _cur_vol < 1_000_000: continue  # حجم أقل من 1M = تجاهل
 
-        # cooldown لنفس العملة
+
         if now - wl_entry_alerted.get(sym, 0) < WL_ENTRY_COOL: continue
 
-        # ── تأكيد الحجم ─────────────────────────
+
         wl_vol     = info.get("vol", vol)
         vol_confirm = vol >= wl_vol * WL_ENTRY_VOL or vol >= 2_000_000
 
@@ -3384,7 +3384,7 @@ def check_watchlist_entries():
         reason = info.get("reason", "liquidity")
         priority = info.get("priority", "NORMAL")
 
-        # ── إشعار الدخول ────────────────────────
+
         if priority == "STATIC":
             icon = "🚀🟢"
             lvl  = "SIGNAL ENTRY — إشارة دخول"
@@ -3414,15 +3414,15 @@ def check_watchlist_entries():
             + "🚀 _العملة تتحرك — فرصة دخول الآن!_"
         )
 
-        # ══ النظام القديم معطّل — الجوكر فقط يرسل إشارات الدخول ══
-        # send(msg)  ← معطّل
+
+
         wl_entry_alerted[sym] = now
-        # تسجيل في نظام Trailing Stop فقط بدون إشعار
+
         ts_register_entry(sym, price, info.get("sector","Unknown"))
         log.info("👁️ WL silent track | %s | move=+%.1f%% | vol=%.1fM",
                  sym, move_since_add, vol/1e6)
 
-    # حذف العملات المنتهية
+
     for sym in to_remove:
         watchlist.pop(sym, None)
         wl_price_snapshot.pop(sym, None)
@@ -3464,12 +3464,12 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):  # مع
         if change < 8.0:    continue
         if change > 60.0:   continue  # pump واضح
 
-        # cooldown ساعة
+
         if now - hot_alerted.get(sym, 0) < 21600: continue  # 6 ساعات
 
         sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
 
-        # قوة الإشارة
+
         score = 0
         if change >= 30:      score += 4
         elif change >= 20:    score += 3
@@ -3545,7 +3545,7 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):  # معطّل
 
     now = time.time()
 
-    # بناء قائمة عملات SECTORS
+
     all_sector_coins = set()
     for sc in SECTORS.values():
         all_sector_coins.update(sc)
@@ -3566,33 +3566,33 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):  # معطّل
 
         if vol < RT_MIN_VOL: continue
 
-        # ── بناء الـ Baseline تراكمياً ─────────────
+
         if sym not in rt_vol_baseline:
             rt_vol_baseline[sym] = vol  # أول قراءة
             continue
 
         baseline = rt_vol_baseline[sym]
 
-        # تحديث الـ baseline ببطء (exponential moving average)
+
         rt_vol_baseline[sym] = baseline * 0.85 + vol * 0.15
 
         if baseline <= 0: continue
 
         vol_spike = vol / baseline
 
-        # ── شرط 1: ارتفاع حجم مفاجئ ───────────────
+
         if vol_spike < RT_VOL_SPIKE: continue
 
-        # ── شرط 2: حركة سعر مصاحبة ────────────────
+
         if abs(change) < RT_PRICE_MOVE: continue
 
-        # ── تجنب التكرار ────────────────────────────
+
         if now - rt_alerted.get(sym, 0) < RT_COOLDOWN: continue
 
-        # ── إيجاد القطاع ────────────────────────────
+
         sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
 
-        # ── حساب القوة ──────────────────────────────
+
         strength = 0
         if vol_spike >= 5:    strength += 4
         elif vol_spike >= 3:  strength += 3
@@ -3688,7 +3688,7 @@ def scan_hot_market(price_map=None, vol_now=None):  # معطّل
     now  = time.time()
     hot  = []
 
-    # بناء قائمة كل العملات في SECTORS
+
     all_sector_coins = set()
     for sector_coins in SECTORS.values():
         all_sector_coins.update(sector_coins)
@@ -3711,18 +3711,18 @@ def scan_hot_market(price_map=None, vol_now=None):  # معطّل
         if change < HOT_MIN_CHANGE: continue
         if change > HOT_MAX_CHANGE: continue
 
-        # تجنب التكرار
+
         last_alert = hot_alerted.get(sym, 0)
         if now - last_alert < HOT_COOLDOWN: continue
 
-        # إيجاد القطاع
+
         sector = "Unknown"
         for sec, coins in SECTORS.items():
             if sym in coins:
                 sector = sec
                 break
 
-        # قوة الإشارة
+
         strength = 0
         if change >= 30:     strength += 4
         elif change >= 20:   strength += 3
@@ -3733,7 +3733,7 @@ def scan_hot_market(price_map=None, vol_now=None):  # معطّل
         elif vol >= 5_000_000: strength += 2
         elif vol >= 2_000_000: strength += 1
 
-        # هل هي في gem_watchlist؟ (مرت بمراحل)
+
         if sym in gem_watchlist: strength += 2
 
         hot.append({
@@ -3766,7 +3766,7 @@ def scan_hot_market(price_map=None, vol_now=None):  # معطّل
             icon = "⚡"
             lvl  = "ACTIVE"
 
-        # هل في gem_watchlist؟
+
         gem_tag = ""
         if sym in gem_watchlist:
             stage = gem_watchlist[sym].get("stage", 1)
@@ -3789,7 +3789,7 @@ def scan_hot_market(price_map=None, vol_now=None):  # معطّل
         send(msg)
         hot_alerted[sym] = now
 
-        # إضافة للـ candidates
+
         if sym not in candidates:
             candidates.append(sym)
         log.info("🔥 Hot Market | %s | +%.1f%% | vol=%.1fM | strength=%d",
@@ -3834,8 +3834,8 @@ def scan_ath_distance(price_map=None):  # معطّل
         if vol < ATH_MIN_VOL: continue
         if price <= 0: continue
 
-        # ── تحديث ATH المحلي ──────────────────────
-        # نبني ATH تراكمياً من أعلى سعر يومي
+
+
         prev_ath = ath_tracker.get(sym, 0.0)
         if high > prev_ath:
             ath_tracker[sym] = high
@@ -3843,36 +3843,36 @@ def scan_ath_distance(price_map=None):  # معطّل
 
         if prev_ath <= 0: continue
 
-        # ── حساب الانخفاض من ATH ──────────────────
+
         drop_pct = 1.0 - (price / prev_ath)
 
-        # يجب أن يكون الانخفاض 90%+ من ATH
+
         if drop_pct < ATH_DROP_STRONG: continue
 
-        # ── حجم التاريخ لمعرفة التزايد ────────────
+
         vh = bottom_vol_history.get(sym, [])
         vol_ratio = 1.0
         if len(vh) >= 3:
             vol_avg   = sum(vh[:-1]) / len(vh[:-1])
             vol_ratio = vol / vol_avg if vol_avg > 0 else 1.0
 
-        # ── تجنب التكرار ──────────────────────────
+
         last_alert = ath_alerted.get(sym, 0)
         if now - last_alert < ATH_COOLDOWN: continue
 
-        # ── حساب درجة الفرصة ──────────────────────
+
         score = 0
 
-        # درجة الانهيار
+
         if drop_pct >= ATH_DROP_EXTREME:  score += 4  # -95%+ نادر جداً
         elif drop_pct >= ATH_DROP_STRONG: score += 2  # -90%+
 
-        # درجة الحجم
+
         if vol_ratio >= 3.0:  score += 3  # حجم ضخم جداً
         elif vol_ratio >= 2.0: score += 2  # حجم كبير
         elif vol_ratio >= 1.3: score += 1  # حجم يتزايد
 
-        # درجة الحركة الحالية
+
         if 0 < change <= 5:   score += 2  # صعود هادئ = تجميع
         elif change > 5:      score += 1  # بدأ يتحرك
         elif change < -5:     score -= 1  # لا يزال ينزل
@@ -3901,7 +3901,7 @@ def scan_ath_distance(price_map=None):  # معطّل
 
         drop_str = str(round(gem["drop_pct"] * 100, 1))
 
-        # تحديد مستوى الفرصة
+
         if gem["drop_pct"] >= ATH_DROP_EXTREME and gem["vol_ratio"] >= 2.0:
             level = "💎🔥 EXTREME GEM"
             icon  = "💎"
@@ -3915,7 +3915,7 @@ def scan_ath_distance(price_map=None):  # معطّل
             level = "📊 GEM WATCH -90%+"
             icon  = "📊"
 
-        # حساب الهدف المحتمل (ارتداد 20-50% من ATH)
+
         target_20 = round(gem["ath"] * 0.20, 8)
         target_30 = round(gem["ath"] * 0.30, 8)
         gain_20   = round((target_20 / gem["price"] - 1) * 100, 1)
@@ -3943,17 +3943,17 @@ def scan_ath_distance(price_map=None):  # معطّل
         send(msg)
         ath_alerted[sym] = now
         coin_alerted[sym] = now   # 🔒 موحد
-        # تسجيل في gem_watchlist للمراحل القادمة
+
         gem_watchlist[sym] = {"stage": 1, "ath_drop": gem["drop_pct"],
                               "since": now, "score": gem["score"]}
-        # عداد يومي
+
         import datetime as _dt
         _today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
         if daily_gem_count["date"] != _today:
             daily_gem_count["date"] = _today; daily_gem_count["count"] = 0
         daily_gem_count["count"] += 1
 
-        # أضف لقائمة المراقبة
+
         if sym not in watchlist:
             watchlist[sym] = {
                 "since":    now,
@@ -3987,7 +3987,7 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
     for t in all_tickers:
         sym = t.get("symbol", "")
         if not sym.endswith("USDT"): continue
-        # المرحلة 2: فقط للعملات التي اجتازت المرحلة 1 (ATH alert)
+
         if sym not in gem_watchlist: continue
         if gem_watchlist[sym].get("stage", 0) < 1: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
@@ -4002,7 +4002,7 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
 
         if vol < BOTTOM_MIN_VOL: continue
 
-        # ── تحديث تاريخ السعر والحجم ──────────
+
         if sym not in bottom_price_history:
             bottom_price_history[sym] = []
             bottom_vol_history[sym]   = []
@@ -4010,7 +4010,7 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
         bottom_price_history[sym].append(price)
         bottom_vol_history[sym].append(vol)
 
-        # احتفظ بآخر 30 قراءة فقط
+
         if len(bottom_price_history[sym]) > 30:
             bottom_price_history[sym].pop(0)
             bottom_vol_history[sym].pop(0)
@@ -4018,41 +4018,41 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
         ph = bottom_price_history[sym]
         vh = bottom_vol_history[sym]
 
-        # نحتاج على الأقل BOTTOM_MIN_DAYS قراءة
+
         if len(ph) < BOTTOM_MIN_DAYS: continue
 
-        # ── شرط 1: السعر قريب من القاع ────────
+
         price_low  = min(ph)
         price_high = max(ph)
         if price_high <= price_low: continue
 
-        # السعر يجب أن يكون في النطاق السفلي
+
         price_position = (price - price_low) / (price_high - price_low)
         if price_position > 0.25: continue  # فوق 25% من النطاق = ليس قاع
 
-        # ── شرط 2: الحجم يتزايد في القاع ──────
+
         vol_avg   = sum(vh[:-3]) / len(vh[:-3]) if len(vh) > 3 else vol
         vol_recent = sum(vh[-3:]) / 3
         vol_ratio  = vol_recent / vol_avg if vol_avg > 0 else 1.0
         if vol_ratio < BOTTOM_VOL_INCREASE: continue
 
-        # ── شرط 3: التغيير اليومي صغير ─────────
+
         if change > BOTTOM_MAX_CHANGE: continue
 
-        # ── شرط 4: مدة في القاع كافية ──────────
-        # عدد الأيام التي كان السعر فيها < 120% من القاع
+
+
         days_in_bottom = sum(1 for p in ph if p <= price_low * 1.20)
         if days_in_bottom < BOTTOM_MIN_DAYS: continue
 
-        # 🔒 Cooldown موحد — إشارة #1 فقط إذا لم تُرسل إشارة بعد
+
         if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN:
             if now - coin_whale_done.get(sym, 0) >= LZ_TPS_COOLDOWN:
                 continue
-        # ── شرط 5: تجنب التكرار ─────────────────
+
         last_alert = bottom_alerted.get(sym, 0)
         if now - last_alert < BOTTOM_COOLDOWN: continue
 
-        # ── حساب قوة الإشارة ────────────────────
+
         strength = 0
         if price_position <= 0.10: strength += 3   # قاع مباشر
         elif price_position <= 0.20: strength += 2
@@ -4082,14 +4082,14 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
     if not found:
         return
 
-    # ترتيب حسب القوة
+
     found.sort(key=lambda x: -x["strength"])
 
     for coin in found[:5]:  # أفضل 5 فقط
         sym = coin["sym"]
         base = sym.replace("USDT", "")
 
-        # تحديد مستوى الإشارة
+
         if coin["strength"] >= 7:
             level = "🔥🐳 STRONG BOTTOM"
             icon  = "🔥"
@@ -4100,7 +4100,7 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
             level = "👀 EARLY BOTTOM"
             icon  = "👀"
 
-        # نسبة المسافة من القاع للهدف المحتمل
+
         target_pct = round((1 - coin["price_pos"]) * 40 + 10, 1)
 
         msg = (
@@ -4122,10 +4122,10 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
         send(msg)
         bottom_alerted[sym] = now
         coin_alerted[sym] = now   # 🔒 موحد
-        # ترقية إلى المرحلة 2
+
         if sym in gem_watchlist: gem_watchlist[sym]["stage"] = 2
 
-        # أضف للـ candidates تلقائياً
+
         if sym not in candidates:
             candidates.append(sym)
             log.info("📊 Bottom Accumulation → candidates | %s | strength=%d | vol_ratio=%.1f×",
@@ -4158,7 +4158,7 @@ def scan_volume_explosion():
     for t in all_tickers:
         sym = t.get("symbol", "")
         if not sym.endswith("USDT"): continue
-        # المرحلة 3: فقط للعملات التي اجتازت المرحلتين 1+2
+
         if sym not in gem_watchlist: continue
         if gem_watchlist[sym].get("stage", 0) < 2: continue
         if any(k in sym for k in LEVERAGE_KEYWORDS): continue
@@ -4172,45 +4172,45 @@ def scan_volume_explosion():
 
         if vol < EXPLOSION_MIN_VOL: continue
 
-        # ── شرط أساسي: يجب أن تكون في قاع مرصود ──
+
         ph = bottom_price_history.get(sym, [])
         vh = bottom_vol_history.get(sym, [])
         if len(ph) < EXPLOSION_MIN_DAYS: continue
         if len(vh) < EXPLOSION_MIN_DAYS: continue
 
-        # ── حساب متوسط الحجم التاريخي ────────────
-        # نستثني آخر قراءة (الانفجار نفسه)
+
+
         vol_history_avg = sum(vh[:-1]) / len(vh[:-1]) if len(vh) > 1 else vol
         if vol_history_avg <= 0: continue
 
         vol_mult = vol / vol_history_avg
 
-        # ── شرط الانفجار: 3× المتوسط ─────────────
+
         if vol_mult < EXPLOSION_VOL_MULT: continue
 
-        # ── شرط الاتجاه: السعر يتحرك للأعلى ──────
+
         if change <= 0: continue  # يجب أن يكون صاعداً
         if change > EXPLOSION_MAX_CHANGE: continue  # Pump مسبق كثير
 
-        # ── شرط القاع: السعر كان في القاع ────────
+
         price_low  = min(ph[:-1])  # القاع قبل الانفجار
         price_high = max(ph[:-1])
         if price_high <= price_low: continue
 
-        # السعر قبل الانفجار كان في النطاق السفلي
+
         prev_price = ph[-2] if len(ph) >= 2 else ph[-1]
         prev_position = (prev_price - price_low) / (price_high - price_low)
         if prev_position > 0.30: continue  # لم يكن في القاع
 
-        # 🔒 Cooldown موحد — إشارة #1 فقط إذا لم تُرسل إشارة بعد
+
         if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN:
             if now - coin_whale_done.get(sym, 0) >= LZ_TPS_COOLDOWN:
                 continue
-        # ── تجنب التكرار ─────────────────────────
+
         last_alert = explosion_alerted.get(sym, 0)
         if now - last_alert < EXPLOSION_COOLDOWN: continue
 
-        # ── حساب قوة الانفجار ────────────────────
+
         power = 0
         if vol_mult >= 8:  power += 4
         elif vol_mult >= 5: power += 3
@@ -4249,7 +4249,7 @@ def scan_volume_explosion():
         sym  = coin["sym"]
         base = sym.replace("USDT", "")
 
-        # مستوى الانفجار
+
         if coin["power"] >= 8:
             level = "🔥🔥 MEGA EXPLOSION"
             icon  = "🚨"
@@ -4278,10 +4278,10 @@ def scan_volume_explosion():
         send(msg)
         explosion_alerted[sym] = now
         coin_alerted[sym] = now   # 🔒 موحد
-        # المرحلة 3 مكتملة — تحديث stage
+
         if sym in gem_watchlist: gem_watchlist[sym]["stage"] = 3
 
-        # أضف للـ candidates بأولوية عالية
+
         if sym not in candidates:
             candidates.insert(0, sym)  # أولوية قصوى في المقدمة
         if sym not in watchlist:
@@ -4388,7 +4388,7 @@ def analyze_smart_money(force_report=False):
     smart_money_alert = is_accumulation
     last_smart_money  = time.time()
 
-    # 🆕 مكافأة Score عند تجميع الحيتان: عملة في قطاع ساخن + تجميع = score+10
+
     smart_money_bonus = 10 if is_accumulation else 0
 
     if urgent and not force_report:
@@ -4479,7 +4479,7 @@ def analyze_smart_money(force_report=False):
 
 
 # ═══════════════════════════════════════════════
-#   MOMENTUM DETECTOR — نظام الإشعارات الثلاثي
+
 # ═══════════════════════════════════════════════
 def _get_top10_sector(sector, price_map, vol_now, change_now, high_map, low_map):
     # type: (str, dict, dict, dict, dict, dict) -> list
@@ -4509,7 +4509,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
 
     now = time.time()
 
-    # متابعة المراحل 2 و 3
+
     for sym in list(momentum_stage.keys()):
         if sym not in price_map: continue
         price      = price_map[sym]
@@ -4520,7 +4520,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
         entry_vol  = sd["entry_vol"]
         gain       = (price - entry_price) / entry_price * 100 if entry_price > 0 else 0
 
-        # 🐛 إصلاح V11: تنظيف أفضل — نحذف فقط إذا انتهت 4 ساعات أو خسر >5%
+
         if now - sd["entry_time"] > 14400 or gain < -5.0:
             del momentum_stage[sym]
             continue
@@ -4529,7 +4529,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
         high_24h       = high_map.get(sym, price)
         drop_from_high = (high_24h - price) / high_24h * 100 if high_24h > 0 else 0
 
-        # 🟡 إشعار 2
+
         if sd["stage"] == 1 and not sd.get("alerted_2"):
             if gain >= 2.0 and vol_ratio >= 1.3:
                 sd["alerted_2"] = True
@@ -4561,7 +4561,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                 )
                 log.info("🟡 Stage2 | %s | +%.2f%% | vol_ratio=%.1f", sym, gain, vol_ratio)
 
-        # 🟢 إشعار 3
+
         elif sd["stage"] == 2 and not sd.get("alerted_3"):
             if gain >= 3.0 and vol_ratio >= 2.0 and change_24h > 0:
                 sd["alerted_3"] = True
@@ -4589,7 +4589,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                 deep_scan(sym, price, change_24h)
                 log.info("🟢 Stage3 | %s | +%.2f%%", sym, gain)
 
-    # 🔵 إشعار 1: رصد جديد
+
     for sym, price in price_map.items():
         if sym in tracked: continue
         if sym in momentum_stage: continue
@@ -4632,7 +4632,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
 
         if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN: continue
 
-        # 🆕 إذا في Watchlist → تخفيف الـ cooldown (أولوية)
+
         if sym in watchlist:
             if now - momentum_alerted.get(sym, 0) < MOMENTUM_COOLDOWN / 3:
                 continue
@@ -4696,7 +4696,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
 
 # ═══════════════════════════════════════════════
 #   🆕 AUTO EXPAND SECTORS V12
-#   يجلب عملات MEXC ويضيف الجديدة لكل قطاع (هدف 50/قطاع)
+
 # ═══════════════════════════════════════════════
 def _classify_symbol(base):
     # type: (str) -> Optional[str]
@@ -4712,7 +4712,7 @@ def _classify_symbol(base):
     for sector, keywords in SECTOR_KEYWORDS.items():
         score = 0
         for kw in keywords:
-            # تطابق كامل أو جزئي
+
             if kw == base_upper:
                 score += 10   # تطابق تام = وزن أعلى
             elif base_upper.startswith(kw) or base_upper.endswith(kw):
@@ -4723,11 +4723,11 @@ def _classify_symbol(base):
             best_score  = score
             best_sector = sector
 
-    # نقبل فقط إذا كان هناك تطابق واضح
+
     return best_sector if best_score >= 2 else None
 
 
-# ⚠️ تضيف عملات تلقائياً — تأكد من المراجعة قبل الإنتاج
+
 def auto_expand_sectors():
     # type: () -> None
     """
@@ -4747,10 +4747,10 @@ def auto_expand_sectors():
         log.warning("⚠️ Auto Expand: فشل جلب البيانات")
         return
 
-    # كل العملات الموجودة حالياً في قائمتنا
+
     existing = set(sym for coins in SECTORS.values() for sym in coins)
 
-    # بناء خريطة الحجوم
+
     vol_map    = {}
     change_map = {}
     for t in data:
@@ -4762,7 +4762,7 @@ def auto_expand_sectors():
         except (KeyError, ValueError):
             pass
 
-    # فرز حسب الحجم تنازلياً (الأنشط أولاً)
+
     all_usdt = sorted(
         [s for s in vol_map if vol_map[s] >= EXPAND_MIN_VOL],
         key=lambda s: -vol_map[s]
@@ -4773,48 +4773,48 @@ def auto_expand_sectors():
     skipped_filter   = 0
 
     for sym in all_usdt:
-        # تجاهل الموجودة أصلاً
+
         if sym in existing:
             skipped_existing += 1
             continue
 
-        # تجاهل المستثنيات
+
         if sym in EXCLUDED:
             continue
 
         base = sym.replace("USDT","")
 
-        # فلتر Stablecoin
+
         if is_stablecoin(sym, 0.0, change_map.get(sym, 0.0)):
             skipped_filter += 1
             continue
 
-        # فلتر Leverage tokens
+
         if any(k in sym for k in LEVERAGE_KEYWORDS):
             skipped_filter += 1
             continue
 
-        # فلتر الحجم الأقصى
+
         if vol_map[sym] > EXPAND_MAX_VOL:
             skipped_filter += 1
             continue
 
-        # تصنيف العملة
+
         sector = _classify_symbol(base)
         if not sector:
             continue
 
-        # هل القطاع وصل الهدف؟
+
         current_count = len(SECTORS[sector]) + len(added_per_sector[sector])
         if current_count >= SECTOR_TARGET:
             continue
 
-        # إضافة للقطاع
+
         SECTORS[sector].append(sym)
         added_per_sector[sector].append(sym)
         existing.add(sym)
 
-    # ── تقرير ما أُضيف ──────────────────────────
+
     total_added = sum(len(v) for v in added_per_sector.values())
     log.info("✅ Auto Expand انتهى | أُضيف: %d عملة | موجودة: %d | مُرشَّح: %d",
              total_added, skipped_existing, skipped_filter)
@@ -4823,10 +4823,10 @@ def auto_expand_sectors():
         log.info("ℹ️ لا عملات جديدة للإضافة — القوائم مكتملة")
         return
 
-    # لا نرسل إشعار AUTO EXPAND — يعمل بصمت في الخلفية
+
     log.info("🔄 AUTO EXPAND | أُضيف %d عملة جديدة", total_added)
 
-    # تحديث hot_symbols بعد التوسع
+
     global hot_symbols
     hot_symbols = {c for s in hot_sectors for c in SECTORS[s]}
     log.info("🔥 hot_symbols محدَّثة | %d عملة", len(hot_symbols))
@@ -4834,15 +4834,15 @@ def auto_expand_sectors():
 
 # ═══════════════════════════════════════════════
 #   REFRESH TICKERS
-#   🐛 إصلاح V11: candidates تأخذ فلتر الحجم من all_tickers
+
 # ═══════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════
 #   🆕 SECTOR ACTIVITY REPORT + WHALE ACCUMULATION
-#   تقرير القطاعات النشطة + تجميع الحيتان
+
 # ═══════════════════════════════════════════════
 
-# توقيت التقرير
+
 SECTOR_REPORT_EVERY = 3600   # كل ساعة
 last_sector_report  = 0.0
 
@@ -4856,7 +4856,7 @@ def scan_sector_activity():
 
     ticker_map = {t["symbol"]: t for t in all_tickers}
 
-    # ═══ تحديث Snapshot كل ساعة ══════════════════
+
     now = time.time()
     if now - price_snapshot_time >= 3600 or not price_snapshot:
         price_snapshot = {
@@ -4878,23 +4878,23 @@ def scan_sector_activity():
         except (KeyError, ValueError):
             return 0.0
 
-    # ═══ الخطوة 1: تصنيف كل عملات MEXC للقطاعات ═══
-    # نصنّف من السوق الكامل وليس القائمة فقط
+
+
     sector_stats = {}
 
-    # بناء خريطة ديناميكية: كل عملة → قطاعها
+
     def get_sector_for(sym):
         base = sym.replace("USDT","")
         for sec, keywords in SECTOR_KEYWORDS.items():
             if any(kw in base for kw in keywords):
                 return sec
-        # إذا في SECTORS الثابتة
+
         for sec, coins in SECTORS.items():
             if sym in coins:
                 return sec
         return None
 
-    # تجميع البيانات من كل عملات MEXC
+
     full_sector_data = {}   # {sector: {buy_vol, sell_vol, changes, vols}}
 
     for t in all_tickers:
@@ -4933,7 +4933,7 @@ def scan_sector_activity():
             "sell_vol": sell_vol,
             "avg":      avg_ch,
             "count":    len(d["changes"]),
-            # ترتيب حسب إجمالي السيولة الداخلة
+
             "score":    total_vol / 1_000_000,
         }
 
@@ -4942,7 +4942,7 @@ def scan_sector_activity():
 
     sorted_sectors = sorted(sector_stats.items(), key=lambda x: -x[1]["score"])
 
-    # ═══ الخطوة 2: تجميع الحيتان ════════════════
+
     whale_accumulation = []
     for sym, t in ticker_map.items():
         if not sym.endswith("USDT"): continue
@@ -4959,7 +4959,7 @@ def scan_sector_activity():
         except (KeyError, ValueError):
             continue
 
-        # فلتر صارم
+
         if vol < WHALE_MIN_VOL: continue
         if vol > MAX_VOL_USDT:  continue
         if price <= 0 or high <= 0 or low <= 0: continue
@@ -4993,7 +4993,7 @@ def scan_sector_activity():
     whale_accumulation.sort(key=lambda x: (-x["strength"], -x["vol"]))
     last_sector_report = time.time()
 
-    # ═══ تحديث Watchlist ═════════════════════════
+
     new_wl = {}
     for w in whale_accumulation:
         sec = next((s for s,coins in SECTORS.items()
@@ -5018,7 +5018,7 @@ def scan_sector_activity():
                  "━━━━━━━━━━━━━━━━━━\n"
                  "{}\n⚡ _انتظر Momentum + Signal للدخول_".format(txt))
 
-    # ═══ بناء التقرير ════════════════════════════
+
     icons = ["🔥","⚡","📈","📊","📊"]
     sector_lines = ""
     for i, (sec, st) in enumerate(sorted_sectors[:5]):
@@ -5048,7 +5048,7 @@ def scan_sector_activity():
     if not whale_lines:
         whale_lines = "  _لا يوجد تجميع واضح الآن_\n"
 
-    # حساب نسبة الشراء/البيع بالحجم الحقيقي
+
     buy_vol_total  = 0.0
     sell_vol_total = 0.0
     for t in all_tickers:
@@ -5113,7 +5113,7 @@ def refresh_tickers():
     all_tickers = data
     changes_map = {}
 
-    # بناء خريطة الحجوم من البيانات الحالية
+
     vol_map = {}
     for t in data:
         sym = t.get("symbol", "")
@@ -5126,7 +5126,7 @@ def refresh_tickers():
         except (KeyError, ValueError):
             pass
 
-    # ✅ الإصلاح: candidates = عملات قائمتنا التي تجاوزت فلتر الحجم
+
     our_coins  = set(sym for coins in SECTORS.values() for sym in coins)
     candidates = [
         sym for sym in our_coins
@@ -5146,12 +5146,12 @@ def refresh_tickers():
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   🔥 LIQUIDITY HUNTER — كاشف دخول السيولة المفاجئ
-#   يعمل كل 5 دقائق على كل العملات
-#   يكتشف 3 سيناريوهات قبل الارتفاع بدقائق/ساعات
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
-# إعدادات LIQUIDITY HUNTER
+
 # ══════════════════════════════════════════
 # TPS/ATS + Volume Delta
 # ══════════════════════════════════════════
@@ -5164,7 +5164,7 @@ TPS_COOLDOWN      = 7200   # ساعتان — موحد مع التعريف ال�
 TPS_SCAN_EVERY    = 300    # كل 5 دقائق
 
 # ══════════════════════════════════════════
-# Small Caps — قائمة مستقلة للعملات الصغيرة
+
 # ══════════════════════════════════════════
 SC_MIN_VOL        = 50_000    # حجم أدنى 50K USDT
 SC_MAX_VOL        = 500_000   # حجم أقصى 500K (فوقه يصبح Big Cap)
@@ -5186,10 +5186,10 @@ LH_SCAN_EVERY     = 300   # كل 5 دقائق
 
 # ═══════════════════════════════════════════════════════════════════
 #   ⚡ TPS / ATS + VOLUME DELTA ENGINE
-#   يحلل الصفقات الفعلية لكشف:
-#   • TPS  — عدد الصفقات/ثانية  → ارتفاع مفاجئ = نشاط غير عادي
-#   • ATS  — متوسط حجم الصفقة  → كبير = حيتان / صغير = أفراد
-#   • VDelta — شراء حقيقي vs بيع حقيقي من الصفقات الفعلية
+
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 def analyze_tps_ats(sym):
@@ -5225,8 +5225,8 @@ def analyze_tps_ats(sym):
         tps = trade_window / 30.0
         ats = all_vol / len(raw)
 
-        # ✅ VDelta MA — متوسط مرجح بالحجم على آخر 10 شموع 15m
-        # أدق من VDelta اللحظي — يكشف التجميع الحقيقي
+
+
         vdelta = calc_vdelta_ma(sym, period=10, interval="15m")
         kd = get_klines(sym, "15m", 15)
         buy_vol_k  = 0.0
@@ -5255,18 +5255,18 @@ def analyze_tps_ats(sym):
 
 
 
-# ✅ fmt_price موحّدة — انظر التعريف الأسفل
+
 
 
 # ═══════════════════════════════════════════════════════════════════
 #   🎯 LIQUIDITY ZONE + TPS/ATS FUSION ENGINE
-#   يدمج:
-#   1. مناطق السيولة اليومية (Swing High/Low + Volume)
-#   2. TPS/ATS الفوري (صفقات حقيقية + حيتان)
-#   = إشارة مزدوجة نادرة جداً 🔥
+
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
-# إعدادات الدمج
+
 LZ_TPS_PROXIMITY  = 0.015   # السعر قريب من المنطقة بـ 1.5%
 LZ_TPS_COOLDOWN   = 14400   # 4 ساعات بين تنبيهات نفس العملة
 LZ_TPS_SCORE_MIN  = 60      # حد أدنى للنقاط (كان 70)
@@ -5274,8 +5274,8 @@ lz_tps_alerted    = {}      # type: Dict[str, float]
 
 # ═══════════════════════════════════════════════════════════════════
 #   🐋 WHALE CONFIRMATION SYSTEM
-#   يراقب العملات التي اشترى فيها الأفراد
-#   وينتظر دخول الحيتان للتأكيد
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 WHALE_WATCH_TTL    = 14400   # يراقب العملة 4 ساعات بعد إشارة الأفراد
@@ -5283,7 +5283,7 @@ WHALE_CHECK_EVERY  = 60      # ⚡ يتحقق كل دقيقة (كان 5 دقائ
 WHALE_ATS_MIN      = 500     # 🔽 ATS > 500$ = حيتان (كان 3000$) — مناسب للـ Altcoins
 WHALE_VDELTA_MIN   = 0.65    # VDelta 65%+
 
-# قائمة المراقبة: {sym: {time, ats_then, vdelta_then, price_then}}
+
 whale_watchlist    = {}   # type: Dict[str, Dict]
 whale_confirmed    = {}   # type: Dict[str, float]  {sym: last_confirm_time}
 
@@ -5292,7 +5292,7 @@ def whale_watch_add(sym, ats, vdelta, price):
     # type: (str, float, float, float) -> None
     """يضيف عملة لقائمة مراقبة الحيتان"""
     global whale_watchlist
-    # ✅ فلتر VDelta — لا نضيف عملات بيعها أكثر من شرائها
+
     if vdelta < 0.60:
         log.debug("🚫 whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
         return
@@ -5308,20 +5308,20 @@ def whale_watch_add(sym, ats, vdelta, price):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   🛡️ UNIFIED SIGNAL FILTER — الفلتر النهائي الموحد
-#   كل إشارة يجب أن تمر من هنا قبل الإرسال
-#   يحل مشكلة تضارب الأنظمة نهائياً
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   🔍 ACCUMULATION DETECTOR — كشف التجميع المبكر
-#   يرصد التجميع الهادئ قبل الانفجار بـ 2-6 ساعات
-#   المؤشرات:
-#   1. حجم متصاعد تدريجياً (وليس انفجار فجائي)
-#   2. سعر ثابت أو صاعد قليلاً
-#   3. VDelta مستمر >= 60% على عدة شموع
-#   4. Higher Lows على 1h
+
+
+
+
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 def detect_accumulation(sym):
@@ -5347,14 +5347,14 @@ def detect_accumulation(sym):
     details = {}
 
     try:
-        # ── 1. حجم متصاعد تدريجياً ──────────────
-        # نقسم على 3 فترات: قديم / وسط / حديث
+
+
         third   = n // 3
         vol_old = sum(vols1h[:third])     / third if third > 0 else 0
         vol_mid = sum(vols1h[third:2*third]) / third if third > 0 else 0
         vol_new = sum(vols1h[2*third:])   / max(n - 2*third, 1)
 
-        # التجميع = حجم يتصاعد تدريجياً (وليس قفزة فجائية)
+
         gradual_increase = (vol_mid > vol_old * 1.1 and
                            vol_new > vol_mid * 1.1 and
                            vol_new < vol_old * 5.0)   # ليس انفجاراً
@@ -5365,7 +5365,7 @@ def detect_accumulation(sym):
         else:
             details["vol_gradient"] = "❌"
 
-        # ── 2. سعر ثابت أو صاعد قليلاً ──────────
+
         price_change = (closes1h[-1] - closes1h[-12]) / closes1h[-12] * 100 if closes1h[-12] > 0 else 0
         if -3.0 <= price_change <= 8.0:
             score += 20
@@ -5373,12 +5373,12 @@ def detect_accumulation(sym):
         else:
             details["price_stability"] = "❌ {:.1f}%".format(price_change)
 
-        # ── 3. VDelta مستمر >= 60% ────────────────
+
         if kd15 and len(kd15["closes"]) >= 20:
             c15 = kd15["closes"]
             o15 = kd15["opens"]
             v15 = kd15["vols"]
-            # حساب VDelta لكل شمعة
+
             vd_candles = []
             for i in range(len(c15)):
                 if c15[i] > o15[i]:
@@ -5388,7 +5388,7 @@ def detect_accumulation(sym):
                 else:
                     vd_candles.append(0.5)
 
-            # VDelta المستمر = معدل آخر 20 شمعة
+
             avg_vd = sum(vd_candles[-20:]) / 20
             if avg_vd >= 0.60:
                 score += 25
@@ -5399,7 +5399,7 @@ def detect_accumulation(sym):
             avg_vd = 0.5
             details["vdelta_continuous"] = "⚠️ بيانات غير كافية"
 
-        # ── 4. Higher Lows (قيعان صاعدة) ─────────
+
         recent_lows = lows1h[-8:]
         hl_count = sum(1 for i in range(1, len(recent_lows))
                       if recent_lows[i] >= recent_lows[i-1] * 0.998)
@@ -5411,7 +5411,7 @@ def detect_accumulation(sym):
         else:
             details["higher_lows"] = "❌ {:.0f}%".format(hl_ratio*100)
 
-        # ── تحديد المرحلة ────────────────────────
+
         if score >= 80:
             phase = "ready"      # جاهز للانطلاق
             phase_ar = "جاهز للانطلاق 🚀"
@@ -5444,22 +5444,22 @@ def check_trend_filter(sym, change_24h):
     فلتر اتجاه السوق — يمنع الدخول في ترند هابط
     يعيد: (passed, reason)
     """
-    # 1. تغيير 24h شديد السلبية
+
     if change_24h < -10.0:
         return False, "هبوط حاد {:.1f}%".format(change_24h)
 
-    # 2. فحص EMA على 4h
+
     kd = get_klines(sym, "4h", 20)
     if kd and len(kd["closes"]) >= 15:
         closes = kd["closes"]
         ema15  = sum(closes[-15:]) / 15
         ema5   = sum(closes[-5:])  / 5
 
-        # EMA5 تحت EMA15 = ترند هابط
+
         if ema5 < ema15 * 0.97:
             return False, "EMA هابط على 4h"
 
-    # 3. فحص إذا ارتفع كثيراً (Pump) — فات الأوان
+
     if change_24h > 20.0:
         return False, "Pump مكتمل {:.1f}%".format(change_24h)
 
@@ -5494,16 +5494,16 @@ def unified_signal_check(sym, vdelta, ats, vol, change_24h, signal_type="WATCH")
     if vdelta < min_vd:
         return False, "VDelta {:.0f}% < {:.0f}%".format(vdelta*100, min_vd*100)
 
-    # ── 2. حالة السوق ──────────────────────────
+
     if market_state == "DANGER" and signal_type != "JOKER":
         return False, "السوق DANGER"
 
-    # ── 3. الترند الهابط القوي ─────────────────
-    # تغيير 24h أقل من -8% = ترند هابط قوي
+
+
     if change_24h < -8.0:
         return False, "ترند هابط قوي {:.1f}%".format(change_24h)
 
-    # ── 4. الحجم الكافي ────────────────────────
+
     min_vol = {
         "WATCH":  500_000,
         "ENTRY":  1_000_000,
@@ -5513,18 +5513,18 @@ def unified_signal_check(sym, vdelta, ats, vol, change_24h, signal_type="WATCH")
     if vol < min_vol:
         return False, "حجم ضعيف {:.0f}K".format(vol/1000)
 
-    # ── 5. Fake Pump — ارتفاع مفاجئ كبير ──────
-    # إذا ارتفع أكثر من 15% في 24h = فات الأوان
+
+
     if change_24h > 15.0:
         return False, "Pump مكتمل {:.1f}%".format(change_24h)
 
-    # ── 6. MTF Check (سريع) ────────────────────
-    # نفحص فقط EMA السريع على 4h
+
+
     kd4h = get_klines(sym, "4h", 20)
     if kd4h and len(kd4h["closes"]) >= 10:
         closes = kd4h["closes"]
         ema10  = sum(closes[-10:]) / 10
-        # السعر تحت EMA10 على 4h = ترند هابط
+
         if closes[-1] < ema10 * 0.97 and signal_type == "WATCH":
             return False, "تحت EMA 4h — ترند هابط"
 
@@ -5551,21 +5551,21 @@ def scan_whale_confirmation(price_map):
     to_del  = []
 
     for sym, data in list(whale_watchlist.items()):
-        # انتهت مدة المراقبة؟
+
         if now - data["time"] > WHALE_WATCH_TTL:
             to_del.append(sym)
             continue
 
-        # 🔒 إذا أُرسل الجوكر → صمت تام 4h
+
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             to_del.append(sym)  # أزل من القائمة
             continue
 
-        # 🔒 cooldown التأكيد
+
         if now - whale_confirmed.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
 
-        # جلب TPS/ATS الحالي
+
         stats = analyze_tps_ats(sym)
         if not stats:
             continue
@@ -5575,12 +5575,12 @@ def scan_whale_confirmation(price_map):
         tps    = stats["tps"]
         price  = price_map.get(sym, 0)
 
-        # هل دخل الحيتان؟
-        # ✅ 3 حالات للدخول:
-        # 1. VDelta قوي جداً (80%+) → ادخل بدون شرط ATS
-        # 2. ATS + VDelta كلاهما فوق الحد → دخول عادي
-        # 3. ATS كبير جداً (حوت ضخم) → ادخل حتى لو VDelta متوسط
-        # ── شروط الجوكر حسب فئة العملة ──
+
+
+
+
+
+
         _j_tier   = get_tier_settings(vol_now.get(sym, 0) if hasattr(vol_now, 'get') else 0)
         _j_ats    = _j_tier["ats_min"]
 
@@ -5588,13 +5588,13 @@ def scan_whale_confirmation(price_map):
         _early_entry   = ats >= max(300, _j_ats*2) and vdelta >= 0.70  # مسار 2
         _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN  # مسار 3
         _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50          # مسار 4
-        # مسار 5: Small Cap — ATS منخفض لكن VDelta قوي
+
         _small_cap     = _j_ats <= 50 and ats >= _j_ats and vdelta >= 0.70
 
         if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale or _small_cap):
             continue
 
-        # حساب التغير منذ إشارة الأفراد
+
         price_then  = data["price_then"]
         ats_then    = data["ats_then"]
         price_chg   = (price - price_then) / price_then * 100 if price_then > 0 else 0
@@ -5603,17 +5603,17 @@ def scan_whale_confirmation(price_map):
 
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
 
-        # نوع الحيتان
+
         if ats >= ATS_WHALE:
             whale_type = "🐋🐋 حوت ضخم"
         else:
             whale_type = "🐋 حوت"
 
-        # عداد الإشارات
+
         coin_signal_count[sym] = coin_signal_count.get(sym, 0) + 1
         _sig_num = coin_signal_count[sym]
 
-        # ── سطر التطور: يظهر فقط إذا مرت دقيقتان+ ──
+
         if elapsed_min >= 2:
             evolution_line = (
                 "📊 *التطور:*\n"
@@ -5630,7 +5630,7 @@ def scan_whale_confirmation(price_map):
                 "━━━━━━━━━━━━━━━━━━\n"
             )
 
-        # ── BTC.D tag للدمج مع ENTRY ──
+
         _btcd_vol  = {t["symbol"]: float(t.get("quoteVolume",0)) for t in all_tickers} if all_tickers else {}
         _btcd_val  = get_btc_dominance(_btcd_vol) if _btcd_vol else 0.0
         _btcd_fall = (len(btcd_history) >= 2 and _btcd_val > 0 and
@@ -5673,7 +5673,7 @@ def scan_whale_confirmation(price_map):
             footer
         )
 
-        # إضافة محرك التحليل للجوكر
+
         _joker_engine = build_engine_block(sym)
         if _joker_engine:
             msg = msg + "\n" + _joker_engine
@@ -5689,7 +5689,7 @@ def scan_whale_confirmation(price_map):
         log.info("🐋 Whale Confirmed! %s | ATS=%.0f$ | VD=%.0f%% | +%.1f%% منذ الإشارة",
                  sym, ats, vdelta*100, price_chg)
 
-    # تنظيف القائمة
+
     for sym in to_del:
         whale_watchlist.pop(sym, None)
 
@@ -5706,7 +5706,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     global lz_tps_alerted
     now = time.time()
 
-    # أفضل 30 عملة بالحجم + القائمة الثابتة
+
     all_syms = list(set(list(candidates) + EXTRA_COINS))
     ranked = sorted(
         [(s, vol_now.get(s, 0)) for s in all_syms],
@@ -5719,13 +5719,13 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
         if vol < _min_vol:  # 🛡️ EXTRA_COINS=100K | عادية=1M
             continue
-        # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
+
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
-        # 🔒 حد أقصى إشارتان يومياً لنفس العملة
+
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
             continue
-        # 🔒 Cooldown موحد
+
         last_alert  = coin_alerted.get(sym, 0)
         in_cooldown = (now - last_alert < TPS_COOLDOWN)
 
@@ -5733,11 +5733,11 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         if price <= 0:
             continue
 
-        # 🚫 تجاهل إذا ارتفعت كثيراً — الفرصة فاتت
+
         if changes_map.get(sym, 0) >= TPS_MAX_CHANGE:
             continue
 
-        # ── الخطوة 1: هل هناك منطقة سيولة قريبة؟ ──
+
         kd = get_klines(sym, "1d", LZ_LOOKBACK)
         if not kd or len(kd.get("closes", [])) < 20:
             continue
@@ -5746,7 +5746,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         if not zones:
             continue
 
-        # أقرب منطقة للسعر الحالي
+
         nearest_zone = None
         min_dist     = float("inf")
         for z in zones:
@@ -5758,7 +5758,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         if not nearest_zone or min_dist > LZ_TPS_PROXIMITY:
             continue
 
-        # 🔒 إذا في cooldown — فقط الحيتان يمرون
+
         if in_cooldown:
             _tps_quick = analyze_tps_ats(sym)
             if not (_tps_quick and
@@ -5766,13 +5766,13 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                     _tps_quick.get("vdelta", 0) >= WHALE_VDELTA_MIN):
                 continue
 
-        # نوع المنطقة — دعم أم مقاومة؟
+
         is_support    = price >= nearest_zone["low"] * 0.99
         is_resistance = price <= nearest_zone["high"] * 1.01
         if not is_support:
             continue  # فقط مناطق الدعم للشراء
 
-        # ── الخطوة 2: تأكيد TPS/ATS ──
+
         tps_stats = analyze_tps_ats(sym)
         if not tps_stats:
             continue
@@ -5781,26 +5781,26 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         ats    = tps_stats["ats"]
         vdelta = tps_stats["vdelta"]
 
-        # 🔒 إذا في cooldown — فقط الحيتان يمرون
+
         if in_cooldown:
             if not (ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN):
                 continue  # أفراد مرة ثانية — تجاهل
 
-        # baseline — إصلاح: إذا baseline صغير جداً لا نحسب ratio
+
         base  = tps_baseline.get(sym, 0)
         if base < 0.05:
-            # أول مرة نرى هذه العملة — احفظ baseline فقط بدون ratio
+
             tps_baseline[sym] = tps if tps > 0 else 0.1
             ratio = 1.0   # لا spike في أول مشاهدة
         else:
             ratio = tps / base if base > 0 else 1.0
             tps_baseline[sym] = base * 0.9 + tps * 0.1
 
-        # ── الخطوة 3: حساب النقاط المدمجة ──
+
         score   = 0
         signals = []
 
-        # نقاط المنطقة
+
         zone_sigma = nearest_zone.get("sigma", 1)
         zone_type  = nearest_zone.get("type", "REPEAT")
         score += min(zone_sigma * 5, 30)
@@ -5811,7 +5811,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             touches = nearest_zone.get("touches", 1)
             signals.append("🔁 Zone {}×".format(touches))
 
-        # قرب السعر من المنطقة
+
         prox_pct = min_dist * 100
         if prox_pct <= 0.5:
             score += 20
@@ -5847,39 +5847,39 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             score += 8
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
-        # ✅ فلتر أساسي: VDelta >= 65%
+
         if vdelta < 0.66:
             continue
 
         if score < LZ_TPS_SCORE_MIN:
             continue
 
-        # ── الخطوة 4: حساب الأهداف ──
-        # الهدف = أقرب مقاومة / Stop = تحت المنطقة
+
+
         zone_low  = nearest_zone["low"]
         zone_high = nearest_zone["high"]
         stop_loss = zone_low * 0.985           # 1.5% تحت المنطقة
-        # أقرب مقاومة من بين المناطق الأخرى
-        # الهدف = أقرب مقاومة واقعية (max +30%)
+
+
         resistance_zones = sorted(
             [z for z in zones if z["mid"] > price * 1.02],
             key=lambda z: z["mid"]
         )
         if resistance_zones:
-            # أقرب مقاومة لكن لا تتجاوز +30%
+
             nearest_res = resistance_zones[0]["mid"]
             target = min(nearest_res, price * 1.30)
         else:
             target = price * 1.12   # هدف افتراضي +12% إذا لا مقاومة قريبة
         rr = (target - price) / (price - stop_loss) if price > stop_loss else 0
 
-        # 🛡️ R/R أقل من 1.5 = لا يستحق الإشارة
+
         if rr < 1.5:
             log.debug("⚖️ LZ+TPS skip %s: R/R=%.1f < 1.5", sym, rr)
             continue
 
-        # 🐌 TPS ضعيف جداً = لا إشارة
-        # منطقة سيولة + تجميع بطيء مقبول من 0.2
+
+
         if tps < 0.2:
             log.debug("🐌 LZ+TPS skip %s: TPS=%.2f < 0.2", sym, tps)
             continue
@@ -5889,10 +5889,10 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         rarity  = "🏆 نادر جداً" if score >= 90 else ("🔥 قوي" if score >= 80 else "⚡ جيد")
         zone_tag = "🆕 FRESH" if zone_type == "FRESH" else "🔁 REPEAT"
 
-        # ══ LZ+TPS: يرسل فقط إذا لم تصل إشارة #1 بعد ══
-        # إذا وصلت WATCH ALERT → أضف للمراقبة بصمت فقط
+
+
         if coin_signal_count.get(sym, 0) >= 1:
-            # أضف للمراقبة بصمت — الحيتان سيرسلون ENTRY SIGNAL
+
             if sym not in whale_watchlist:
                 whale_watchlist[sym] = {
                     "time":       now,
@@ -5903,7 +5903,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                 log.info("👁️ LZ+TPS silent watchlist add: %s", sym)
             continue
 
-        # أول إشارة — أرسل كـ WATCH ALERT مدمج مع LZ+TPS
+
         coin_signal_count[sym] = 1
 
         _tps_label = (
@@ -5920,7 +5920,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
              "على الحافة ⚡")
         )
 
-        # ── فلتر السيولة الحقيقية ──
+
         _dir_lz  = calc_direction_engine(sym, "1h")
         _hmm_lz  = calc_hmm_regime(sym, "4h")
         _kd_lz   = get_klines(sym, "1h", 30)
@@ -5935,7 +5935,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             _weis_lz  >= 0.50
         )
 
-        # ── هل VDelta قوي جداً + R/R ممتاز؟ → ادخل مباشرة ──
+
         _direct = vdelta >= 0.80 and rr >= 1.5 and _real_liq_lz
 
         if _direct:
@@ -5994,7 +5994,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   💧 LIQUIDITY EXIT ALERT — إنذار خروج السيولة قبل الانهيار
+
 # ═══════════════════════════════════════════════════════════════════
 liq_exit_alerted  = 0.0   # آخر تنبيه
 liq_exit_vol_hist = []    # تاريخ الحجم كل 5 دقائق
@@ -6019,7 +6019,7 @@ def check_liquidity_exit(vol_now, price_map):
     if now - liq_exit_alerted < LEX_COOLDOWN:
         return
 
-    # ── حجم السوق الكلي ──
+
     total_vol = sum(v for s, v in vol_now.items()
                     if s.endswith("USDT") and v > 0)
     liq_exit_vol_hist.append((now, total_vol))
@@ -6028,11 +6028,11 @@ def check_liquidity_exit(vol_now, price_map):
     if len(liq_exit_vol_hist) < 4:
         return
 
-    # ── BTC تغيير 1h و 24h ──
+
     btc_1h  = btc_tps_stats.get("change_1h",  0.0) if btc_tps_stats else 0.0
     btc_24h = btc_tps_stats.get("change_24h", 0.0) if btc_tps_stats else 0.0
 
-    # ── BTC.D تغيير ──
+
     btcd_now = get_btc_dominance(vol_now)
     btcd_chg = 0.0
     if len(btcd_history) >= 2 and btcd_now > 0:
@@ -6043,13 +6043,13 @@ def check_liquidity_exit(vol_now, price_map):
     btc_ats     = btc_tps_stats.get("ats", 0)      if btc_tps_stats else 0
     btc_selling = (btc_vdelta < LEX_VDELTA_SELL and btc_ats >= ATS_WHALE)
 
-    # ── حجم السوق ينهار ──
+
     old_vol    = liq_exit_vol_hist[0][1]
     vol_drop   = (old_vol - total_vol) / old_vol if old_vol > 0 else 0
     vol_drying = vol_drop >= LEX_VOL_DROP
 
     # ════════════════════════════════════════
-    # تحديد السيناريو
+
     # ════════════════════════════════════════
     scenario = None
     emoji    = ""
@@ -6057,8 +6057,8 @@ def check_liquidity_exit(vol_now, price_map):
     advice   = ""
     details  = ""
 
-    # السيناريو 1 — RISK-OFF 💣 (الأخطر)
-    # BTC.D ↓ + BTC ↓ = الكل يخرج من السوق
+
+
     if btc_24h <= -3.0 and btcd_chg <= -1.0 and vol_drying:
         scenario = "RISK_OFF"
         emoji    = "💣💣💣💣💣💣💣💣💣"
@@ -6075,8 +6075,8 @@ def check_liquidity_exit(vol_now, price_map):
             "  🚫 لا تشتري أي شيء الآن\n"
         )
 
-    # السيناريو 2 — هروب للـ BTC ⚠️
-    # BTC.D ↑ + BTC ↓ = Alts تنهار بسرعة
+
+
     elif btc_24h <= -2.0 and btcd_chg >= 2.0:
         scenario = "BTC_DOMINANCE_SURGE"
         emoji    = "🚨🚨🚨🚨🚨🚨🚨🚨🚨"
@@ -6092,7 +6092,7 @@ def check_liquidity_exit(vol_now, price_map):
             "  👁️ راقب BTC — هل يستقر؟\n"
         )
 
-    # السيناريو 3 — BTC يبيع الحيتان + حجم ينهار
+
     elif btc_selling and vol_drying:
         scenario = "WHALE_SELLING"
         emoji    = "🚨🚨🚨🚨🚨🚨🚨🚨🚨"
@@ -6108,7 +6108,7 @@ def check_liquidity_exit(vol_now, price_map):
             "  👁️ انتظر تأكيد الاتجاه\n"
         )
 
-    # السيناريو 4 — Alt Season 🚀 (إيجابي)
+
     # BTC.D ↓ + BTC ↑ = Alt Season
     elif btc_24h >= 1.0 and btcd_chg <= -1.5 and btcd_now > 0:
         scenario = "ALT_SEASON"
@@ -6127,7 +6127,7 @@ def check_liquidity_exit(vol_now, price_map):
     else:
         return  # لا سيناريو واضح
 
-    # ── إرسال الرسالة ──
+
     msg = (
         "{}\n".format(emoji) +
         "*MARKET SCENARIO ALERT*\n" +
@@ -6184,10 +6184,10 @@ def get_btc_dominance(vol_now):
             total_vol += v
         if total_vol <= 0:
             return 0.0
-        # BTC.D = BTC / مجموع كل العملات الحقيقية
+
         raw = (btc_vol / total_vol) * 100
-        # تصحيح: Binance تمثل ~40% من السوق الكلي
-        # لكن نسبة BTC داخل Binance ≈ BTC.D الحقيقي
+
+
         return round(raw, 2)
     except Exception:
         return 0.0
@@ -6195,12 +6195,12 @@ def get_btc_dominance(vol_now):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   🚨 PUMP DETECTOR — رصد الارتفاع المفاجئ
-#   🔴 DUMP DETECTOR — رصد الانهيار المفاجئ
-#   🌊 MARKET PULSE  — نبض السوق كل 30 دقيقة
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
-# تاريخ الأسعار للكشف عن التغيرات المفاجئة
+
 pump_dump_history  = {}   # type: Dict[str, list]   sym → [(time, price, vol)]
 pump_alerted       = {}   # type: Dict[str, float]  آخر تنبيه pump
 dump_alerted       = {}   # type: Dict[str, float]  آخر تنبيه dump
@@ -6223,11 +6223,11 @@ def update_pump_dump_history(price_map, vol_now):
         vol = vol_now.get(sym, 0)
         if sym not in pump_dump_history:
             pump_dump_history[sym] = []
-        # ✅ تأكد أن القيمة list
+
         if not isinstance(pump_dump_history[sym], list):
             pump_dump_history[sym] = []
         pump_dump_history[sym].append((now, price, vol))
-        # نحتفظ بآخر 10 دقائق فقط
+
         pump_dump_history[sym] = [
             x for x in pump_dump_history[sym]
             if now - x[0] <= 600
@@ -6250,7 +6250,7 @@ def scan_pump_dump(price_map, vol_now, change_now):
 
         if len(hist) < 3: continue
 
-        # نأخذ السعر قبل 5 دقائق
+
         five_min_ago = [(t, p, v) for t, p, v in hist if now - t >= 280]
         if not five_min_ago: continue
         old_price = five_min_ago[-1][1]
@@ -6258,7 +6258,7 @@ def scan_pump_dump(price_map, vol_now, change_now):
 
         move = (price - old_price) / old_price * 100
 
-        # متوسط الحجم التاريخي
+
         hist_vols = coin_vol_history.get(sym, [])
         avg_vol   = sum(hist_vols) / len(hist_vols) if hist_vols else vol
         vol_mult  = vol / avg_vol if avg_vol > 0 else 1.0
@@ -6348,7 +6348,7 @@ def scan_market_pulse(price_map, vol_now, change_now):
     total_vol   = buy_vol + sell_vol
     buy_pct     = buy_vol / total_vol * 100 if total_vol > 0 else 50
 
-    # حكم النبض
+
     if rising_pct >= 65 and buy_pct >= 60:
         pulse_icon  = "🟢"
         pulse_label = "السوق صاعد قوي 🚀"
@@ -6370,14 +6370,14 @@ def scan_market_pulse(price_map, vol_now, change_now):
         pulse_label = "السوق محايد ➡️"
         pulse_note  = "لا اتجاه واضح — انتظر"
 
-    # أقوى العملات صعوداً
+
     strong_up.sort(key=lambda x: -x[1])
     strong_down.sort(key=lambda x: x[1])
 
     up_txt   = " | ".join(["*{}* +{:.1f}%".format(b,c) for b,c,v in strong_up[:3]]) or "لا يوجد"
     down_txt = " | ".join(["*{}* {:.1f}%".format(b,c) for b,c,v in strong_down[:3]]) or "لا يوجد"
 
-    # شريط المؤشر
+
     bar_g = int(rising_pct / 10)
     bar_r = 10 - bar_g
     bar   = "🟩" * bar_g + "🟥" * bar_r
@@ -6410,8 +6410,8 @@ def scan_market_pulse(price_map, vol_now, change_now):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   🌊 LIQUIDITY FLOW TRACKER — اتجاه السيولة لحظة بلحظة
-#   يرصد: من أي قطاع تخرج؟ إلى أي قطاع تدخل؟
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 sector_vol_history   = {}   # type: Dict[str, list]  قطاع → [vol1, vol2, ...]
@@ -6438,7 +6438,7 @@ def track_liquidity_flow(vol_now, change_now):
         return
     last_flow_track_time = now
 
-    # ── حساب حجم كل قطاع الآن ──
+
     sector_vol_now = {}
     sector_chg_now = {}
 
@@ -6457,18 +6457,18 @@ def track_liquidity_flow(vol_now, change_now):
             sector_vol_now[sector] = total_vol
             sector_chg_now[sector] = total_chg / count
 
-    # ── تحديث التاريخ ──
+
     for sector, vol in sector_vol_now.items():
         if sector not in sector_vol_history:
             sector_vol_history[sector] = []
-        # ✅ تأكد أن القيمة list وليس float (من load_state)
+
         if not isinstance(sector_vol_history[sector], list):
             sector_vol_history[sector] = []
         sector_vol_history[sector].append(vol)
         if len(sector_vol_history[sector]) > 12:  # آخر ساعة
             sector_vol_history[sector].pop(0)
 
-    # ── كشف الدخول والخروج ──
+
     flowing_in  = []  # قطاعات تدخلها السيولة
     flowing_out = []  # قطاعات تخرج منها السيولة
 
@@ -6491,13 +6491,13 @@ def track_liquidity_flow(vol_now, change_now):
     flowing_in.sort(key=lambda x: -x[1])
     flowing_out.sort(key=lambda x: x[1])
 
-    # ── Rotation: خروج من قطاع + دخول لآخر ──
+
     if flowing_in and flowing_out:
-        # rotation واضح
+
         top_in  = flowing_in[0]
         top_out = flowing_out[0]
 
-        # تحقق cooldown
+
         alert_key = "rotation_{}_{}" .format(top_out[0], top_in[0])
         if now - sector_flow_alerted.get(alert_key, 0) < FLOW_ALERT_COOLDOWN:
             return
@@ -6530,7 +6530,7 @@ def track_liquidity_flow(vol_now, change_now):
                  top_out[0], top_in[0], top_in[1])
         return
 
-    # ── دخول سيولة فقط ──
+
     if flowing_in and not flowing_out:
         top = flowing_in[0]
         alert_key = "in_{}".format(top[0])
@@ -6558,7 +6558,7 @@ def track_liquidity_flow(vol_now, change_now):
         log.info("💰 FLOW IN | %s | ratio=%.1fx | chg=%.1f%%",
                  top[0], top[1], top[2])
 
-    # ── خروج سيولة فقط ──
+
     elif flowing_out and not flowing_in:
         top = flowing_out[0]
         alert_key = "out_{}".format(top[0])
@@ -6589,8 +6589,8 @@ def track_liquidity_flow(vol_now, change_now):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   💥 EXPLOSION CATCHER — يصطاد الانفجارات قبل حدوثها
-#   الشروط: حجم يتضاعف + TPS يقفز + VDelta عالي + سعر لم يتحرك
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 explosion_alerted    = {}   # type: Dict[str, float]  آخر تنبيه
@@ -6625,7 +6625,7 @@ def scan_explosion_catcher(price_map, vol_now, change_now):
         if vol < 300_000: continue
         if abs(chg) > EXPLOSION_MAX_CHANGE: continue  # السعر تحرك = فات الأوان
 
-        # تاريخ الحجم
+
         if sym not in explosion_vol_hist:
             explosion_vol_hist[sym] = []
         explosion_vol_hist[sym].append(vol)
@@ -6640,7 +6640,7 @@ def scan_explosion_catcher(price_map, vol_now, change_now):
 
         vol_mult = vol / avg_vol
 
-        # فحص TPS
+
         try:
             stats = get_tps_ats(sym)
         except Exception:
@@ -6651,11 +6651,11 @@ def scan_explosion_catcher(price_map, vol_now, change_now):
         ats    = stats.get("ats", 0)
         vdelta = stats.get("vdelta", 0)
 
-        # فحص TPS التاريخي
+
         baseline = tps_baseline.get(sym, tps)
         tps_mult = tps / baseline if baseline > 0 else 1.0
 
-        # شروط الانفجار
+
         if (vol_mult  >= EXPLOSION_VOL_MULT and
             tps_mult  >= EXPLOSION_TPS_MULT and
             vdelta    >= EXPLOSION_VDELTA_MIN and
@@ -6663,7 +6663,7 @@ def scan_explosion_catcher(price_map, vol_now, change_now):
 
             sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
 
-            # قوة الانفجار
+
             power = (vol_mult * 0.4) + (tps_mult * 0.4) + (vdelta * 100 * 0.2)
             if power >= 300:
                 power_label = "💥 انفجار وشيك جداً!!!"
@@ -6710,8 +6710,8 @@ def scan_explosion_catcher(price_map, vol_now, change_now):
 
 # ═══════════════════════════════════════════════════════════════════
 #   🌊 LIQUIDITY ACCUMULATION TRACKER
-#   يرصد تراكم السيولة على مدى ساعات قبل الانفجار
-#   = يدخل قبل الجميع بساعات 🎯
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 liq_accum_history  = {}   # type: Dict[str, list]  تاريخ السيولة لكل عملة
@@ -6746,11 +6746,11 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
         if vol < 200_000: continue
         if abs(chg) > LAT_MAX_CHANGE: continue  # تحرك كثيراً = فات الأوان
 
-        # تحديث التاريخ
+
         if sym not in liq_accum_history:
             liq_accum_history[sym] = []
 
-        # نجلب TPS/VDelta
+
         try:
             stats = get_tps_ats(sym)
         except Exception:
@@ -6761,7 +6761,7 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
         vdelta = stats.get("vdelta", 0.5)
         ats    = stats.get("ats", 0)
 
-        # نحفظ القراءة
+
         liq_accum_history[sym].append({
             "time":   now,
             "vol":    vol,
@@ -6770,32 +6770,32 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
             "price":  price,
         })
 
-        # نحتفظ بآخر LAT_READINGS قراءة
+
         if len(liq_accum_history[sym]) > LAT_READINGS:
             liq_accum_history[sym].pop(0)
 
         hist = liq_accum_history[sym]
         if len(hist) < 6: continue   # نحتاج 30 دقيقة على الأقل
 
-        # ── تحليل التراكم ──
-        # 1. هل الحجم يرتفع تدريجياً؟
+
+
         first_vol  = sum(h["vol"] for h in hist[:6]) / 6
         recent_vol = sum(h["vol"] for h in hist[-6:]) / 6
         vol_growth = recent_vol / first_vol if first_vol > 0 else 1.0
 
-        # 2. هل VDelta مستمر؟
+
         avg_vdelta = sum(h["vdelta"] for h in hist[-12:]) / 12
 
-        # 3. هل TPS يرتفع؟
+
         first_tps  = sum(h["tps"] for h in hist[:6]) / 6
         recent_tps = sum(h["tps"] for h in hist[-6:]) / 6
         tps_growth = recent_tps / first_tps if first_tps > 0.1 else 1.0
 
-        # 4. هل السعر ثابت؟
+
         first_price  = hist[0]["price"]
         price_change = abs(price - first_price) / first_price * 100 if first_price > 0 else 0
 
-        # شروط التراكم
+
         if (vol_growth  >= LAT_VOL_GROW and
             avg_vdelta  >= LAT_VDELTA_MIN and
             price_change <= LAT_MAX_CHANGE):
@@ -6803,7 +6803,7 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
             sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
             hours  = len(hist) * 5 / 60  # عدد الساعات التقريبي
 
-            # قوة التراكم
+
             accum_score = (vol_growth * 40) + (avg_vdelta * 100 * 0.4) + (tps_growth * 20)
 
             if accum_score >= 120:
@@ -6841,7 +6841,7 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
             liq_accum_alerted[sym] = now
             coin_alerted[sym] = now
 
-            # نضيفها لـ whale_watchlist تلقائياً
+
             whale_watch_add(sym, ats, avg_vdelta, price)
 
             log.info("🌊 LAT | %s | vol_growth=%.1fx | vdelta=%.0f%% | hours=%.1f",
@@ -6851,7 +6851,7 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
 
 # ═══════════════════════════════════════════════════════════════════
 #   🔍 AUTO SECTOR DISCOVERY
-#   يكتشف قطاعات جديدة تلقائياً عندما عملات كثيرة ترتفع معاً
+
 # ═══════════════════════════════════════════════════════════════════
 
 discovered_sectors   = {}   # type: Dict[str, dict]  قطاعات مكتشفة
@@ -6874,7 +6874,7 @@ def auto_sector_discovery(vol_now, change_now):
         return
     asd_last_run = now
 
-    # نجلب كل العملات الصاعدة بقوة
+
     strong_movers = []
     for sym, chg in change_now.items():
         if not sym.endswith("USDT"): continue
@@ -6884,7 +6884,7 @@ def auto_sector_discovery(vol_now, change_now):
         vol = vol_now.get(sym, 0)
         if vol < ASD_VOL_MIN: continue
         if chg >= ASD_MIN_CHANGE:
-            # هل هي في قطاع معروف؟
+
             known = any(sym in coins for coins in SECTORS.values())
             strong_movers.append({
                 "sym": sym, "chg": chg, "vol": vol, "known": known
@@ -6893,18 +6893,18 @@ def auto_sector_discovery(vol_now, change_now):
     if len(strong_movers) < ASD_MIN_COINS:
         return
 
-    # نجد العملات غير المصنفة
+
     unknown = [m for m in strong_movers if not m["known"]]
     known   = [m for m in strong_movers if m["known"]]
 
     if len(unknown) < 3:
         return
 
-    # نرتب حسب الارتفاع
+
     unknown.sort(key=lambda x: -x["chg"])
     known.sort(key=lambda x: -x["chg"])
 
-    # نرسل تنبيه اكتشاف
+
     unknown_txt = ""
     for m in unknown[:8]:
         unknown_txt += "  🆕 *{}* `{:+.1f}%` 💧`{:.1f}M`\n".format(
@@ -6944,7 +6944,7 @@ def auto_sector_discovery(vol_now, change_now):
 
 # ═══════════════════════════════════════════════════════════════════
 #   ⚠️ DELISTING HUNTER
-#   يرصد علامات حذف العملة قبل الانهيار
+
 # ═══════════════════════════════════════════════════════════════════
 
 delisting_alerted  = {}   # type: Dict[str, float]
@@ -6974,14 +6974,14 @@ def scan_delisting_hunter(vol_now, change_now, price_map):
 
         if vol <= 0: continue
 
-        # تاريخ الحجم
+
         hist = coin_vol_history.get(sym, [])
         if len(hist) < DH_MIN_HISTORY: continue
 
         avg_vol  = sum(hist) / len(hist)
         vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
 
-        # علامات الحذف
+
         signs = []
 
         if vol_ratio <= DH_VOL_CRASH:
@@ -7017,8 +7017,8 @@ def scan_delisting_hunter(vol_now, change_now, price_map):
 
 # ═══════════════════════════════════════════════════════════════════
 #   🎯 SMALL CAP HUNTER
-#   يصطاد عملات صغيرة على وشك الانفجار
-#   حجم 100K-2M = أسرع انفجاراً = مكسب 50-200%
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 sc_hunter_alerted  = {}   # type: Dict[str, float]
@@ -7049,11 +7049,11 @@ def scan_small_cap_hunter(price_map, vol_now, change_now):
         chg  = change_now.get(sym, 0)
         price = price_map.get(sym, 0)
 
-        # Small Cap فقط
+
         if vol < SCH_VOL_MIN or vol > SCH_VOL_MAX: continue
         if abs(chg) > SCH_MAX_CHANGE: continue
 
-        # تاريخ الحجم
+
         hist = coin_vol_history.get(sym, [])
         if len(hist) < 3: continue
         avg_vol = sum(hist) / len(hist)
@@ -7109,8 +7109,8 @@ def scan_small_cap_hunter(price_map, vol_now, change_now):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   🚀 BULL MODE — وضع السوق الصاعد
-#   عند BTC +2%+ في يوم = نخفف الفلاتر ونصطاد أكثر
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 BULL_MODE_ACTIVE    = False  # يتفعل تلقائياً عند صعود BTC
@@ -7133,7 +7133,7 @@ def update_bull_mode(vol_now=None, change_now=None):
     if vol_now is None or change_now is None:
         return
 
-    # ── 1. Order Flow السوق الكلي ──
+
     buy_vol_total  = 0.0
     sell_vol_total = 0.0
     for sym, vol in vol_now.items():
@@ -7148,7 +7148,7 @@ def update_bull_mode(vol_now=None, change_now=None):
     total_vol = buy_vol_total + sell_vol_total
     buy_pct_now = buy_vol_total / total_vol * 100 if total_vol > 0 else 50
 
-    # ── 2. قطاعات ساخنة ──
+
     hot_sector_count = 0
     hot_sector_name  = ""
     for sector, coins in SECTORS.items():
@@ -7158,10 +7158,10 @@ def update_bull_mode(vol_now=None, change_now=None):
             if not hot_sector_name:
                 hot_sector_name = sector
 
-    # ── 3. BTC مساعد ──
+
     btc_rising = btc_change_24h >= BULL_BTC_THRESHOLD
 
-    # ── حكم Bull Mode ──
+
     if buy_pct_now >= 65:
         BULL_MODE_ACTIVE = True
         bull_reason = "Order Flow {:.0f}% شراء 💰".format(buy_pct_now)
@@ -7175,7 +7175,7 @@ def update_bull_mode(vol_now=None, change_now=None):
         BULL_MODE_ACTIVE  = False
         BULL_MODE_ALERTED = False
 
-    # ── تنبيه عند التفعيل ──
+
     if BULL_MODE_ACTIVE and not was_active and not BULL_MODE_ALERTED:
         BULL_MODE_ALERTED = True
         msg = (
@@ -7215,11 +7215,11 @@ def check_btc_dominance(vol_now):
     if len(btcd_history) < 2:
         return
 
-    # التغيير خلال آخر 24 ساعة
+
     oldest = btcd_history[0]
     change_24h = btcd - oldest
 
-    # ✅ تحديث btcd_trend للتقرير اليومي
+
     if change_24h <= -0.3:
         btcd_trend = "falling"
     elif change_24h >= 0.3:
@@ -7227,7 +7227,7 @@ def check_btc_dominance(vol_now):
     else:
         btcd_trend = "neutral"
 
-    # ══ Alt Season — BTC.D ينزل ══
+
     if (change_24h <= -BTCD_DROP_ALERT and
             now - btcd_alert_sent > 14400):
 
@@ -7255,7 +7255,7 @@ def check_btc_dominance(vol_now):
         btcd_alert_sent = now
         log.info("🚀 Alt Season Alert! BTC.D=%.2f%% change=%.2f%%", btcd, change_24h)
 
-    # ══ BTC يسيطر — BTC.D يصعد ══
+
     elif (change_24h >= BTCD_RISE_ALERT and
               now - btcd_alert_sent > 14400):
 
@@ -7312,8 +7312,8 @@ def get_ats_label(ats):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   📊 COIN TIER SYSTEM — تصنيف العملات حسب الحجم
-#   Tier 1: Big Cap  >= 10M USDT يومياً
+
+
 #   Tier 2: Mid Cap  1M - 10M USDT
 #   Tier 3: Small Cap < 1M USDT (Meme + Small)
 # ═══════════════════════════════════════════════════════════════════
@@ -7327,7 +7327,7 @@ def get_coin_tier(vol_24h):
     else:
         return "small"   # MASKSOL, Meme coins
 
-# شروط كل فئة
+
 TIER_SETTINGS = {
     "big": {
         "vdelta_min":  0.68,   # شراء 68%+
@@ -7370,7 +7370,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
     global tps_alerted, tps_baseline
     now = time.time()
 
-    # دمج candidates مع القائمة الثابتة
+
     all_syms = list(set(list(candidates) + EXTRA_COINS))
     ranked = sorted(
         [(s, vol_now.get(s, 0)) for s in all_syms if s not in tracked],
@@ -7383,17 +7383,17 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
         if vol < _min_vol:  # 🛡️ EXTRA_COINS=100K | عادية=1M
             continue
-        # 🔒 إذا وصل حيتان لهذه العملة → مغلقة تماماً
+
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
-        # 🔒 حد أقصى إشارتان يومياً لنفس العملة
+
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
             continue
-        # 🔒 Cooldown موحد
+
         last_alert  = coin_alerted.get(sym, 0)
         in_cooldown = (now - last_alert < TPS_COOLDOWN)
 
-        # 🚫 تجاهل إذا ارتفعت كثيراً — الفرصة فاتت
+
         chg24 = changes_map.get(sym, 0)
         if chg24 >= TPS_MAX_CHANGE:
             continue
@@ -7406,17 +7406,17 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         ats    = stats["ats"]
         vdelta = stats["vdelta"]
 
-        # ── تحديد فئة العملة وشروطها ──
+
         _tier    = get_tier_settings(vol)
         _vd_min  = _tier["vdelta_min"]
 
-        # 🔴 فلتر VDelta حسب الفئة
+
         if vdelta < _vd_min:
             log.info("🔴 VDELTA_REJECT [%s]: %s | %.0f%% < %.0f%%",
                      _tier["label"], sym, vdelta*100, _vd_min*100)
             continue
 
-        # baseline تدريجي
+
         base   = tps_baseline.get(sym, tps)
         ratio  = tps / base if base > 0 else 1.0
         tps_baseline[sym] = base * 0.9 + tps * 0.1
@@ -7450,8 +7450,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _tps     = stats["tps"]
         _ats     = stats["ats"]
 
-        # ✅ فلتر "قريبة من الانطلاق"
-        # Bull Mode = فلاتر مخففة
+
+
         if BULL_MODE_ACTIVE:
             _ready = _vdelta >= 0.65  # Bull Mode = 65% يكفي
         else:
@@ -7461,7 +7461,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 or (_vdelta >= 0.65 and _tps >= 0.3 and _ats >= 100)  # تجميع هادئ ✅
                 or (_vdelta >= 0.65 and _ats >= 500)                   # ATS متوسط + شراء جيد
             )
-        # ✅ فلتر أساسي: VDelta >= 65%
+
         if _vdelta < 0.66:
             continue
 
@@ -7474,7 +7474,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
     results.sort(key=lambda x: -x[0])
     for score, sym, signals, stats, chg, vol in results[:3]:
-        # 🔒 إذا سبق وأُرسل WATCH → أضف للمراقبة بصمت فقط
+
         if coin_signal_count.get(sym, 0) >= 1:
             if sym not in whale_watchlist:
                 whale_watch_add(sym, stats["ats"], stats["vdelta"], price_map.get(sym, 0))
@@ -7483,11 +7483,11 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
         rarity = "🐋🔥 نادر" if score >= 80 else ("🔥 قوي" if score >= 65 else "⚡ متوسط")
-        # عداد الإشارات — أول إشارة فقط
+
         coin_signal_count[sym] = 1
         _sig_num = 1
 
-        # ── نحاول إيجاد أقرب منطقة سيولة ──
+
         _lz_block = ""
         try:
             _klines = safe_get(
@@ -7499,7 +7499,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 _lows   = [float(k[3]) for k in _klines]
                 _closes = [float(k[4]) for k in _klines]
                 _cp     = price_map.get(sym, _closes[-1])
-                # نجد أقرب منطقة دعم وأقرب مقاومة
+
                 _support = max([l for l in _lows[-50:] if l < _cp * 0.995], default=0)
                 _resist  = min([h for h in _highs[-50:] if h > _cp * 1.005], default=0)
                 if _support > 0 and _resist > 0:
@@ -7525,11 +7525,11 @@ def scan_tps_ats(price_map, vol_now, changes_map):
              "💥 نشاط انفجاري"))))
         )
 
-        # ── فلتر السيولة الحقيقية + MTF + Trend + Accumulation ──
+
         _direction = calc_direction_engine(sym, "1h")
         _hmm       = calc_hmm_regime(sym, "4h")
         _mtf       = calc_mtf_analysis(sym)
-        # فلتر الاتجاه وكشف التجميع
+
         _trend_ok, _trend_reason = check_trend_filter(sym, chg24)
         _accum = detect_accumulation(sym)
         _weis      = calc_weis_wave(
@@ -7537,7 +7537,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             get_klines(sym, "1h", 30)["vols"]   if get_klines(sym, "1h", 30) else []
         ) if get_klines(sym, "1h", 30) else 0.5
 
-        # السيولة حقيقية إذا:
+
         _bull_pct    = _direction.get("bullish_pct", 0) if _direction else 0
         _regime      = _hmm.get("regime", "unknown") if _hmm else "unknown"
         _mtf_bias    = _mtf.get("bias", "neutral") if _mtf else "neutral"
@@ -7553,12 +7553,12 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             _accum_phase  != "none"            # يوجد تجميع فعلي
         )
 
-        # ── هل VDelta قوي جداً؟ → إشارة دخول مباشرة بدون انتظار الجوكر ──
+
         _direct_entry = vdelta >= 0.80 and score >= 55 and _real_liq
         _price_now    = price_map.get(sym, 0)
 
         if _direct_entry:
-            # إشارة دخول مباشرة
+
             _engine_block = build_engine_block(sym)
             _accum_txt = "🔍 *التجميع:* {} (نقاط: {})\n".format(
                 _accum.get("phase_ar",""), _accum.get("score",0)) if _accum else ""
@@ -7584,7 +7584,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 "🛡️ ضع Stop Loss تحت آخر قاع"
             )
         else:
-            # WATCH عادي — انتظر الجوكر
+
             msg = (
                 "👁️ *WATCH ALERT*\n" +
                 "━━━━━━━━━━━━━━━━━━\n"
@@ -7607,7 +7607,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         coin_alerted[sym] = now   # 🔒 يمنع كل الأنظمة من التكرار
         perf_register(sym, price_map.get(sym, 0), "tps_ats", score, " | ".join(signals))
 
-        # 🐋 إذا أفراد يشترون → أضف لقائمة مراقبة الحيتان
+
         if ats < WHALE_ATS_MIN and vdelta >= 0.65:
             whale_watch_add(sym, ats, vdelta, price_map.get(sym, 0))
         log.info("⚡ TPS/ATS | %s | score=%d | tps=%.1f | ats=%.0f | vdelta=%.0f%%",
@@ -7633,7 +7633,7 @@ def liquidity_hunter(price_map, vol_now, changes_map):
     global lh_alerted, last_lh_scan
     now = time.time()
 
-    # أفضل 60 عملة حسب الحجم
+
     ranked = sorted(
         [(s, vol_now.get(s, 0)) for s in candidates if s not in tracked],
         key=lambda x: -x[1]
@@ -7645,7 +7645,7 @@ def liquidity_hunter(price_map, vol_now, changes_map):
     for sym, vol in ranked:
         if vol < 200_000:
             continue
-        # 🔒 Cooldown موحد
+
         if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN and now - coin_whale_done.get(sym, 0) >= LZ_TPS_COOLDOWN:
             continue
         if now - lh_alerted.get(sym, 0) < LH_COOLDOWN:
@@ -7655,7 +7655,7 @@ def liquidity_hunter(price_map, vol_now, changes_map):
         if price <= 0:
             continue
 
-        # جلب بيانات 15m (20 شمعة)
+
         kd = get_klines(sym, "15m", 20)
         if not kd or len(kd["closes"]) < 10:
             continue
@@ -7678,8 +7678,8 @@ def liquidity_hunter(price_map, vol_now, changes_map):
         signals = []
 
         # ══════════════════════════════════════════
-        # سيناريو 1 — Volume Spike الصامت 🔥
-        # حجم ضخم + سعر ثابت = تجميع خفي
+
+
         # ══════════════════════════════════════════
         if vol_ratio >= LH_VOL_SPIKE and price_chg <= LH_PRICE_FLAT:
             pts = min(int(vol_ratio * 10), 45)
@@ -7692,8 +7692,8 @@ def liquidity_hunter(price_map, vol_now, changes_map):
             signals.append("🔇 QuietVol {:.1f}×".format(vol_ratio))
 
         # ══════════════════════════════════════════
-        # سيناريو 2 — Wick Rejection 🕯️
-        # ذيول سفلية متكررة = رفض النزول
+
+
         # ══════════════════════════════════════════
         wick_score = 0
         for i in range(-5, 0):
@@ -7708,12 +7708,12 @@ def liquidity_hunter(price_map, vol_now, changes_map):
             signals.append("🕯️ WickReject ×{}".format(wick_score))
 
         # ══════════════════════════════════════════
-        # سيناريو 3 — BTC Divergence 📊
-        # BTC ينزل لكن العملة تقاوم
+
+
         # ══════════════════════════════════════════
         coin_change_24h = changes_map.get(sym, 0)
         if btc_change <= -LH_BTC_DIV_MIN and coin_change_24h >= -1.0:
-            # BTC ينزل 1.5%+ لكن العملة ثابتة أو ترتفع
+
             divergence = coin_change_24h - btc_change  # كلما كبر = أقوى
             if divergence >= 2.0:
                 pts = min(int(divergence * 5), 30)
@@ -7721,8 +7721,8 @@ def liquidity_hunter(price_map, vol_now, changes_map):
                 signals.append("📊 BTCDiv +{:.1f}%".format(divergence))
 
         # ══════════════════════════════════════════
-        # سيناريو 4 — Volume Trend صاعد 📈
-        # الحجم يتصاعد تدريجياً على 5 شمعات
+
+
         # ══════════════════════════════════════════
         vol_trend = sum(1 for i in range(-4, 0) if vols[i] > vols[i-1])
         if vol_trend >= 4 and vol_ratio >= 1.4:
@@ -7730,7 +7730,7 @@ def liquidity_hunter(price_map, vol_now, changes_map):
             signals.append("📈 VolTrend {}/4".format(vol_trend))
 
         # ══════════════════════════════════════════
-        # فلتر: يجب على الأقل سيناريوان
+
         # ══════════════════════════════════════════
         if score >= LH_SCORE_MIN and len(signals) >= 2:
             results.append((score, sym, signals, price, vol, coin_change_24h))
@@ -7738,10 +7738,10 @@ def liquidity_hunter(price_map, vol_now, changes_map):
     if not results:
         return
 
-    # رتّب حسب Score تنازلياً — أرسل أفضل 3 فقط
+
     results.sort(key=lambda x: -x[0])
     for score, sym, signals, price, vol, chg in results[:3]:
-        # تأكيد على 1h أيضاً
+
         kd1h = get_klines(sym, "1h", 6)
         if not kd1h:
             continue
@@ -7749,7 +7749,7 @@ def liquidity_hunter(price_map, vol_now, changes_map):
         avg_1h  = sum(vols_1h) / len(vols_1h) if vols_1h else 1
         vol_1h_ratio = vols_1h[-1] / avg_1h if avg_1h > 0 else 0
 
-        # على الأقل 1.2× على 1h
+
         if vol_1h_ratio < 1.2:
             continue
 
@@ -7783,8 +7783,8 @@ def liquidity_hunter(price_map, vol_now, changes_map):
 
 # ═══════════════════════════════════════════════════════════════════
 #   📋 SMALL CAPS ENGINE
-#   قائمة ديناميكية للعملات الصغيرة — تُحدَّث كل ساعة
-#   حجم 50K→500K USDT يومياً
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 def refresh_small_caps():
@@ -7803,7 +7803,7 @@ def refresh_small_caps():
     if not data:
         return
 
-    # بناء خريطة الحجوم
+
     vol_map = {}
     for t in data:
         sym = t.get("symbol", "")
@@ -7817,7 +7817,7 @@ def refresh_small_caps():
     sc_set  = set()
     stats   = {}   # {sector: count}
 
-    # ── المصدر 1: عملات SECTORS المعروفة ذات حجم صغير ──
+
     for sector, coins in SECTORS.items():
         sector_sc = []
         for base in coins:
@@ -7829,7 +7829,7 @@ def refresh_small_caps():
         if sector_sc:
             stats[sector] = len(sector_sc)
 
-    # ── المصدر 2: عملات MEXC جديدة خارج SECTORS ──
+
     known = set(
         (b if b.endswith("USDT") else b + "USDT")
         for coins in SECTORS.values() for b in coins
@@ -7847,7 +7847,7 @@ def refresh_small_caps():
         if SC_MIN_VOL <= vol <= SC_MAX_VOL:
             new_sc.append((sym, vol))
 
-    # أضف أفضل 100 جديدة حسب الحجم
+
     new_sc.sort(key=lambda x: -x[1])
     for sym, vol in new_sc[:100]:
         sc_set.add(sym)
@@ -7855,7 +7855,7 @@ def refresh_small_caps():
     small_caps = list(sc_set)[:SC_MAX_COINS]
     last_sc_refresh = time.time()
 
-    # تقرير مفصّل
+
     sector_info = " | ".join("{}:{}".format(s, n) for s, n in stats.items())
     log.info("📋 Small Caps: %d عملة | قطاعات: %s | جديدة: %d",
              len(small_caps), sector_info, len(new_sc[:100]))
@@ -7879,7 +7879,7 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
     btc_change = btc_change_24h
     results    = []
 
-    # فلتر مسبق بدون API — خذ أفضل 80 حسب الحجم الحالي
+
     ranked_sc = sorted(
         [(s, vol_now.get(s, 0)) for s in small_caps
          if vol_now.get(s, 0) >= SC_MIN_VOL * 0.5
@@ -7919,8 +7919,8 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
         score   = 0
         signals = []
 
-        # سيناريو 1 — Volume Spike الصامت
-        # Micro Cap (< 100K): يكفي 1.8× لأن الحجم الأساسي ضعيف
+
+
         _spike_threshold = SC_VOL_SPIKE_MICRO if vol < SC_MICRO_VOL_MAX else SC_VOL_SPIKE
         if vol_ratio >= _spike_threshold and price_chg <= LH_PRICE_FLAT:
             pts = min(int(vol_ratio * 10), 50)
@@ -7932,7 +7932,7 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
             score += pts
             signals.append("🔇 QuietVol {:.1f}×".format(vol_ratio))
 
-        # سيناريو 2 — Wick Rejection
+
         wick_score = 0
         for i in range(-5, 0):
             body       = abs(closes[i] - opens[i])
@@ -7943,7 +7943,7 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
             score += wick_score * 8
             signals.append("🕯️ WickReject ×{}".format(wick_score))
 
-        # سيناريو 3 — BTC Divergence
+
         coin_change_24h = changes_map.get(sym, 0)
         if btc_change <= -LH_BTC_DIV_MIN and coin_change_24h >= -1.0:
             divergence = coin_change_24h - btc_change
@@ -7951,7 +7951,7 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
                 score += min(int(divergence * 5), 30)
                 signals.append("📊 BTCDiv +{:.1f}%".format(divergence))
 
-        # سيناريو 4 — Volume Trend
+
         vol_trend = sum(1 for i in range(-4, 0) if vols[i] > vols[i-1])
         if vol_trend >= 4 and vol_ratio >= 1.5:
             score += 20
@@ -8005,8 +8005,8 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
 
 # ═══════════════════════════════════════════════════════════════
 #   🆕 V16: HIDDEN ACCUMULATION ENGINE
-#   كشف السيولة الخفية قبل الارتفاع
-#   الحيتان يشترون بهدوء في السوق النازل
+
+
 # ═══════════════════════════════════════════════════════════════
 
 def detect_hidden_accumulation(kd, ob=None):
@@ -8041,8 +8041,8 @@ def detect_hidden_accumulation(kd, ob=None):
     signals  = []
 
     # ══════════════════════════════════════════════
-    # 1. Volume Divergence — أهم مؤشر
-    #    السعر ينزل أو ثابت لكن الحجم يرتفع
+
+
     # ══════════════════════════════════════════════
     price_5  = (closes[-5] - closes[-1]) / closes[-5] * 100 if closes[-5] > 0 else 0
     vol_avg3 = sum(vols[-3:]) / 3
@@ -8058,8 +8058,8 @@ def detect_hidden_accumulation(kd, ob=None):
         signals.append("📊 Divergence {:.1f}x".format(div_strength))
 
     # ══════════════════════════════════════════════
-    # 2. Lower Wicks — ذيول سفلية طويلة
-    #    الحيتان يشترون كل مرة ينزل السعر
+
+
     # ══════════════════════════════════════════════
     wick_count = 0
     for i in range(-6, 0):
@@ -8074,8 +8074,8 @@ def detect_hidden_accumulation(kd, ob=None):
         signals.append("🕯️ Wicks x{}".format(wick_count))
 
     # ══════════════════════════════════════════════
-    # 3. Bid Wall — جدار شراء في Order Book
-    #    طلبات شراء ضخمة تحت السعر الحالي
+
+
     # ══════════════════════════════════════════════
     if ob and ob.get("bid", 0) > 0 and ob.get("ask", 0) > 0:
         bid_ask_ratio = ob["bid"] / ob["ask"]
@@ -8088,8 +8088,8 @@ def detect_hidden_accumulation(kd, ob=None):
             signals.append("💧 Bid+")
 
     # ══════════════════════════════════════════════
-    # 4. Quiet Accumulation — تصاعد تدريجي هادئ
-    #    الحجم يزداد ببطء على مدى 5 شمعات
+
+
     # ══════════════════════════════════════════════
     if n >= 6:
         vol_trend = 0
@@ -8102,8 +8102,8 @@ def detect_hidden_accumulation(kd, ob=None):
             signals.append("🔇 Quiet Accum")
 
     # ══════════════════════════════════════════════
-    # 5. Price Compression — ضغط السعر مع ارتفاع الحجم
-    #    نطاق سعري ضيق + حجم يرتفع = طاقة مكبوتة
+
+
     # ══════════════════════════════════════════════
     recent_high = max(highs[-8:])
     recent_low  = min(lows[-8:])
@@ -8115,7 +8115,7 @@ def detect_hidden_accumulation(kd, ob=None):
         signals.append("🔒 Compression {:.1f}%".format(price_range))
 
     # ══════════════════════════════════════════════
-    # النتيجة
+
     # ══════════════════════════════════════════════
     is_accumulating = score >= 35
     desc = " | ".join(signals) if signals else ""
@@ -8139,11 +8139,11 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
     )[:50]  # أعلى 50 عملة حجماً
 
     for sym, vol in top_candidates:
-        # 🔒 Cooldown موحد — إشارة #1 فقط إذا لم تُرسل إشارة بعد
+
         if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN:
             if now - coin_whale_done.get(sym, 0) >= LZ_TPS_COOLDOWN:
                 continue
-        # cooldown 4 ساعات لنفس العملة
+
         if now - hidden_accum_alerted.get(sym, 0) < 14400:
             continue
 
@@ -8155,7 +8155,7 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
         if not kd:
             continue
 
-        # جلب OrderBook للأكثر حجماً فقط
+
         ob = get_order_book(sym) if vol > 500_000 else None
 
         is_accum, acc_score, acc_desc = detect_hidden_accumulation(kd, ob)
@@ -8163,7 +8163,7 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
         if not is_accum:
             continue
 
-        # تأكيد إضافي: الحجم على 1h أيضاً يرتفع
+
         kd1h = get_klines(sym, "1h", 10)
         if not kd1h:
             continue
@@ -8177,7 +8177,7 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
         change_24h = changes_map.get(sym, 0)
         sector     = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
 
-        # نقاط الندرة
+
         rarity = "🔥 قوي" if acc_score >= 60 else "⚡ متوسط"
         if acc_score >= 80:
             rarity = "🐋🔥 نادر جداً"
@@ -8405,7 +8405,7 @@ def check_trailing(symbol, price):
 
 # ═══════════════════════════════════════════════
 #   SCORE SYSTEM V11
-#   🆕 تحسين: عقوبة BTC هابط + مكافأة Sector Flow + Smart Money
+
 # ═══════════════════════════════════════════════
 def calculate_score(kd, ob, vol_accum, vol_spike, consol,
                     higher_lows, green, bo_str, in_hot, st, symbol=""):
@@ -8413,7 +8413,7 @@ def calculate_score(kd, ob, vol_accum, vol_spike, consol,
     score = 0
     avg   = kd["avg_vol"]
 
-    # حجم (15)
+
     r = kd["vols"][-1]/avg if avg>0 else 0
     score += 15 if r>=3 else 10 if r>=2 else 6 if r>=1.5 else 0
 
@@ -8446,7 +8446,7 @@ def calculate_score(kd, ob, vol_accum, vol_spike, consol,
     ig, gp = green
     if ig: score += 7 if gp>=75 else 4 if gp>=60 else 2
 
-    # اتجاه عام (5)
+
     c = kd["closes"]
     if c[-1] > c[0]: score += 5
 
@@ -8456,19 +8456,19 @@ def calculate_score(kd, ob, vol_accum, vol_spike, consol,
     # Sector Rotation Bonus (15)
     if in_hot: score += SECTOR_BONUS
 
-    # 🆕 Sector Flow Bonus (+8): القطاع يستقبل سيولة الآن
+
     if symbol:
         sector = next((s for s, syms in SECTORS.items() if symbol in syms), "")
         if sector and sector_flow_state.get(sector) == "IN":
             score += 8
 
-    # 🆕 BTC Penalty: إذا BTC ينزل بقوة، عملة غير محمية = طرح نقاط
+
     if btc_change_24h < -2.0 and not in_hot:
         score -= 8
     elif btc_change_24h < -1.0 and not in_hot:
         score -= 4
 
-    # 🆕 Smart Money Bonus: تجميع حيتان + قطاع ساخن
+
     if smart_money_bonus > 0 and in_hot:
         score += smart_money_bonus
 
@@ -8522,7 +8522,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
         log.debug("⛔ %s رُفض: شموع خضراء %.0f%%", symbol, gp)
         return
 
-    # 🆕 V15: OrderBook فقط للعملات التي اجتازت الفلاتر الأولية
+
     ob = get_order_book(symbol) if fetch_orderbook else None
     if ob:
         if ob["imb"] < MIN_IMBALANCE or ob["imb"] > MAX_IMBALANCE:
@@ -8574,7 +8574,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
     if ig:              sigs += "\n🟢 *Green Candles:* `{:.0f}%`".format(gp)
     sigs += "\n📊 *Supertrend:* `{}`".format("🟢 UP" if st=="UP" else "🔴 DOWN")
 
-    # 🆕 إضافة Flow Status للإشارة
+
     flow_state = sector_flow_state.get(
         next((s for s, syms in SECTORS.items() if symbol in syms), ""), "NEUTRAL"
     )
@@ -8672,14 +8672,14 @@ def cleanup():
 
 # ═══════════════════════════════════════════════
 #   🆕 V15: DAILY MARKET REPORT — 00:00 UTC
-#   تقرير يومي شامل عند إغلاق الشمعة اليومية
-#   يكشف: هل الحيتان داخل السوق أم خارجه؟
+
+
 # ═══════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════
 #   🆕 V16: LIQUIDITY ZONES ENGINE
-#   يكتشف مناطق السيولة ديناميكياً من الشمعات اليومية
-#   ويرسل إشارة عند الإغلاق فوق/تحت المنطقة
+
+
 # ═══════════════════════════════════════════════════════════════
 
 def detect_liquidity_zones(kd_daily):
@@ -8719,8 +8719,8 @@ def detect_liquidity_zones(kd_daily):
 
         vol_ratio = zone_vol / avg_vol
 
-        # ── النوع 1: FRESH ZONE ──────────────────────
-        # سعر جديد منخفض تاريخياً + حجم 3x المعدل
+
+
         is_new_low   = zone_low <= min(lows[:i])
         is_vol_spike = vol_ratio >= 3.0
 
@@ -8743,8 +8743,8 @@ def detect_liquidity_zones(kd_daily):
                 zones.append(zone)
             continue
 
-        # ── النوع 2: REPEAT ZONE ─────────────────────
-        # لمسات متعددة + حجم مرتفع
+
+
         if vol_ratio < LZ_VOL_MULT:
             continue
 
@@ -8780,7 +8780,7 @@ def detect_liquidity_zones(kd_daily):
         if not dup:
             zones.append(zone)
 
-    # FRESH اولاً ثم Sigma تنازلياً
+
     zones.sort(key=lambda z: (0 if z["type"] == "FRESH" else 1, -z["sigma"]))
     return zones[:5]
 
@@ -8801,12 +8801,12 @@ def check_liquidity_breakout(sym, price, daily_close, zones):
         zone_type  = zone.get("type", "REPEAT")
         vol_ratio  = zone.get("vol_ratio", 1.0)
 
-        # هامش الاختراق
+
         margin = LZ_ZONE_MARGIN * (0.3 if zone_type == "FRESH" else 0.5)
 
         target_pct = round((zone_high / zone_low - 1) * 100, 1) if zone_low > 0 else 0
 
-        # 🆕 مرحلة 1: السعر داخل المنطقة = تجميع مبكر
+
         if zone_low <= daily_close <= zone_high:
             return {
                 "type":       "WATCH",   # راقب — لم يخترق بعد
@@ -8819,7 +8819,7 @@ def check_liquidity_breakout(sym, price, daily_close, zones):
                 "target_pct": target_pct,
             }
 
-        # مرحلة 2: إغلاق فوق المنطقة = اختراق مؤكد
+
         if daily_close > zone_high * (1 + margin):
             return {
                 "type":       "BUY",
@@ -8832,7 +8832,7 @@ def check_liquidity_breakout(sym, price, daily_close, zones):
                 "target_pct": target_pct,
             }
 
-        # تحت المنطقة — تجاهل (لا نرسل إشارات بيع)
+
 
     return None
 
@@ -8850,9 +8850,9 @@ def sigma_label(sigma):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   🎣 BOTTOM FISHER — صياد القيعان
-#   يرصد التجميع قبل الانطلاق بغض النظر عن موقع السعر
-#   لا يشترط أن يكون السعر في القاع — يكفي وجود تجميع حقيقي
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 bottom_fisher_alerted = {}  # type: dict
@@ -8865,7 +8865,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
     all_syms = list(set(list(candidates) + EXTRA_COINS))
 
     for sym in all_syms:
-        # فلاتر أساسية
+
         if sym.replace("USDT","") in STABLECOINS: continue
         if vol_now.get(sym, 0) < 500_000: continue
         if now - bottom_fisher_alerted.get(sym, 0) < 14400: continue  # 4 ساعات
@@ -8873,12 +8873,12 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS: continue
 
         chg24 = changes_map.get(sym, 0)
-        # لا نريد عملات انفجرت بالفعل أكثر من 25%
+
         if chg24 > 25.0: continue
-        # لا نريد عملات في هبوط حاد
+
         if chg24 < -15.0: continue
 
-        # جلب بيانات
+
         kd1h = get_klines(sym, "1h", 48)
         kd4h = get_klines(sym, "4h", 30)
         if not kd1h or len(kd1h["closes"]) < 24: continue
@@ -8897,7 +8897,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
         signals = []
 
         try:
-            # ── 1. VDelta MA >= 65% مستمر ────────────────
+
             vdelta_ma = calc_vdelta_ma(sym, period=12, interval="1h")
             if vdelta_ma >= 0.68:
                 score += 30
@@ -8908,7 +8908,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
             else:
                 continue  # لا تجميع بدون VDelta
 
-            # ── 2. حجم متصاعد تدريجياً ───────────────────
+
             n = len(vols1h)
             if n >= 12:
                 vol_old = sum(vols1h[-12:-8]) / 4
@@ -8917,7 +8917,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                     score += 25
                     signals.append("حجم +{:.0f}%".format((vol_new/vol_old-1)*100))
 
-            # ── 3. Higher Lows على 1h ─────────────────────
+
             recent_lows = lows1h[-12:]
             hl = sum(1 for i in range(1, len(recent_lows))
                     if recent_lows[i] >= recent_lows[i-1] * 0.998)
@@ -8925,7 +8925,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                 score += 20
                 signals.append("Higher Lows {}/11".format(hl))
 
-            # ── 4. EMA تقاطع صاعد ────────────────────────
+
             if len(closes1h) >= 25:
                 ema7  = sum(closes1h[-7:])  / 7
                 ema25 = sum(closes1h[-25:]) / 25
@@ -8936,7 +8936,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                     score += 8
                     signals.append("EMA قريب التقاطع")
 
-            # ── 5. السعر فوق EMA على 4h ──────────────────
+
             if len(closes4h) >= 14:
                 ema14_4h = sum(closes4h[-14:]) / 14
                 price    = closes4h[-1]
@@ -8955,7 +8955,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                     score += 10
                     signals.append("Direction {:.0f}%".format(bull))
 
-            # ── 7. HMM — ليس volatile ─────────────────────
+
             _hmm = calc_hmm_regime(sym, "4h")
             if _hmm:
                 if _hmm.get("regime") == "volatile":
@@ -8972,7 +8972,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
             elif weis >= 0.55:
                 score += 8
 
-            # ── 9. Murray Math — منطقة دعم قوية ──────────
+
             _mm = calc_murray_math(sym, "1d")
             if _mm:
                 zone = _mm.get("zone_label", "")
@@ -8983,7 +8983,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                     score += 8
                     signals.append("Murray {}".format(zone))
 
-            # ── 10. MTF توافق ─────────────────────────────
+
             _mtf = calc_mtf_analysis(sym)
             if _mtf:
                 if _mtf.get("bias") == "bullish" and not _mtf.get("conflict"):
@@ -8992,7 +8992,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                 elif _mtf.get("conflict"):
                     score -= 10  # خصم عند تضارب
 
-            # ── الحكم النهائي ──────────────────────────────
+
             if score < 60 or len(signals) < 3:
                 continue
 
@@ -9000,18 +9000,18 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
             sector   = next((s for s,syms in SECTORS.items() if sym in syms), "غير محدد")
             vol      = vol_now.get(sym, 0)
 
-            # فلتر السيولة الحقيقية
+
             trend_ok, _ = check_trend_filter(sym, chg24)
             if not trend_ok: continue
 
-            # جلب TPS/ATS الحالي
+
             _stats = analyze_tps_ats(sym)
             _tps = _stats.get("tps", 0) if _stats else 0
             _ats = _stats.get("ats", 0) if _stats else 0
 
-            # ── فحص دخول السيولة ──────────────────────────
-            # ATS يرتفع = سيولة تدخل = ادخل الآن
-            # ATS منخفض = تجميع مبكر = راقب فقط
+
+
+
             _liq_entering = (
                 (_ats >= 300 and vdelta_ma >= 0.68) or   # سيولة متوسطة + VDelta قوي
                 (_ats >= 150 and vdelta_ma >= 0.72) or   # سيولة خفيفة + VDelta عالٍ جداً
@@ -9022,11 +9022,11 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
             sig_txt  = " | ".join(signals[:4])
 
             if _liq_entering:
-                # ✅ سيولة تدخل — إشارة دخول مباشرة
+
                 header = "🎣🚀 *BOTTOM FISHER — ادخل الآن!* 🚀🎣"
                 action = "✅ *ادخل الآن* — تجميع + سيولة تدخل! 💪"
             else:
-                # 👁️ تجميع مبكر — راقب فقط
+
                 header = "🎣 *BOTTOM FISHER — تجميع مكتشف!*"
                 action = "⏳ _تجميع نشط — انتظر ارتفاع ATS للدخول_ 👁️"
 
@@ -9058,7 +9058,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                 action
             )
 
-            # إضافة محركات التحليل
+
             engine_block = build_engine_block(sym)
             if engine_block:
                 msg = msg + "\n" + engine_block
@@ -9084,7 +9084,7 @@ def run_daily_liquidity_scan():
     """
     global lz_daily_sent_date, lz_alerted
     global coin_signal_count, coin_alerted
-    # إعادة تعيين العدادات يومياً
+
     coin_signal_count = {}
     coin_alerted      = {}
     coin_whale_done   = {}
@@ -9092,7 +9092,7 @@ def run_daily_liquidity_scan():
     now_utc = datetime.utcnow()
     today   = now_utc.strftime("%Y-%m-%d")
 
-    # مرة واحدة في اليوم عند 00:00→00:59 UTC
+
     if lz_daily_sent_date == today:
         return
     if now_utc.hour != 0:
@@ -9104,17 +9104,17 @@ def run_daily_liquidity_scan():
     signals_found = 0
     tv_signals    = []
 
-    # أفضل 5 عملات حسب الحجم فقط
+
     _vmap = {t["symbol"]: float(t.get("quoteVolume",0)) for t in all_tickers}
     _cands_sorted = sorted(candidates, key=lambda s: -_vmap.get(s,0))
     _lz_count = 0
     for sym in _cands_sorted:
-        # تجنب التكرار
+
         last_alert = lz_alerted.get(sym, 0)
         if time.time() - last_alert < LZ_COOLDOWN:
             continue
 
-        # جلب شمعات يومية
+
         kd_daily = get_klines(sym, "1d", LZ_LOOKBACK)
         if not kd_daily or len(kd_daily.get("closes", [])) < 20:
             continue
@@ -9122,17 +9122,17 @@ def run_daily_liquidity_scan():
         closes = kd_daily["closes"]
         daily_close = closes[-1]   # آخر إغلاق يومي
 
-        # اكتشاف مناطق السيولة
+
         zones = detect_liquidity_zones(kd_daily)
         if not zones:
             continue
 
-        # هل أغلق فوق/تحت منطقة؟
+
         signal = check_liquidity_breakout(sym, daily_close, daily_close, zones)
         if not signal:
             continue
 
-        # فقط إشارات الشراء — البيع للتحذير فقط
+
         if signal["type"] == "SELL":
             continue
 
@@ -9143,7 +9143,7 @@ def run_daily_liquidity_scan():
         zone_type  = signal.get("zone_type", "REPEAT")
         sig_label  = sigma_label(sigma)
 
-        # نوع المنطقة
+
         if zone_type == "FRESH":
             type_tag = "🆕 *منطقة جديدة* — سعر تاريخي جديد + حجم ضخم"
             type_icon = "🆕"
@@ -9151,32 +9151,32 @@ def run_daily_liquidity_scan():
             type_tag = "🔁 *منطقة متكررة* — دعم مؤكد بالحجم"
             type_icon = "🔁"
 
-        # حساب وقف الخسارة — بحد أقصى 5%
+
         sl_raw   = round((daily_close - zone_low) / daily_close * 100, 2) if daily_close > 0 else 5.0
         sl_pct   = min(sl_raw, 5.0)   # لا يتجاوز 5% أبداً
         sl_price = round(daily_close * (1 - sl_pct / 100), 8)
 
-        # الهدف = zone_high إذا كان أعلى من الدخول، وإلا نحسب هدفاً واقعياً
+
         if zone_high > daily_close:
             target_price = zone_high
             target_pct   = round((zone_high / daily_close - 1) * 100, 1)
         else:
-            # الهدف = الدخول + نسبة المخاطرة × 1.5 (Risk:Reward 1:1.5)
+
             target_pct   = round(sl_pct * 1.5, 1)
             target_price = round(daily_close * (1 + target_pct / 100), 8)
 
-        # تحقق منطقي — إذا الهدف أقل من الدخول لا نرسل
+
         if target_price <= daily_close:
             log.info("⏭️ تخطي %s — الهدف أقل من الدخول", sym)
             continue
 
-        # القطاع
+
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
 
-        # إشارة نادرة؟
+
         rare_tag = "\n🐋🔥 *RARE — نادر جداً!*" if sigma >= LZ_TOUCHES_RARE else ""
 
-        # تمييز WATCH vs BUY
+
         sig_type = sig.get("type", "BUY")
         if sig_type == "WATCH":
             sig_icon  = "👁️"
@@ -9276,18 +9276,18 @@ def analyze_market_history():
     recent   = h[-7:]  if len(h) >= 7  else h
     all_days = h
 
-    # ── 1. نمط الأيام الأخيرة ──────────────────
+
     red_days    = sum(1 for d in recent if d["buy_pct"] <= 45)
     green_days  = sum(1 for d in recent if d["buy_pct"] >= 55)
     neutral_days= len(recent) - red_days - green_days
 
-    # ── 2. اتجاه الحيتان ────────────────────────
+
     stable_vals = [d.get("stable_pct", 0) for d in recent]
     stable_now  = stable_vals[-1] if stable_vals else 0
     stable_avg  = sum(stable_vals) / len(stable_vals) if stable_vals else 0
     stable_trend = stable_vals[-1] - stable_vals[0] if len(stable_vals) >= 2 else 0
 
-    # ── 3. اتجاه الشراء ─────────────────────────
+
     buy_vals    = [d["buy_pct"] for d in recent]
     buy_now     = buy_vals[-1] if buy_vals else 50
     buy_prev    = buy_vals[-2] if len(buy_vals) >= 2 else buy_now
@@ -9297,11 +9297,11 @@ def analyze_market_history():
     sigma_avg   = sum(d.get("sigma_count",0) for d in recent) / len(recent)
     sigma_now   = recent[-1].get("sigma_count", 0) if recent else 0
 
-    # ── 5. تحديد النمط ──────────────────────────
+
     lines_out = []
     sep = "━" * 18
 
-    # نمط السوق
+
     if red_days >= 5:
         market_pattern = "🔴 سوق هابط (" + str(red_days) + " أيام حمراء)"
     elif green_days >= 5:
@@ -9313,7 +9313,7 @@ def analyze_market_history():
     else:
         market_pattern = "🟡 سوق متذبذب"
 
-    # سلوك الحيتان
+
     if stable_now >= 20 and stable_trend > 5:
         whale_pattern = "🐳 تجميع قوي Stablecoins (" + str(round(stable_now,1)) + "%) ↑ ينتظرون قاع"
     elif stable_now >= 20 and stable_trend <= 0:
@@ -9323,18 +9323,18 @@ def analyze_market_history():
     else:
         whale_pattern = "✅ الحيتان في السوق (" + str(round(stable_now,1)) + "%)"
 
-    # ── 6. التوقع الذكي ─────────────────────────
+
     score = 0
     reasons = []
 
-    # إشارات صعود
+
     if red_days >= 4:       score += 2; reasons.append("تشبع بيع")
     if stable_trend > 8:    score += 2; reasons.append("تجميع حيتان")
     if stable_now >= 15 and stable_trend <= 0: score += 3; reasons.append("حيتان يدخلون")
     if buy_trend > 8:       score += 2; reasons.append("زخم شراء متزايد")
     if sigma_now > sigma_avg * 1.5: score += 1; reasons.append("نشاط Sigma غير عادي")
 
-    # إشارات هبوط
+
     if green_days >= 4:     score -= 2; reasons.append("تشبع شراء")
     if stable_trend < -8:   score -= 2; reasons.append("خروج Stablecoins")
     if buy_trend < -8:      score -= 2; reasons.append("زخم بيع متزايد")
@@ -9422,7 +9422,7 @@ def send_daily_report(force=False):
     now_utc  = datetime.utcnow()
     today    = now_utc.strftime("%Y-%m-%d")
 
-    # ── يرسل عند 00:00 UTC تلقائياً أو عند force=True ──
+
     if not force and not _force_daily_report:
         if now_utc.hour != 0:
             return
@@ -9446,7 +9446,7 @@ def _send_daily_report_body(today, now_utc):
     """الكود الفعلي للتقرير — منفصل لكشف الأخطاء"""
     global daily_market_vol_history, market_activity_history, btcd_trend
 
-    # ── تقرير Backtest اليومي ──────────────────
+
     if backtest_signals:
         bt_results = []
         _pm     = {t["symbol"]: float(t["lastPrice"])    for t in all_tickers}
@@ -9485,7 +9485,7 @@ def _send_daily_report_body(today, now_utc):
     vol_now = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in all_tickers}
 
     # ══════════════════════════════════════════
-    # 1. تحليل Stablecoins — مؤشر الحيتان 🐋
+
     # ══════════════════════════════════════════
     ticker_map     = {t["symbol"]: t for t in all_tickers}
     stable_total   = 0.0
@@ -9500,7 +9500,7 @@ def _send_daily_report_body(today, now_utc):
         except (KeyError, ValueError):
             pass
 
-    # مقارنة Stablecoin بالتاريخ
+
     stable_hist = stable_vol_history
     stable_avg  = {}
     whale_signals = []
@@ -9518,8 +9518,8 @@ def _send_daily_report_body(today, now_utc):
             whale_signals.append((sym.replace("USDT",""), ratio))
 
     # ══════════════════════════════════════════
-    # 2. نسبة الشراء/البيع الحقيقي (Order Flow) 📊
-    # takerBuyQuoteVolume = شراء فعلي من السوق
+
+
     # ══════════════════════════════════════════
     buy_vol          = 0.0
     sell_vol         = 0.0
@@ -9536,10 +9536,10 @@ def _send_daily_report_body(today, now_utc):
         try:
             vol      = float(t.get("quoteVolume", 0))
             if vol < 100_000: continue
-            # ✅ Order Flow الحقيقي
+
             taker_buy = float(t.get("takerBuyQuoteVolume", 0))
             if taker_buy <= 0:
-                # fallback: نستخدم اتجاه السعر
+
                 ch = float(t.get("priceChangePercent", 0))
                 taker_buy = vol if ch > 0 else 0
             taker_sell = vol - taker_buy
@@ -9558,8 +9558,8 @@ def _send_daily_report_body(today, now_utc):
     buy_pct         = buy_vol  / total_trade_vol * 100 if total_trade_vol > 0 else 50
     sell_pct        = sell_vol / total_trade_vol * 100 if total_trade_vol > 0 else 50
 
-    # ✅ rising_pct = نفس buy_pct (Order Flow)
-    # = السيولة الداخلة هي المقياس الحقيقي
+
+
     rising_pct  = buy_pct
     falling_pct = sell_pct
     rising      = int(buy_vol / 1_000_000)
@@ -9573,9 +9573,9 @@ def _send_daily_report_body(today, now_utc):
     top_losers.sort(key=lambda x: x[1])
 
     # ══════════════════════════════════════════
-    # 3. تدفق رأس المال — اليوم vs أمس 💰
+
     # ══════════════════════════════════════════
-    # نضيف فقط مرة واحدة يومياً
+
     _today_vol_key = today
     if not daily_market_vol_history or (
         isinstance(daily_market_vol_history[-1], dict) and 
@@ -9597,7 +9597,7 @@ def _send_daily_report_body(today, now_utc):
             vol_arrow = "📈" if vol_change_pct > 5 else "📉" if vol_change_pct < -5 else "➡️"
 
     # ══════════════════════════════════════════
-    # 4. تحليل BTC الإضافي 📈
+
     # ══════════════════════════════════════════
     btc_data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
     btc_ch   = btc_change_24h
@@ -9613,18 +9613,18 @@ def _send_daily_report_body(today, now_utc):
             pass
 
     # ══════════════════════════════════════════
-    # 5. حكم الحيتان 🐋
-    # ══════════════════════════════════════════
-    # منطق الحكم:
-    # Stablecoins مرتفعة + سوق هابط = الحيتان يجمعون كاش (بيع أو انتظار)
-    # Stablecoins منخفضة + سوق صاعد = الحيتان دخلوا السوق (شراء)
-    # Stablecoins منخفضة + سوق هابط = بيع عشوائي (ليس حيتان)
 
     # ══════════════════════════════════════════
-    # حكم الحيتان — يعتمد على 3 مصادر:
-    # 1. whale_signals (نشاط Stablecoins غير طبيعي)
-    # 2. sell_pct / buy_pct (حجم الشراء vs البيع)
-    # 3. rising_pct / falling_pct (عدد العملات الصاعدة vs الهابطة)
+
+
+
+
+
+    # ══════════════════════════════════════════
+
+
+
+
     # ══════════════════════════════════════════
     _sell_pressure = sell_pct >= 70   # ضغط بيع حجمي
     _buy_pressure  = buy_pct  >= 55   # ضغط شراء حجمي
@@ -9633,42 +9633,42 @@ def _send_daily_report_body(today, now_utc):
     _whales_active = len(whale_signals) >= 2
 
     if _whales_active and _sell_pressure and _mkt_falling:
-        # الحيتان يجمعون Stablecoins + ضغط بيع + سوق هابط = خطر حقيقي
+
         whale_verdict  = "🔴 *تحذير — الحيتان خارج السوق*"
         whale_desc     = "الحيتان يجمعون Stablecoins + ضغط بيع {:.0f}% — ينتظرون قاعاً".format(sell_pct)
         whale_action   = "⛔ _لا تدخل — انتظر حتى تنخفض نسبة البيع_"
         whale_icon     = "🐋🔴"
 
     elif _whales_active and _buy_pressure and _mkt_rising:
-        # الحيتان نشطون + ضغط شراء + سوق صاعد = فرصة قوية
+
         whale_verdict  = "🟢 *فرصة ذهبية — الحيتان يشترون*"
         whale_desc     = "الحيتان يضخون سيولة + شراء {:.0f}% — زخم صاعد قوي".format(buy_pct)
         whale_action   = "✅ _ادخل الآن — السيولة إيجابية والحيتان معك_"
         whale_icon     = "🐋🟢"
 
     elif _whales_active and _sell_pressure and not _mkt_falling:
-        # الحيتان يجمعون Stablecoins لكن السوق لم ينهار = تجميع خفي محتمل
+
         whale_verdict  = "👁️ *تجميع خفي محتمل*"
         whale_desc     = "الحيتان يجمعون Stablecoins ({}) رغم استقرار السوق — مراقبة".format(len(whale_signals))
         whale_action   = "⏳ _انتظر تأكيداً — قد يكون تجميعاً قبل الارتفاع_"
         whale_icon     = "🐋👁️"
 
     elif _sell_pressure and _mkt_falling:
-        # ضغط بيع + سوق هابط بدون حيتان = بيع عشوائي
+
         whale_verdict  = "🔴 *ضغط بيع — ابتعد*"
         whale_desc     = "بيع {:.0f}% من السيولة — خروج أموال من السوق ⚠️".format(sell_pct)
         whale_action   = "⛔ _لا تدخل — انتظر الاستقرار_"
         whale_icon     = "📉🔴"
 
     elif _buy_pressure and _mkt_rising:
-        # شراء + سوق صاعد = جو إيجابي
+
         whale_verdict  = "🟢 *السوق صاعد — زخم إيجابي*"
         whale_desc     = "شراء {:.0f}% من السيولة — أموال تدخل السوق 💰".format(buy_pct)
         whale_action   = "✅ _يمكن الدخول بحذر_"
         whale_icon     = "📈🟢"
 
     elif _sell_pressure:
-        # ضغط بيع فقط بدون انهيار واضح = حذر
+
         whale_verdict  = "🟡 *ضغط بيع — توخَّ الحذر*"
         whale_desc     = "بيع {:.0f}% من السيولة — ضغط بيعي".format(sell_pct)
         whale_action   = "⚠️ _انتظر قبل الدخول — الضغط البيعي مرتفع_"
@@ -9681,14 +9681,14 @@ def _send_daily_report_body(today, now_utc):
         whale_icon     = "🟡"
 
     # ══════════════════════════════════════════
-    # 6. بناء الرسالة
+
     # ══════════════════════════════════════════
-    # قائمة Stablecoins
+
     stable_txt = ""
     for name, vol in sorted(stable_details, key=lambda x: -x[1])[:4]:
         stable_txt += "  • *{}*: `{:,.0f}` USDT\n".format(name, vol)
 
-    # قائمة الحيتان
+
     whale_txt = ""
     if whale_signals:
         for name, ratio in whale_signals[:3]:
@@ -9696,21 +9696,21 @@ def _send_daily_report_body(today, now_utc):
     else:
         whale_txt = "  ✅ لا نشاط غير عادي\n"
 
-    # أفضل/أسوأ العملات
+
     gainers_txt = ""
     losers_txt  = ""
 
-    # مؤشر السوق
+
     mkt_bar_green = int(rising_pct / 10)
     mkt_bar_red   = 10 - mkt_bar_green
     mkt_bar = "🟩" * mkt_bar_green + "🟥" * mkt_bar_red
 
-    # حالة تدفق السيولة
+
     flow_sum = get_flow_summary()
 
-    # ضمان أن القيم أرقام وليست نصوص — نستخدم متغيرات محلية جديدة
+
     _btc         = float(btc_ch)          if btc_ch          is not None else 0.0
-    # 🆕 تصحيح حالة السوق للعرض — إذا ضغط بيع شديد رغم SAFE
+
     _display_state = market_state
     if market_state == "SAFE" and sell_pct >= 80:
         _display_state = "CAUTION"
@@ -9718,7 +9718,7 @@ def _send_daily_report_body(today, now_utc):
         _display_state = "DANGER"
     _mkt_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
     _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
-    # 🆕 جلب BTC 1h طازج مباشرة للتقرير — بدون الاعتماد على الكاش
+
     _btc1h = btc_trend_1h  # الافتراضي
     try:
         _kd1h = get_klines("BTCUSDT", "1h", 6)
@@ -9857,7 +9857,7 @@ def _send_daily_report_body(today, now_utc):
         +_SP)
     _trnd=""
     if len(market_activity_history)>=2:
-        # إزالة التكرار — نعرض كل يوم مرة واحدة فقط
+
         _seen_dates = set()
         _unique_history = []
         for _e in market_activity_history:
@@ -9876,17 +9876,17 @@ def _send_daily_report_body(today, now_utc):
             _trnd+="\n"
         _trnd+=_SP
     _analysis  = analyze_market_history()
-    # ══ Stablecoin Sigma من analyze_smart_money ══
+
     _sm_data   = _get_smart_money_summary()
     _sm_block  = "\n" + _sm_data if _sm_data else ""
     send(msg+"\n"+_brk+"\n"+_trnd+"\n"+_analysis+_sm_block)
     log.info("Daily Report merged | rising=%.0f%% | whale=%d | vol=%.1f%%",
              rising_pct, len(whale_signals), vol_change_pct if vol_change_pct is not None else 0.0)
-    # ── نهاية _send_daily_report_body ──
+
 
 # ═══════════════════════════════════════════════════════
 #  🆕 FEATURE 1: Daily Breakout Report (Sigma)
-#  مثل FlowEntry — عملات دخلت سيولة غير عادية
+
 # ═══════════════════════════════════════════════════════
 def send_breakout_report():
     global market_activity_history, breakout_report_sent
@@ -9973,7 +9973,7 @@ def send_market_activity_trend():
     msg  = "📊 *Market Activity Trend*\n"
     msg += "━━━━━━━━━━━━━━━━━━\n"
 
-    # آخر 10 أيام
+
     recent = market_activity_history[-BARS:]
     max_vol = max(d["buy_vol"] + d["sell_vol"] for d in recent) or 1
 
@@ -10003,7 +10003,7 @@ def send_market_activity_trend():
 
 # ═══════════════════════════════════════════════════════
 #  🆕 FEATURE 3: TradingView Script Generator
-#  يولّد سكريبت Pine Script لرسم مناطق السيولة
+
 # ═══════════════════════════════════════════════════════
 def generate_tv_script(sym, zone_high, zone_low, sigma, touches):
     # type: (str, float, float, int, int) -> str
@@ -10073,7 +10073,7 @@ def send_tv_scripts(signals):
         )
         base = s["sym"].replace("USDT","")
 
-        # إرسال كملف نصي
+
         send(
             "📄 *TradingView Script — {}*\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -10107,12 +10107,12 @@ def send_report():
     for sym, gr, sc in rows[:5]:
         msg += "🔥 *{}* `+{:.2f}%` Score:{}\n".format(sym, gr, sc)
 
-    # إضافة ملخص السيولة
+
     msg += "\n━━━━━━━━━━━━━━━━━━\n"
     msg += "💸 *حالة السيولة:*\n"
     msg += get_flow_summary()
 
-    # 🆕 V15: إضافة إحصاءات Backtest
+
     msg += "\n━━━━━━━━━━━━━━━━━━\n"
     msg += get_backtest_stats()
 
@@ -10124,7 +10124,7 @@ def send_report():
 # ═══════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════
-# STATE PERSISTENCE — حفظ واستعادة البيانات
+
 # ═══════════════════════════════════════════════
 
 def fmt_change(c):
@@ -10149,18 +10149,18 @@ def fmt_price(p):
         # PEPE, SHIB: 0.0000035
         return "{:.9f}".format(p).rstrip('0').rstrip('.')
     else:
-        # عملات صغيرة جداً
+
         return "{:.12f}".format(p).rstrip('0').rstrip('.')
 
 
 # ═══════════════════════════════════════════════
-# REDIS PERSISTENCE — حفظ دائم عبر Upstash
+
 # ═══════════════════════════════════════════════
 
-# ✅ redis_save القديمة محذوفة — نستخدم الجديدة أدناه
 
 
-# ✅ redis_load القديمة محذوفة — نستخدم الجديدة أدناه
+
+
 
 
 def redis_save(data):
@@ -10227,12 +10227,12 @@ def save_state():
         state = {
             "version":             "V20",
             "saved_at":            time.time(),
-            # تاريخ الأسعار والأحجام
+
             "bottom_price_history": bottom_price_history,
             "bottom_vol_history":   bottom_vol_history,
             "ath_tracker":          ath_tracker,
             "rt_vol_baseline":      rt_vol_baseline,
-                        # القوائم
+
             "gem_watchlist":        gem_watchlist,
             "watchlist":            watchlist,
             "wl_price_snapshot":    wl_price_snapshot,
@@ -10249,21 +10249,21 @@ def save_state():
             "ts_sell_alerted":      ts_sell_alerted,
             "daily_signals":        daily_signals,
             "wl_entry_alerted":     wl_entry_alerted,
-            # تقارير
+
             "daily_report_sent_date":   daily_report_sent_date,
             "lz_daily_sent_date":       lz_daily_sent_date,
             "daily_gem_count":          daily_gem_count,
             "stable_vol_history":       stable_vol_history,
             "daily_market_vol_history": daily_market_vol_history,
-            # 🐋 Whale Watchlist — قائمة الجوكر
+
             "whale_watchlist":          {k: v for k, v in whale_watchlist.items()},
             "coin_signal_count":        coin_signal_count,
             "market_activity_history":  market_activity_history,
         }
-        # حفظ محلي
+
         with open(STATE_FILE, "w") as f:
             json.dump(state, f)
-        # حفظ في Redis
+
         redis_save(state)
         log.info("💾 State saved — %d gems | %d watchlist | %d BT",
                  len(gem_watchlist), len(watchlist), len(backtest_signals))
@@ -10285,11 +10285,11 @@ def load_state():
     global daily_signals
     global whale_watchlist, coin_signal_count, market_activity_history
 
-    # أولاً: Redis
+
     state = redis_load()
     log.info("☁️ Redis state: %d keys", len(state))
 
-    # ثانياً: ملف محلي إذا Redis فارغ
+
     if not state:
         if not os.path.exists(STATE_FILE):
             log.info("📂 لا يوجد حفظ — بداية جديدة")
@@ -10389,7 +10389,7 @@ def init_static_watchlist():
         ("PYTHUSDT", "DeFi", "Oracle منافس LINK"),
         ("COOKIEUSDT", "AI", "AI Agent ساخن"),
         ("ROSEUSDT",  "Privacy", "Privacy L1"),
-        # ── Meme Coins — 50 عملة ──────────────────
+
         ("DOGEUSDT",    "Meme", "Meme — الأكبر"),
         ("SHIBUSDT",    "Meme", "Meme — ضخم"),
         ("PEPEUSDT",    "Meme", "Meme — ضخم"),
@@ -10456,9 +10456,9 @@ def init_static_watchlist():
 
 
 # ═══════════════════════════════════════════════════════════════════
-#   💧 GLOBAL LIQUIDITY TRACKER — تتبع السيولة من كل MEXC
-#   يفحص كل عملات MEXC كل 10 دقائق
-#   ويحدد القطاعات التي تدخلها السيولة
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 
 _liq_tracker_last   = 0.0
@@ -10483,7 +10483,7 @@ def track_global_liquidity():
         return
 
     try:
-        # ── حساب حجم كل قطاع الآن ──────────────────
+
         ticker_map = {t["symbol"]: t for t in all_tickers}
         sector_vol_now  = {}
         sector_chg_now  = {}
@@ -10516,7 +10516,7 @@ def track_global_liquidity():
         if not sector_vol_now:
             return
 
-        # ── مقارنة مع الدورة السابقة ──────────────────
+
         if not _sector_vol_prev:
             _sector_vol_prev = sector_vol_now.copy()
             return
@@ -10542,7 +10542,7 @@ def track_global_liquidity():
         if not entering:
             return
 
-        # ── تحديث hot_sectors ────────────────────────
+
         entering.sort(key=lambda x: -x[1])
 
         new_hot = [s for s, _, _, _ in entering[:3]]
@@ -10560,7 +10560,7 @@ def track_global_liquidity():
             log.info("💧 LIQUIDITY FLOW | IN: %s | OUT: %s",
                      list(added), list(removed))
 
-        # ── إرسال إشعار إذا تغير كبير ─────────────────
+
         if not added:
             return
 
@@ -10570,7 +10570,7 @@ def track_global_liquidity():
             icon = "🔥" if vol_pct >= 50 else "✅"
             msg_lines.append("{}  *{}* حجم:`+{:.0f}%` | avg:`+{:.1f}%`".format(
                 icon, sector, vol_pct, avg_chg))
-            # أفضل عملتين
+
             for name, chg, vol in coins[:2]:
                 msg_lines.append("    🟢 *{}* `+{:.1f}%`".format(name, chg))
 
@@ -10626,7 +10626,7 @@ def run():
 
     log.info("🚀 MAFIO BOT V20 يبدأ...")
 
-    # ✅ نحذف Webhook ونمسح أي تعارض عند البداية
+
     try:
         import requests as _rq
         _rq.get(
@@ -10637,7 +10637,7 @@ def run():
     except Exception as _e:
         log.warning("deleteWebhook error: %s", _e)
 
-    # ✅ انتظار 15 ثانية للتأكد من توقف النسخة القديمة
+
     time.sleep(15)
 
     load_state()  # استعادة البيانات من آخر تشغيل
@@ -10648,7 +10648,7 @@ def run():
     refresh_tickers()
     time.sleep(2)
 
-    # 🔧 مسح offset قديم عند البدء — لا نتخطى أي رسائل معلقة
+
     try:
         _r = requests.get(
             "https://api.telegram.org/bot{}/getUpdates?offset=-1&timeout=1".format(TELEGRAM_TOKEN),
@@ -10669,14 +10669,14 @@ def run():
     last_expand = time.time()
 
     analyze_sectors()
-    # scan_sector_activity() — معطّل عند البدء لمنع رسالتين
+
     last_sector_report = time.time()  # منع إرسال ثانٍ فوراً
     log.info("✅ جاهز | Candidates: %d | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
     last_deep_scan = 0
 
-    # 🆕 V16: تأكيد global للمتغيرات الجديدة (القيم مُعرَّفة على مستوى الملف)
+
     global last_lh_scan, last_sc_refresh, last_sr_alert
     last_lh_scan    = 0.0
     last_sc_refresh = 0.0
@@ -10714,7 +10714,7 @@ def run():
     flow_cycle = 0  # عداد لتحليل Flow كل 5 دورات (~60 ثانية)
 
     while True:
-        # قيم افتراضية آمنة — تُبنى لاحقاً في كل دورة
+
         price_map  = {}
         change_now = {}
         vol_now    = {}
@@ -10723,21 +10723,21 @@ def run():
         try:
             now = time.time()
 
-            # 🚨 أولوية قصوى — Realtime Liquidity كل 5 دقائق
-            # ⚡ Instant Movers — كل 5 دقائق بدون تاريخ
 
-            # 🎯 Early Detection — كل 15 دقيقة
 
-            # 💾 حفظ الحالة كل 30 دقيقة
+
+
+
+
             if int(now) % 1800 < 12:  # كل 30 دقيقة
                 save_state()
 
-            # 🔴 Trailing Stop Check — كل 5 دقائق
+
             if now - last_ts_scan >= TS_SCAN_EVERY:
                 check_trailing_stops()
                 last_ts_scan = now
 
-            # 👁️ Watchlist Entry Check — كل دقيقة
+
             if now - last_wl_check >= WL_CHECK_EVERY:
                 check_watchlist_entries()
                 last_wl_check = now
@@ -10748,7 +10748,7 @@ def run():
                 last_rt_scan = now
             poll_commands()  # استماع لأوامر Telegram
 
-            # تحديثات دورية
+
             if now - last_btc         >= BTC_EVERY:
                 analyze_btc()
                 update_bull_mode(vol_now, change_now)  # 🚀 تحديث Bull Mode
@@ -10756,28 +10756,28 @@ def run():
                 analyze_sectors()
                 detect_sector_rotation()  # 🌊 هل حدث Rotation؟
                 track_global_liquidity()  # 💧 تتبع السيولة من كل MEXC
-            # analyze_smart_money مدمجة في التقرير اليومي
+
             refresh_sector_report()   # 🆕 تقرير القطاعات + تجميع الحيتان كل ساعة
-            # 🆕 Bottom Accumulation Scan كل ساعة
+
             if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
-                # 🆕 Hot Market Scanner — كل 30 دقيقة فوري
+
                 if now - last_hot_scan >= HOT_SCAN_EVERY:
                     scan_hot_market()
                     last_hot_scan = now
                 check_btc_dominance(vol_now)
                 scan_bottom_accumulation()
-                # 🆕 ATH Distance Scan كل ساعتين
+
                 if now - last_ath_scan >= ATH_SCAN_EVERY:
                     scan_ath_distance()
                     last_ath_scan = now
-                # scan_volume_explosion — معطّل (مكرر مع liquidity_hunter)
+
                 last_bottom_scan = now
 
-            # 🆕 V15: تقرير يومي عند 00:00 UTC
+
             send_daily_report()
-            # run_daily_liquidity_scan مدمجة في التقرير اليومي
+
             if now - last_expand      >= EXPAND_EVERY:
-                # 🆕 V12: توسيع يومي تلقائي للقوائم
+
                 log.info("🔄 تحديث يومي — Auto Expand Sectors")
                 auto_expand_sectors()
                 last_expand = now
@@ -10785,16 +10785,16 @@ def run():
                 cleanup()
                 last_stale = now
 
-            # جلب 24h Ticker
+
             tickers_now = safe_get(MEXC_24H)
             if not tickers_now:
                 time.sleep(CHECK_INTERVAL)
                 continue
 
-            # ✅ إصلاح V11: تحديث all_tickers كـ global
+
             all_tickers = tickers_now
 
-            # بناء الخرائط
+
             price_map  = {}
             change_now = {}
             vol_now    = {}
@@ -10819,10 +10819,10 @@ def run():
 
             changes_map.update(change_now)
 
-            # 🆕 V15: تحديث تاريخ حجم العملات (لحساب vol_ratio التاريخي)
+
             update_coin_vol_history(vol_now)
 
-            # 🆕 V15: متابعة إشارات Backtest
+
             check_backtest(price_map)
 
             if now - last_tickers >= TICKERS_EVERY:
@@ -10835,46 +10835,46 @@ def run():
                     if not check_trailing(sym, price_map[sym]):
                         pass  # check_progression — معطّل (SIGNAL #2 قديم)
 
-            # 🆕 Sector Flow: تجميع لقطات كل دورة
+
             update_sector_flow(ticker_map)
             flow_cycle += 1
 
-            # 🆕 Sector Flow: تحليل كل 5 دورات (~60 ثانية)
+
             if flow_cycle >= FLOW_WINDOW:
                 analyze_sector_flow()
                 flow_cycle = 0
 
-            # Momentum Detector — معطّل (WATCH + الجوكر فقط)
+
             # detect_momentum(price_map, change_now, vol_now, high_map, low_map)
 
-            # 📊 تحديث نتائج الأداء — بعد بناء price_map
+
             if now - last_ts_scan >= TS_SCAN_EVERY:
                 perf_check(price_map)
 
-            # 🆕 V16: كشف التجميع الخفي — كل 10 دقائق
+
             if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
 
-            # 🚨 PUMP/DUMP — كل دورة (12 ثانية)
+
             update_pump_dump_history(price_map, vol_now)
             scan_pump_dump(price_map, vol_now, change_now)
 
-            # 🌊 MARKET PULSE — معطّل (DAILY REPORT يكفي)
+
             # scan_market_pulse(price_map, vol_now, change_now)
 
-            # 🌊 LIQUIDITY FLOW TRACKER — كل 5 دقائق
+
             track_liquidity_flow(vol_now, change_now)
 
-            # 🔥 LIQUIDITY HUNTER — كل 5 دقائق
-            # ⚡ TPS/ATS + LZ Fusion + Whale — كل 5 دقائق
+
+
             if now - last_tps_scan >= TPS_SCAN_EVERY:
                 check_liquidity_exit(vol_now, price_map)
                 scan_tps_ats(price_map, vol_now, change_now)
                 scan_lz_tps_fusion(price_map, vol_now, change_now)  # 🎯 الدمج
                 last_tps_scan = now
 
-            # 🐋 تأكيد حيتان — كل دقيقة (أسرع من TPS)
+
             if now - last_whale_check >= WHALE_CHECK_EVERY:
                 scan_whale_confirmation(price_map)
                 last_whale_check = now
@@ -10883,18 +10883,68 @@ def run():
                 liquidity_hunter(price_map, vol_now, changes_map)
                 last_lh_scan = now
 
-            # 📋 Small Caps — تحديث القائمة كل ساعة
+
             if now - last_sc_refresh >= SC_REFRESH_EVERY:
                 refresh_small_caps()
 
-            # 🔍 SMALL CAP HUNTER — كل 5 دقائق
+
             if now - last_lh_scan < 10 and small_caps:
                 liquidity_hunter_small_caps(price_map, vol_now, changes_map)
 
             # Deep Scan
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
-                # 🆕 V15: ترتيب مسبق — OrderBook لأفضل 20 فقط
-                # نرتب العملات حسب: حجم مرتفع + تغيير إيجابي أولاً
+                # V15: pre-score coins before deep scan
+                # sort by: high volume + positive change first
                 pre_scored = []
                 for sym in candidates:
-                    if sym in tr
+                    if sym in tracked: continue
+                    price  = price_map.get(sym, 0)
+                    change = changes_map.get(sym, 0)
+                    vol    = vol_now.get(sym, 0)
+                    if price <= 0: continue
+
+                    in_hot       = sym in hot_symbols
+                    in_watchlist = sym in watchlist
+                    wl_priority  = watchlist.get(sym, {}).get("priority","") == "🔥 HIGH"
+
+                    pre_score = (
+                        (vol / 1_000_000) * 0.5 +
+                        max(change, 0) * 0.3 +
+                        (2  if in_hot       else 0) +
+                        (5  if in_watchlist else 0) +   # 🆕 watchlist أولوية
+                        (10 if wl_priority  else 0)     # 🆕 قطاع ساخن + تجميع = أقصى أولوية
+                    )
+                    pre_scored.append((sym, price, change, pre_score))
+
+
+                pre_scored.sort(key=lambda x: -x[3])
+
+                log.info("🔍 Deep Scan — %d عملة (أفضل 20 تأخذ OrderBook)...",
+                         len(pre_scored))
+
+                scanned = 0
+                for rank, (sym, price, change, _) in enumerate(pre_scored):
+
+                    fetch_ob = (rank < 20)
+                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
+                    scanned += 1
+                    if scanned % 10 == 0:
+                        time.sleep(0.5)
+
+                last_deep_scan = now
+                log.info("✅ Deep Scan انتهى | %d عملة", scanned)
+
+            cycle += 1
+
+            time.sleep(CHECK_INTERVAL)
+
+        except KeyboardInterrupt:
+            send("⛔ *MAFIO BOT V17* — تم الإيقاف")
+            break
+        except Exception as e:
+            log.error("خطأ: %s", e, exc_info=True)
+            time.sleep(10)
+
+
+if __name__ == "__main__":
+    run()
