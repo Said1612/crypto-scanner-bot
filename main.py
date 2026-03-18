@@ -351,7 +351,7 @@ EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
 }
 
 # حد أقصى لإشارات نفس العملة يومياً
-MAX_COIN_SIGNALS = 2  # إشارة #1 راقب + إشارة #2 ادخل — لا ثالثة
+MAX_COIN_SIGNALS = 2  # إشارة #1 راقب + إشارة #2 ادخل — لا ثالثة (Cooldown 2h)
 
 # ── 🆕 Auto Expand Sectors ───────────────────────
 SECTOR_TARGET      = 50       # الهدف: 50 عملة لكل قطاع
@@ -5125,7 +5125,7 @@ TPS_SPIKE         = 2.0    # TPS ارتفع 2× = نشاط غير عادي (كا
 ATS_WHALE         = 2000   # 🔽 صفقة > 2000 USDT = حيتان (كان 5000$)
 ATS_RETAIL        = 500    # متوسط صفقة < 500 USDT = أفراد
 VDELTA_STRONG     = 0.65   # 🔽 65%+ شراء (كان 70%) — أكثر حساسية
-TPS_COOLDOWN      = 3600   # ساعة بين تنبيهات نفس العملة
+TPS_COOLDOWN      = 7200   # ساعتان — موحد مع التعريف العالمي
 TPS_SCAN_EVERY    = 300    # كل 5 دقائق
 
 # ══════════════════════════════════════════
@@ -8752,6 +8752,233 @@ def sigma_label(sigma):
         return "✅ عادي ({} لمسات)".format(sigma)
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🎣 BOTTOM FISHER — صياد القيعان
+#   يرصد التجميع قبل الانطلاق بغض النظر عن موقع السعر
+#   لا يشترط أن يكون السعر في القاع — يكفي وجود تجميع حقيقي
+# ═══════════════════════════════════════════════════════════════════
+
+bottom_fisher_alerted = {}  # type: dict
+
+def scan_bottom_fisher(price_map, vol_now, changes_map):
+    # type: (dict, dict, dict) -> None
+    global bottom_fisher_alerted
+    now = time.time()
+
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+
+    for sym in all_syms:
+        # فلاتر أساسية
+        if sym.replace("USDT","") in STABLECOINS: continue
+        if vol_now.get(sym, 0) < 500_000: continue
+        if now - bottom_fisher_alerted.get(sym, 0) < 14400: continue  # 4 ساعات
+        if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN: continue
+        if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS: continue
+
+        chg24 = changes_map.get(sym, 0)
+        # لا نريد عملات انفجرت بالفعل أكثر من 25%
+        if chg24 > 25.0: continue
+        # لا نريد عملات في هبوط حاد
+        if chg24 < -15.0: continue
+
+        # جلب بيانات
+        kd1h = get_klines(sym, "1h", 48)
+        kd4h = get_klines(sym, "4h", 30)
+        if not kd1h or len(kd1h["closes"]) < 24: continue
+        if not kd4h or len(kd4h["closes"]) < 14: continue
+
+        closes1h = kd1h["closes"]
+        vols1h   = kd1h["vols"]
+        opens1h  = kd1h["opens"]
+        lows1h   = kd1h["lows"]
+        highs1h  = kd1h["highs"]
+
+        closes4h = kd4h["closes"]
+        lows4h   = kd4h["lows"]
+
+        score   = 0
+        signals = []
+
+        try:
+            # ── 1. VDelta MA >= 65% مستمر ────────────────
+            vdelta_ma = calc_vdelta_ma(sym, period=12, interval="1h")
+            if vdelta_ma >= 0.68:
+                score += 30
+                signals.append("VDelta {:.0f}%".format(vdelta_ma*100))
+            elif vdelta_ma >= 0.65:
+                score += 20
+                signals.append("VDelta {:.0f}%".format(vdelta_ma*100))
+            else:
+                continue  # لا تجميع بدون VDelta
+
+            # ── 2. حجم متصاعد تدريجياً ───────────────────
+            n = len(vols1h)
+            if n >= 12:
+                vol_old = sum(vols1h[-12:-8]) / 4
+                vol_new = sum(vols1h[-4:])    / 4
+                if vol_new > vol_old * 1.3:
+                    score += 25
+                    signals.append("حجم +{:.0f}%".format((vol_new/vol_old-1)*100))
+
+            # ── 3. Higher Lows على 1h ─────────────────────
+            recent_lows = lows1h[-12:]
+            hl = sum(1 for i in range(1, len(recent_lows))
+                    if recent_lows[i] >= recent_lows[i-1] * 0.998)
+            if hl >= 7:
+                score += 20
+                signals.append("Higher Lows {}/11".format(hl))
+
+            # ── 4. EMA تقاطع صاعد ────────────────────────
+            if len(closes1h) >= 25:
+                ema7  = sum(closes1h[-7:])  / 7
+                ema25 = sum(closes1h[-25:]) / 25
+                if ema7 > ema25:
+                    score += 15
+                    signals.append("EMA7 > EMA25")
+                elif ema7 > ema25 * 0.99:
+                    score += 8
+                    signals.append("EMA قريب التقاطع")
+
+            # ── 5. السعر فوق EMA على 4h ──────────────────
+            if len(closes4h) >= 14:
+                ema14_4h = sum(closes4h[-14:]) / 14
+                price    = closes4h[-1]
+                if price > ema14_4h:
+                    score += 10
+                    signals.append("فوق EMA14 4h")
+
+            # ── 6. Direction Engine ───────────────────────
+            _dir = calc_direction_engine(sym, "1h")
+            if _dir:
+                bull = _dir.get("bullish_pct", 0)
+                if bull >= 65:
+                    score += 20
+                    signals.append("Direction {:.0f}%".format(bull))
+                elif bull >= 55:
+                    score += 10
+                    signals.append("Direction {:.0f}%".format(bull))
+
+            # ── 7. HMM — ليس volatile ─────────────────────
+            _hmm = calc_hmm_regime(sym, "4h")
+            if _hmm:
+                if _hmm.get("regime") == "volatile":
+                    continue  # سوق متقلب = لا تجميع حقيقي
+                if _hmm.get("regime") == "trending":
+                    score += 15
+                    signals.append("HMM اتجاهي")
+
+            # ── 8. Weis Wave ──────────────────────────────
+            weis = calc_weis_wave(closes1h, vols1h)
+            if weis >= 0.65:
+                score += 15
+                signals.append("Weis {:.0f}%".format(weis*100))
+            elif weis >= 0.55:
+                score += 8
+
+            # ── 9. Murray Math — منطقة دعم قوية ──────────
+            _mm = calc_murray_math(sym, "1d")
+            if _mm:
+                zone = _mm.get("zone_label", "")
+                if zone in ["0/8", "1/8", "2/8"]:
+                    score += 15
+                    signals.append("Murray {}".format(zone))
+                elif zone in ["3/8", "4/8"]:
+                    score += 8
+                    signals.append("Murray {}".format(zone))
+
+            # ── 10. MTF توافق ─────────────────────────────
+            _mtf = calc_mtf_analysis(sym)
+            if _mtf:
+                if _mtf.get("bias") == "bullish" and not _mtf.get("conflict"):
+                    score += 15
+                    signals.append("MTF صاعد")
+                elif _mtf.get("conflict"):
+                    score -= 10  # خصم عند تضارب
+
+            # ── الحكم النهائي ──────────────────────────────
+            if score < 60 or len(signals) < 3:
+                continue
+
+            price    = price_map.get(sym, closes1h[-1])
+            sector   = next((s for s,syms in SECTORS.items() if sym in syms), "غير محدد")
+            vol      = vol_now.get(sym, 0)
+
+            # فلتر السيولة الحقيقية
+            trend_ok, _ = check_trend_filter(sym, chg24)
+            if not trend_ok: continue
+
+            # جلب TPS/ATS الحالي
+            _stats = analyze_tps_ats(sym)
+            _tps = _stats.get("tps", 0) if _stats else 0
+            _ats = _stats.get("ats", 0) if _stats else 0
+
+            # ── فحص دخول السيولة ──────────────────────────
+            # ATS يرتفع = سيولة تدخل = ادخل الآن
+            # ATS منخفض = تجميع مبكر = راقب فقط
+            _liq_entering = (
+                (_ats >= 300 and vdelta_ma >= 0.68) or   # سيولة متوسطة + VDelta قوي
+                (_ats >= 150 and vdelta_ma >= 0.72) or   # سيولة خفيفة + VDelta عالٍ جداً
+                (_ats >= 500 and vdelta_ma >= 0.65)       # سيولة جيدة
+            )
+
+            strength = "🔥 قوي جداً" if score >= 80 else ("⚡ جيد" if score >= 65 else "🟡 مقبول")
+            sig_txt  = " | ".join(signals[:4])
+
+            if _liq_entering:
+                # ✅ سيولة تدخل — إشارة دخول مباشرة
+                header = "🎣🚀 *BOTTOM FISHER — ادخل الآن!* 🚀🎣"
+                action = "✅ *ادخل الآن* — تجميع + سيولة تدخل! 💪"
+            else:
+                # 👁️ تجميع مبكر — راقب فقط
+                header = "🎣 *BOTTOM FISHER — تجميع مكتشف!*"
+                action = "⏳ _تجميع نشط — انتظر ارتفاع ATS للدخول_ 👁️"
+
+            msg = (
+                header + "\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💥 *{}* — {}\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📊 النقاط: `{}/100` {}\n"
+                "🔍 {}\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📊 VDelta MA: `{:.0f}%` مستمر 🔥\n"
+                "📡 TPS: `{:.2f}` | ATS: `{:.0f}$`\n"
+                "💰 السعر: `{}` | التغيير اليومي: `{:+.1f}%`\n"
+                "📦 الحجم: `{:.1f}M USDT`\n"
+                "🏷️ القطاع: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "{}"
+            ).format(
+                sym.replace("USDT",""),
+                "تجميع + سيولة تدخل!" if _liq_entering else "تجميع قبل الانطلاق 👀",
+                score, strength,
+                sig_txt,
+                vdelta_ma * 100,
+                _tps, _ats,
+                fmt_price(price), chg24,
+                vol / 1_000_000,
+                sector,
+                action
+            )
+
+            # إضافة محركات التحليل
+            engine_block = build_engine_block(sym)
+            if engine_block:
+                msg = msg + "\n" + engine_block
+
+            send(msg)
+            bottom_fisher_alerted[sym] = now
+            coin_alerted[sym] = now
+            whale_watch_add(sym, vol_now.get(sym,0)/10000, vdelta_ma, price)
+
+            log.info("🎣 BOTTOM FISHER | %s | score=%d | vdelta=%.0f%% | signals=%s",
+                     sym, score, vdelta_ma*100, sig_txt)
+
+        except (IndexError, ValueError, ZeroDivisionError):
+            continue
+
+
 def run_daily_liquidity_scan():
     # type: () -> None
     """
@@ -9534,12 +9761,23 @@ def _send_daily_report_body(today, now_utc):
         +_SP)
     _trnd=""
     if len(market_activity_history)>=2:
-        _trnd=_SP+"\n📊 *Market Activity Trend* (كل الأيام المتاحة)\n"
+        # إزالة التكرار — نعرض كل يوم مرة واحدة فقط
+        _seen_dates = set()
+        _unique_history = []
         for _e in market_activity_history:
+            if _e["date"] not in _seen_dates:
+                _seen_dates.add(_e["date"])
+                _unique_history.append(_e)
+
+        _trnd=_SP+"\n📊 *نشاط السوق — آخر الأيام:*\n"
+        for _e in _unique_history[-7:]:  # آخر 7 أيام فقط
             _bp2=_e["buy_pct"]; _stp2=_e.get("stable_pct",0); _sc=_e.get("sigma_count",0)
             _ic="🟢" if _bp2>=55 else "🔴" if _bp2<=45 else "🟡"
-            _trnd+="`"+_e["date"][5:]+"` "+_ic+" "+str(round(_bp2,0))+"%B | 🐳"
-            _trnd+=str(round(_stp2,1))+"%S | σ"+str(_sc)+"\n"
+            _trnd+="`"+_e["date"][5:]+"` "
+            _sell2 = round(100 - _bp2 - _stp2, 1)
+            _trnd+=_ic+" 🟢`{:.0f}%` | 🔴`{:.0f}%` | 💵`{:.1f}%`".format(_bp2, _sell2, _stp2)
+
+            _trnd+="\n"
         _trnd+=_SP
     _analysis  = analyze_market_history()
     # ══ Stablecoin Sigma من analyze_smart_money ══
@@ -10383,6 +10621,7 @@ def run():
             # 🆕 V16: كشف التجميع الخفي — كل 10 دقائق
             if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
+            scan_bottom_fisher(price_map, vol_now, changes_map)
 
             # 🚨 PUMP/DUMP — كل دورة (12 ثانية)
             update_pump_dump_history(price_map, vol_now)
