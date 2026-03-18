@@ -2030,8 +2030,8 @@ def analyze_btc():
             "━━━━━━━━━━━━━━━━━━\n"
             "{icon} السوق: *{state}*\n"
             "₿ BTC 24h: `{ch:+.2f}%`\n"
-            "₿ BTC 4h:  `{h4:+.2f}%`\n"
-            "₿ BTC 1h:  `{h:+.2f}%`\n"
+            "{h4_txt}"
+            "{h1_txt}"
             "{btc_tps}"
             "━━━━━━━━━━━━━━━━━━\n"
             "Ξ ETH 24h: `{eth:+.2f}%`\n"
@@ -2040,7 +2040,9 @@ def analyze_btc():
             "_{note}_\n"
             "📡 _قوة الإشارة: {confirm}/3_".format(
                 icon=icons[market_state], state=market_state,
-                ch=btc_change_24h, h4=btc_trend_4h, h=btc_trend_1h,
+                ch=btc_change_24h,
+                h4_txt="₿ BTC 4h:  `{:+.2f}%`\n".format(btc_trend_4h) if abs(btc_trend_4h) >= 0.05 else "",
+                h1_txt="₿ BTC 1h:  `{:+.2f}%`\n".format(btc_trend_1h) if abs(btc_trend_1h) >= 0.05 else "",
                 btc_tps=btc_tps_line,
                 eth=eth_change_24h,
                 eth_tps=eth_tps_line,
