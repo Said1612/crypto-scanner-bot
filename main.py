@@ -385,6 +385,7 @@ SECTOR_KEYWORDS = {
         "TWT","GHST","TOWER","REVV","NFTX","MOBOX","SKILL","DERACE",
         "FIGHT","WARS","BATTLE","LEGEND","REALM","KART","SPORT","FAN",
         "CHAMP","WIN","SUPER","GODS","AURY","ATLAS","POLIS","PVU","HMSTR",
+        "ENJUSDT", "STEEMUSDT",
     ],
     "DeFi": [
         "UNI","AAVE","CAKE","SUSHI","COMP","MKR","CRV","LDO","1INCH",
@@ -395,6 +396,7 @@ SECTOR_KEYWORDS = {
         "PERP","SNX","KNC","BAL","BIFI","PANCAKE","QUICK","SPIRIT",
         "SPOOKY","JOE","SOLAR","TRISOLARIS","VELODROME","AERODROME",
         "CAMELOT","STERLING","RAMSES","THENA","KYBER","BANCOR","KMNO","MORPHO","WET",
+        "VANRYUSDT", "GLMUSDT", "LISTAUSDT", "STGUSDT", "STOUSDT", "ANKRUSDT",
     ],
     "Layer1": [
         "AVAX","ADA","ATOM","NEAR","FTM","ALGO","ICP","APT","SUI","SEI",
@@ -411,6 +413,7 @@ SECTOR_KEYWORDS = {
         "POLYGON","OPTIMISM","ARBITRUM","STARKWARE","LOOPRING","MATTER",
         "IMMUTABLE","RONIN","BASE","BLAST","MANTLE","MODE","MINT",
         "FRAXTAL","ZORA","REDSTONE","CYBER","KINTO","ANCIENT8","BREV",
+        "POLYXUSDT",
     ],
     "Meme": [
         "DOGE","SHIB","PEPE","FLOKI","WIF","BOM","MEME","TURO","POPCAT",
@@ -685,6 +688,11 @@ SECTORS = {
         # حوسبة كمية
         "QNTUSDT","QTUMUSDT","IONQUSDT","QUAIUSDT","KVANTUSDT",
         "QUIPUSDT","QUANTUMUSDT","QKCUSDT","ALEPHUSDT","NQUUSDT",
+    ],
+    "POW": [
+        "ZECUSDT", "ZILUSDT", "ALPHUSDT", "ZANOUSDT",
+        "RIFUSDT", "CPHUSDT", "KLSUSDT", "KASUSDT",
+        "ERGOUSDT", "RVNUSDT", "DCRUSDT", "GRLUSDT",
     ],
 }
 
@@ -10445,6 +10453,142 @@ def init_static_watchlist():
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   💧 GLOBAL LIQUIDITY TRACKER — تتبع السيولة من كل MEXC
+#   يفحص كل عملات MEXC كل 10 دقائق
+#   ويحدد القطاعات التي تدخلها السيولة
+# ═══════════════════════════════════════════════════════════════════
+
+_liq_tracker_last   = 0.0
+_liq_tracker_every  = 600   # كل 10 دقائق
+_sector_vol_prev    = {}    # type: dict  حجم كل قطاع في الدورة السابقة
+
+def track_global_liquidity():
+    # type: () -> None
+    """
+    يجلب كل عملات MEXC ويحسب:
+    1. أي القطاعات ارتفع حجمها
+    2. أي القطاعات نزل حجمها
+    3. يحدث hot_sectors تلقائياً
+    """
+    global _liq_tracker_last, _sector_vol_prev, hot_sectors, hot_symbols
+    now = time.time()
+    if now - _liq_tracker_last < _liq_tracker_every:
+        return
+    _liq_tracker_last = now
+
+    if not all_tickers:
+        return
+
+    try:
+        # ── حساب حجم كل قطاع الآن ──────────────────
+        ticker_map = {t["symbol"]: t for t in all_tickers}
+        sector_vol_now  = {}
+        sector_chg_now  = {}
+        sector_coins    = {}  # أفضل عملات كل قطاع
+
+        for sector, coins in SECTORS.items():
+            total_vol = 0.0
+            changes   = []
+            top_coins = []
+
+            for sym in coins:
+                t = ticker_map.get(sym)
+                if not t:
+                    continue
+                try:
+                    vol = float(t.get("quoteVolume", 0))
+                    chg = float(t.get("priceChangePercent", 0))
+                    total_vol += vol
+                    changes.append(chg)
+                    if chg > 0 and vol > 100_000:
+                        top_coins.append((sym.replace("USDT",""), chg, vol))
+                except (ValueError, TypeError):
+                    continue
+
+            if total_vol > 0:
+                sector_vol_now[sector]  = total_vol
+                sector_chg_now[sector]  = sum(changes)/len(changes) if changes else 0
+                sector_coins[sector]    = sorted(top_coins, key=lambda x: -x[2])[:5]
+
+        if not sector_vol_now:
+            return
+
+        # ── مقارنة مع الدورة السابقة ──────────────────
+        if not _sector_vol_prev:
+            _sector_vol_prev = sector_vol_now.copy()
+            return
+
+        entering = []   # قطاعات تدخلها السيولة
+        leaving  = []   # قطاعات تخرج منها السيولة
+
+        for sector, vol_now in sector_vol_now.items():
+            vol_prev = _sector_vol_prev.get(sector, vol_now)
+            if vol_prev <= 0:
+                continue
+            vol_change_pct = (vol_now - vol_prev) / vol_prev * 100
+            avg_chg        = sector_chg_now.get(sector, 0)
+
+            if vol_change_pct >= 20 and avg_chg >= 1.0:
+                entering.append((sector, vol_change_pct, avg_chg,
+                                sector_coins.get(sector, [])))
+            elif vol_change_pct <= -15:
+                leaving.append((sector, vol_change_pct))
+
+        _sector_vol_prev = sector_vol_now.copy()
+
+        if not entering:
+            return
+
+        # ── تحديث hot_sectors ────────────────────────
+        entering.sort(key=lambda x: -x[1])
+
+        new_hot = [s for s, _, _, _ in entering[:3]]
+        old_hot = set(hot_sectors)
+        new_hot_set = set(new_hot)
+
+        added   = new_hot_set - old_hot
+        removed = old_hot - new_hot_set
+
+        if added:
+            for s in added:
+                if s not in hot_sectors:
+                    hot_sectors.append(s)
+            hot_symbols = {c for sec in hot_sectors for c in SECTORS.get(sec, [])}
+            log.info("💧 LIQUIDITY FLOW | IN: %s | OUT: %s",
+                     list(added), list(removed))
+
+        # ── إرسال إشعار إذا تغير كبير ─────────────────
+        if not added:
+            return
+
+        msg_lines = ["💧 *تدفق السيولة — تحديث*", "━━━━━━━━━━━━━━━━━━"]
+
+        for sector, vol_pct, avg_chg, coins in entering[:3]:
+            icon = "🔥" if vol_pct >= 50 else "✅"
+            msg_lines.append("{}  *{}* حجم:`+{:.0f}%` | avg:`+{:.1f}%`".format(
+                icon, sector, vol_pct, avg_chg))
+            # أفضل عملتين
+            for name, chg, vol in coins[:2]:
+                msg_lines.append("    🟢 *{}* `+{:.1f}%`".format(name, chg))
+
+        if leaving:
+            msg_lines.append("━━━━━━━━━━━━━━━━━━")
+            msg_lines.append("📤 *خروج من:* " +
+                           ", ".join(s for s, _ in leaving[:3]))
+
+        msg_lines.append("━━━━━━━━━━━━━━━━━━")
+        msg_lines.append("🎯 _البوت يركز الآن على: {}_".format(
+            ", ".join(hot_sectors[:3])))
+
+        send("\n".join(msg_lines))
+
+    except Exception as e:
+        log.error("track_global_liquidity error: %s", e)
+
+
+
 def run():
     # type: () -> None
     global all_tickers   # ✅ إصلاح V11: تأكيد أن all_tickers global
@@ -10610,6 +10754,7 @@ def run():
             if now - last_sectors     >= SECTORS_EVERY:
                 analyze_sectors()
                 detect_sector_rotation()  # 🌊 هل حدث Rotation؟
+                track_global_liquidity()  # 💧 تتبع السيولة من كل MEXC
             # analyze_smart_money مدمجة في التقرير اليومي
             refresh_sector_report()   # 🆕 تقرير القطاعات + تجميع الحيتان كل ساعة
             # 🆕 Bottom Accumulation Scan كل ساعة
@@ -10751,54 +10896,4 @@ def run():
                 # نرتب العملات حسب: حجم مرتفع + تغيير إيجابي أولاً
                 pre_scored = []
                 for sym in candidates:
-                    if sym in tracked: continue
-                    price  = price_map.get(sym, 0)
-                    change = changes_map.get(sym, 0)
-                    vol    = vol_now.get(sym, 0)
-                    if price <= 0: continue
-
-                    in_hot       = sym in hot_symbols
-                    in_watchlist = sym in watchlist
-                    wl_priority  = watchlist.get(sym, {}).get("priority","") == "🔥 HIGH"
-
-                    pre_score = (
-                        (vol / 1_000_000) * 0.5 +
-                        max(change, 0) * 0.3 +
-                        (2  if in_hot       else 0) +
-                        (5  if in_watchlist else 0) +   # 🆕 watchlist أولوية
-                        (10 if wl_priority  else 0)     # 🆕 قطاع ساخن + تجميع = أقصى أولوية
-                    )
-                    pre_scored.append((sym, price, change, pre_score))
-
-                # ترتيب تنازلي — الأفضل أولاً
-                pre_scored.sort(key=lambda x: -x[3])
-
-                log.info("🔍 Deep Scan — %d عملة (أفضل 20 تأخذ OrderBook)...",
-                         len(pre_scored))
-
-                scanned = 0
-                for rank, (sym, price, change, _) in enumerate(pre_scored):
-                    # OrderBook فقط لأفضل 20 عملة
-                    fetch_ob = (rank < 20)
-                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
-                    scanned += 1
-                    if scanned % 10 == 0:
-                        time.sleep(0.5)
-
-                last_deep_scan = now
-                log.info("✅ Deep Scan انتهى | %d عملة", scanned)
-
-            cycle += 1
-            # send_report() — معطّل (تقرير V15 القديم)
-            time.sleep(CHECK_INTERVAL)
-
-        except KeyboardInterrupt:
-            send("⛔ *MAFIO BOT V17* — تم الإيقاف")
-            break
-        except Exception as e:
-            log.error("خطأ: %s", e, exc_info=True)
-            time.sleep(10)
-
-
-if __name__ == "__main__":
-    run()
+                    if sym in tracked: contin
