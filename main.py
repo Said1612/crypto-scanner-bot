@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
 ║           MAFIO BOT SIGNAL V20 — UNIFIED ENGINE            ║
@@ -10896,5 +10897,4 @@ def run():
                 # نرتب العملات حسب: حجم مرتفع + تغيير إيجابي أولاً
                 pre_scored = []
                 for sym in candidates:
-                    if sym in tracked: continue
-        
+                    if sym in tr
