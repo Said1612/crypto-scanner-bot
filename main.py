@@ -7330,21 +7330,21 @@ def get_coin_tier(vol_24h):
 
 TIER_SETTINGS = {
     "big": {
-        "vdelta_min":  0.68,   # شراء 68%+
+        "vdelta_min":  0.67,   # شراء 67%+
         "ats_min":     500,    # ATS 500$+
         "tps_spike":   2.0,    # TPS 2×+
         "vol_min":     10_000_000,
         "label":       "Big Cap 🏦",
     },
     "mid": {
-        "vdelta_min":  0.66,   # شراء 66%+
+        "vdelta_min":  0.65,   # شراء 65%+
         "ats_min":     200,    # ATS 200$+
         "tps_spike":   2.0,    # TPS 2×+
         "vol_min":     1_000_000,
         "label":       "Mid Cap 📊",
     },
     "small": {
-        "vdelta_min":  0.65,   # شراء 65%+ (أقل صرامة)
+        "vdelta_min":  0.63,   # شراء 63%+
         "ats_min":     50,     # ATS 50$+ فقط
         "tps_spike":   2.5,    # TPS 2.5×+ (تعويض عن ATS المنخفض)
         "vol_min":     20_000, # 20K فقط
