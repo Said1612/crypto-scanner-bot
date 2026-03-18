@@ -2092,7 +2092,7 @@ def analyze_btc():
             _bt  = stats.get("buyer_type", "")
             _verdict = (
                 "🐋 حيتان يشترون 🔥" if _ats >= ATS_WHALE and _vd >= 0.65 else
-                "🐋 حيتان يبيعون ⚠️" if _ats >= ATS_WHALE and _vd < 0.40 else
+                "🔴 حيتان يبيعون!" if _ats >= ATS_WHALE and _vd < 0.40 else
                 "📊 نشاط طبيعي"
             )
             return (
@@ -9857,7 +9857,7 @@ def _send_daily_report_body(today, now_utc):
                 btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
                 btc_tps_stats.get("vdelta",0.5)*100,
                 "حيتان يشترون 🔥" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) >= 0.65
-                else ("حيتان يبيعون ⚠️" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) < 0.40
+                else ("🔴 حيتان يبيعون!" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) < 0.40
                 else "نشاط عادي")
             ) if btc_tps_stats else ""
         ),
@@ -9866,7 +9866,7 @@ def _send_daily_report_body(today, now_utc):
                 eth_tps_stats.get("tps",0), eth_tps_stats.get("ats",0),
                 eth_tps_stats.get("vdelta",0.5)*100,
                 "حيتان يشترون 🔥" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) >= 0.65
-                else ("حيتان يبيعون ⚠️" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) < 0.40
+                else ("🔴 حيتان يبيعون!" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) < 0.40
                 else "نشاط عادي")
             ) if eth_tps_stats else ""
         ),
