@@ -10682,7 +10682,7 @@ def run():
     last_sr_alert   = 0.0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V20* ✅ VDelta>=66% 🔥 MTF✅ POW✅\n"
+        "🤖 *MAFIO BOT SIGNAL V20* ✅ v3.18 🔥\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -10896,4 +10896,5 @@ def run():
                 # نرتب العملات حسب: حجم مرتفع + تغيير إيجابي أولاً
                 pre_scored = []
                 for sym in candidates:
-                    if sym in tracked: c
+                    if sym in tracked: continue
+        
