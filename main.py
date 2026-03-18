@@ -270,9 +270,9 @@ FLOW_ALERT_COOL    = 600       # 🧪 TEST (كان 900) — 10 دقائق cooldo
 FLOW_HISTORY_MAX   = 20        # أقصى تاريخ محفوظ للقطاع
 
 # Sector Rotation
-SR_MIN_OUT        = -8.0   # قطاع يخرج منه: -8% أو أقل
-SR_MIN_IN         = 8.0    # قطاع يدخل إليه: +8% أو أكثر
-SR_COOLDOWN       = 14400  # 4 ساعات بين تنبيهات Rotation
+SR_MIN_OUT        = -5.0   # قطاع يخرج منه: -5% (كان -8%)
+SR_MIN_IN         = 5.0    # قطاع يدخل إليه: +5% (كان 8%)
+SR_COOLDOWN       = 7200   # ساعتان (كان 4 ساعات)
 SR_TOP_COINS      = 5      # أفضل عملات في القطاع المنتعش
 
 # ── 🆕 Auto Expand ───────────────────────────────
@@ -864,16 +864,22 @@ def send(msg, personal_only=False):
 
     personal_only=True → الشخصي فقط (للأوامر الخاصة)
     """
-    # ✅ فلتر VDelta عالمي — يمنع أي WATCH بـ VDelta < 66%
+    # ✅ فلتر VDelta عالمي — يمنع WATCH بـ VDelta منخفض
     # يفحص الرسالة مباشرة قبل الإرسال
     if 'WATCH ALERT' in msg and 'نشاط مشبوه' in msg:
         import re as _re
         vd_match = _re.search(r'VDelta[:\s*`]+(\d+)%', msg)
         if vd_match:
             vd_val = int(vd_match.group(1))
-            if vd_val < 66:
-                log.info("🚫 send() BLOCKED: VDelta=%d%% < 66%% | %s",
-                         vd_val, msg[:50])
+            # تحديد الحد حسب الحجم في الرسالة
+            vol_match = _re.search(r'حجم[:\s*`]+([\d\.]+)M', msg)
+            vol_m = float(vol_match.group(1)) if vol_match else 1.0
+            vol_usdt = vol_m * 1_000_000
+            _t = get_tier_settings(vol_usdt)
+            min_vd = int(_t["vdelta_min"] * 100)
+            if vd_val < min_vd:
+                log.info("🚫 send() BLOCKED [%s]: VDelta=%d%% < %d%% | %s",
+                         _t["label"], vd_val, min_vd, msg[:50])
                 return
 
     if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
@@ -2456,8 +2462,13 @@ def detect_sector_rotation():
 
     for name, ch, vol, pr in top_coins[:SR_TOP_COINS]:
         chg_icon = "🟢" if ch > 0 else "⚪"
-        opp_lines += "  {} *{}* `{:+.1f}%` | vol:`{:.0f}K`\n".format(
-            chg_icon, name, ch, vol/1000)
+        # جلب VDelta وATS للعملة
+        sym_full = name + "USDT"
+        _s = analyze_tps_ats(sym_full)
+        vd_txt  = " | VD:`{:.0f}%`".format(_s["vdelta"]*100) if _s else ""
+        ats_txt = " ATS:`{:.0f}$`".format(_s["ats"]) if _s else ""
+        opp_lines += "  {} *{}* `{:+.1f}%`{}{}\n".format(
+            chg_icon, name, ch, vd_txt, ats_txt)
 
     # حكم ذكي
     top_in_pct  = entering[0][1]
@@ -2499,6 +2510,19 @@ def detect_sector_rotation():
     log.info("🌊 Sector Rotation | OUT:%s → IN:%s",
              [s for s, _ in leaving[:3]],
              [s for s, _ in entering[:3]])
+
+    # ✅ تحديث hot_sectors تلقائياً بناءً على انتقال السيولة
+    global hot_sectors, hot_symbols
+    for s, p in entering[:3]:
+        if s not in hot_sectors:
+            hot_sectors.append(s)
+            log.info("🔥 hot_sector مضاف: %s (+%.1f%%)", s, p)
+    for s, p in leaving[:3]:
+        if s in hot_sectors:
+            hot_sectors.remove(s)
+            log.info("❄️ hot_sector محذوف: %s (%.1f%%)", s, p)
+    hot_symbols = {c for sec in hot_sectors for c in SECTORS.get(sec, [])}
+    log.info("🎯 hot_sectors: %s | %d عملة", hot_sectors, len(hot_symbols))
 
 def get_flow_summary():
     # type: () -> str
@@ -5547,11 +5571,18 @@ def scan_whale_confirmation(price_map):
         # 1. VDelta قوي جداً (80%+) → ادخل بدون شرط ATS
         # 2. ATS + VDelta كلاهما فوق الحد → دخول عادي
         # 3. ATS كبير جداً (حوت ضخم) → ادخل حتى لو VDelta متوسط
-        _vdelta_strong = vdelta >= 0.80 and ats >= 150           # مسار 1: VDelta قوي + حد أدنى ATS
-        _early_entry   = ats >= 300  and vdelta >= 0.70          # مسار 2: دخول مبكر
-        _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN  # مسار 3: عادي
-        _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50     # مسار 4: حوت ضخم
-        if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale):
+        # ── شروط الجوكر حسب فئة العملة ──
+        _j_tier   = get_tier_settings(vol_now.get(sym, 0) if hasattr(vol_now, 'get') else 0)
+        _j_ats    = _j_tier["ats_min"]
+
+        _vdelta_strong = vdelta >= 0.80 and ats >= max(150, _j_ats)  # مسار 1
+        _early_entry   = ats >= max(300, _j_ats*2) and vdelta >= 0.70  # مسار 2
+        _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN  # مسار 3
+        _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50          # مسار 4
+        # مسار 5: Small Cap — ATS منخفض لكن VDelta قوي
+        _small_cap     = _j_ats <= 50 and ats >= _j_ats and vdelta >= 0.70
+
+        if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale or _small_cap):
             continue
 
         # حساب التغير منذ إشارة الأفراد
@@ -6983,12 +7014,12 @@ def scan_delisting_hunter(vol_now, change_now, price_map):
 
 sc_hunter_alerted  = {}   # type: Dict[str, float]
 SCH_COOLDOWN       = 7200    # ساعتان
-SCH_VOL_MIN        = 100_000  # 100K minimum
+SCH_VOL_MIN        = 30_000   # 30K minimum (كان 100K) — يلتقط Small Caps
 SCH_VOL_MAX        = 2_000_000  # 2M maximum
-SCH_VOL_SPIKE      = 4.0     # حجم 4× فجأة
-SCH_VDELTA_MIN     = 0.68    # شراء 68%+ (كان 75%)
-SCH_TPS_MIN        = 0.5     # TPS معقول
-SCH_MAX_CHANGE     = 8.0     # لم يتحرك كثيراً
+SCH_VOL_SPIKE      = 3.0     # حجم 3× فجأة (كان 4×)
+SCH_VDELTA_MIN     = 0.68    # شراء 68%+
+SCH_TPS_MIN        = 0.3     # TPS مخفف (كان 0.5) — Small Caps نشاطها أقل
+SCH_MAX_CHANGE     = 15.0    # رفع الحد (كان 8%) — Small Caps تتحرك أكثر
 
 
 def scan_small_cap_hunter(price_map, vol_now, change_now):
@@ -7270,6 +7301,55 @@ def get_ats_label(ats):
     if ats < 15000:  return "🐋 حيتان"
     return "🐋🔥 حيتان ضخمة"
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📊 COIN TIER SYSTEM — تصنيف العملات حسب الحجم
+#   Tier 1: Big Cap  >= 10M USDT يومياً
+#   Tier 2: Mid Cap  1M - 10M USDT
+#   Tier 3: Small Cap < 1M USDT (Meme + Small)
+# ═══════════════════════════════════════════════════════════════════
+
+def get_coin_tier(vol_24h):
+    # type: (float) -> str
+    if vol_24h >= 10_000_000:
+        return "big"     # BTC, ETH, SOL, BNB
+    elif vol_24h >= 1_000_000:
+        return "mid"     # AVAX, DOT, LINK
+    else:
+        return "small"   # MASKSOL, Meme coins
+
+# شروط كل فئة
+TIER_SETTINGS = {
+    "big": {
+        "vdelta_min":  0.68,   # شراء 68%+
+        "ats_min":     500,    # ATS 500$+
+        "tps_spike":   2.0,    # TPS 2×+
+        "vol_min":     10_000_000,
+        "label":       "Big Cap 🏦",
+    },
+    "mid": {
+        "vdelta_min":  0.66,   # شراء 66%+
+        "ats_min":     200,    # ATS 200$+
+        "tps_spike":   2.0,    # TPS 2×+
+        "vol_min":     1_000_000,
+        "label":       "Mid Cap 📊",
+    },
+    "small": {
+        "vdelta_min":  0.65,   # شراء 65%+ (أقل صرامة)
+        "ats_min":     50,     # ATS 50$+ فقط
+        "tps_spike":   2.5,    # TPS 2.5×+ (تعويض عن ATS المنخفض)
+        "vol_min":     20_000, # 20K فقط
+        "label":       "Small Cap 🚀",
+    },
+}
+
+def get_tier_settings(vol_24h):
+    # type: (float) -> dict
+    tier = get_coin_tier(vol_24h)
+    return TIER_SETTINGS[tier]
+
+
+
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
     log.info("🔒 scan_tps_ats V20 — VDelta filter >= 65%%")
@@ -7317,9 +7397,14 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         ats    = stats["ats"]
         vdelta = stats["vdelta"]
 
-        # 🔴 فلتر صارم — VDelta < 65% = لا إشارة أبداً
-        if vdelta < 0.66:
-            log.info("🔴 VDELTA_REJECT: %s | %.0f%% < 66%%", sym, vdelta*100)
+        # ── تحديد فئة العملة وشروطها ──
+        _tier    = get_tier_settings(vol)
+        _vd_min  = _tier["vdelta_min"]
+
+        # 🔴 فلتر VDelta حسب الفئة
+        if vdelta < _vd_min:
+            log.info("🔴 VDELTA_REJECT [%s]: %s | %.0f%% < %.0f%%",
+                     _tier["label"], sym, vdelta*100, _vd_min*100)
             continue
 
         # baseline تدريجي
