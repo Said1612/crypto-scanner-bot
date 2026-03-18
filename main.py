@@ -5755,13 +5755,17 @@ def scan_whale_confirmation(price_map):
                 fmt_price(price*1.10), fmt_price(price*1.20))
         _sl_val = _smart.get("sl", price*0.96)
         _sl_pct = (_sl_val - price) / price * 100 if price > 0 else -4
+        # Stop Loss لا يتجاوز -6% من السعر
+        if _sl_pct < -6.0:
+            _sl_val = price * 0.94
+            _sl_pct = -6.0
         _tblock += "🛡️ *Stop Loss:* `{}` ({:.1f}%)\n".format(
             fmt_price(_sl_val), _sl_pct)
         msg = msg + "\n" + _tblock
 
         _joker_engine = build_engine_block(sym, include_levels=False)
-        if _joker_engine:
-            msg = msg + "\n" + _joker_engine
+        if _joker_engine and _joker_engine.strip().replace("=","").strip():
+            msg = msg + _joker_engine
 
         send(msg)  # GOLDEN مدمج في msg أعلاه
         _tgts = calc_smart_targets(sym, price)
