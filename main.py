@@ -1622,12 +1622,12 @@ def format_murray_block(sym):
 
 
 
-def build_engine_block(sym):
-    # type: (str) -> str
+def build_engine_block(sym, include_levels=True):
+    # type: (str, bool) -> str
     direction = calc_direction_engine(sym, "1h")
     hmm       = calc_hmm_regime(sym, "4h")
-    garch     = calc_garch_range(sym, "1d")
-    murray    = calc_murray_math(sym, "1d")
+    garch     = calc_garch_range(sym, "1d") if include_levels else {}
+    murray    = calc_murray_math(sym, "1d") if include_levels else {}
     if not direction and not hmm and not garch:
         return ""
     out = "=" * 18 + "\n"
@@ -5648,14 +5648,19 @@ def scan_whale_confirmation(price_map):
         _j_tier   = get_tier_settings(_j_vol)
         _j_ats    = _j_tier["ats_min"]
 
-        _vdelta_strong = vdelta >= 0.80 and ats >= max(150, _j_ats)  # مسار 1
-        _early_entry   = ats >= max(300, _j_ats*2) and vdelta >= 0.70  # مسار 2
-        _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN  # مسار 3
-        _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50          # مسار 4
-
+        _vdelta_strong = vdelta >= 0.80 and ats >= max(150, _j_ats)
+        _early_entry   = ats >= max(300, _j_ats*2) and vdelta >= 0.70
+        _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN
+        _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50
         _small_cap     = _j_ats <= 50 and ats >= _j_ats and vdelta >= 0.70
 
         if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale or _small_cap):
+            continue
+
+        # فلتر التصريف — هل السيولة شرائية أم بيعية؟
+        _is_dist, _dist_reason = detect_distribution(sym, price, vdelta, ats)
+        if _is_dist:
+            log.info("🚫 DISTRIBUTION DETECTED: %s | %s", sym, _dist_reason)
             continue
 
 
@@ -5733,30 +5738,28 @@ def scan_whale_confirmation(price_map):
                 if coin_signal_count.get(sym, 0) >= 1
                 else "✅ *ادخل الصفقة الآن* 💪\n"
             ) +
-            "━━━━━━━━━━━━━━━━━━\n" +
-            "🎯 *الأهداف:*\n" +
-            "  1️⃣ `{t1}` (+10%)\n".format(t1=fmt_price(price * 1.10)) +
-            "  2️⃣ `{t2}` (+20%)\n".format(t2=fmt_price(price * 1.20)) +
-            "  3️⃣ `{t3}` (+35%)\n".format(t3=fmt_price(price * 1.35)) +
-            "🛡️ Stop Loss: `{sl}` (-4%)\n".format(sl=fmt_price(price * 0.96)) +
             footer
         )
 
 
         # الأهداف الذكية عند المقاومات
         _smart = calc_smart_targets(sym, price)
-        if _smart.get("targets"):
-            _tblock = "━━━━━━━━━━━━━━━━━━\n🎯 *الأهداف عند المقاومات:*\n"
-            _nums = ["1","2","3"]
-            for _ii, _tgt in enumerate(_smart["targets"][:3]):
-                _tblock += "  {}️⃣ `{}` (+{:.0f}%)\n".format(
-                    _nums[_ii], fmt_price(_tgt["price"]), _tgt["pct"])
-            _tblock += "🛡️ *Stop Loss:* `{}` ({:.0f}%)\n".format(
-                fmt_price(_smart.get("sl", price*0.96)),
-                _smart.get("sl_pct", -4))
-            msg = msg + "\n" + _tblock
+        _tblock = "━━━━━━━━━━━━━━━━━━\n🎯 *الأهداف عند المقاومات:*\n"
+        _nums = ["1","2","3"]
+        for _ii, _tgt in enumerate(_smart.get("targets", [])[:3]):
+            _lbl = " ({})" .format(_tgt["label"]) if _tgt.get("label") else ""
+            _tblock += "  {}️⃣ `{}` (+{:.0f}%){}\n".format(
+                _nums[_ii], fmt_price(_tgt["price"]), _tgt["pct"], _lbl)
+        if not _smart.get("targets"):
+            _tblock += "  1️⃣ `{}` (+10%)\n  2️⃣ `{}` (+20%)\n".format(
+                fmt_price(price*1.10), fmt_price(price*1.20))
+        _sl_val = _smart.get("sl", price*0.96)
+        _sl_pct = (_sl_val - price) / price * 100 if price > 0 else -4
+        _tblock += "🛡️ *Stop Loss:* `{}` ({:.1f}%)\n".format(
+            fmt_price(_sl_val), _sl_pct)
+        msg = msg + "\n" + _tblock
 
-        _joker_engine = build_engine_block(sym)
+        _joker_engine = build_engine_block(sym, include_levels=False)
         if _joker_engine:
             msg = msg + "\n" + _joker_engine
 
@@ -10687,6 +10690,79 @@ exit_watchlist  = {}   # {sym: {"entry": price, "time": ts, "targets": [...]}}
 exit_alerted    = {}   # {sym: ts}
 EXIT_CHECK_EVERY = 120  # كل دقيقتين
 last_exit_check  = 0.0
+
+
+def detect_distribution(sym, price, vdelta, ats):
+    # type: (str, float, float, float) -> tuple
+    """
+    كشف التصريف قبل إرسال الجوكر
+    يعيد: (is_distribution, reason)
+    True = تصريف = لا ترسل
+    """
+    kd1h = get_klines(sym, "1h", 24)
+    kd4h = get_klines(sym, "4h", 14)
+
+    if not kd1h or len(kd1h["closes"]) < 12:
+        return False, ""
+
+    closes1h = kd1h["closes"]
+    vols1h   = kd1h["vols"]
+    highs1h  = kd1h["highs"]
+    n        = len(closes1h)
+
+    try:
+        # ── 1. هل السعر نزل من القمة اليومية؟ ──
+        peak_24h = max(highs1h[-24:]) if len(highs1h) >= 24 else max(highs1h)
+        drop_from_peak = (peak_24h - price) / peak_24h * 100 if peak_24h > 0 else 0
+
+        if drop_from_peak >= 8.0:
+            return True, "نزل {:.1f}% من القمة — تصريف محتمل".format(drop_from_peak)
+
+        # ── 2. هل الحجم ينخفض مع السعر؟ ──
+        # حجم الساعات الأخيرة vs السابقة
+        if n >= 6:
+            vol_recent = sum(vols1h[-3:]) / 3
+            vol_prev   = sum(vols1h[-6:-3]) / 3
+            price_recent = closes1h[-1]
+            price_prev   = closes1h[-4]
+
+            # السعر ينزل + حجم ينخفض = تصريف
+            if price_recent < price_prev and vol_recent < vol_prev * 0.7:
+                return True, "سعر نازل + حجم ينخفض = تصريف"
+
+        # ── 3. Higher Highs مع Lower Volume (Bearish Divergence) ──
+        if n >= 8:
+            # قارن آخر قمتين
+            recent_high  = max(highs1h[-4:])
+            prev_high    = max(highs1h[-8:-4])
+            recent_vol   = sum(vols1h[-4:])
+            prev_vol     = sum(vols1h[-8:-4])
+
+            if recent_high > prev_high and recent_vol < prev_vol * 0.8:
+                return True, "قمة أعلى + حجم أقل = تباعد هبوطي"
+
+        # ── 4. VDelta على 4h هابط؟ ──
+        if kd4h and len(kd4h["closes"]) >= 6:
+            c4 = kd4h["closes"]
+            o4 = kd4h["opens"]
+            v4 = kd4h["vols"]
+            vd4h = calc_weis_wave(c4[-6:], v4[-6:])
+            if vd4h < 0.40:
+                return True, "Weis Wave 4h هابط {:.0f}%".format(vd4h*100)
+
+        # ── 5. السعر ارتفع كثيراً في 24h (Pump ثم Dump) ──
+        if n >= 20:
+            price_20h_ago = closes1h[-20] if len(closes1h) >= 20 else closes1h[0]
+            gain_20h = (price - price_20h_ago) / price_20h_ago * 100 if price_20h_ago > 0 else 0
+            if gain_20h > 30 and drop_from_peak > 5:
+                return True, "Pump +{:.0f}% ثم تصريف -{:.1f}%".format(gain_20h, drop_from_peak)
+
+        return False, ""
+
+    except (IndexError, ValueError, ZeroDivisionError):
+        return False, ""
+
+
 
 def scan_exit_signals(price_map, vol_now, changes_map):
     # type: (dict, dict, dict) -> None
