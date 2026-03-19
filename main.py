@@ -9014,6 +9014,118 @@ def sigma_label(sigma):
 
 bottom_fisher_alerted = {}  # type: dict
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📡 VOLUME SURGE DETECTOR — كاشف ارتفاع الحجم المبكر
+#   يرصد العملات التي ارتفع حجمها بشكل غير طبيعي
+#   قبل أن يرتفع سعرها = دخول مبكر
+#   مثال: ZANO حجم يرتفع 5× بينما السعر لم يتحرك بعد
+# ═══════════════════════════════════════════════════════════════════
+
+_vol_surge_baseline = {}   # {sym: avg_vol}
+_vol_surge_alerted  = {}   # {sym: ts}
+VOL_SURGE_SPIKE     = 3.0  # الحجم ارتفع 3× = غير طبيعي
+VOL_SURGE_MIN       = 50_000   # حجم أدنى 50K
+VOL_SURGE_COOLDOWN  = 7200     # ساعتان
+
+def scan_volume_surge(price_map, vol_now, changes_map):
+    # type: (dict, dict, dict) -> None
+    now = time.time()
+
+    if not all_tickers:
+        return
+
+    for t in all_tickers:
+        try:
+            sym   = t.get("symbol", "")
+            if not sym.endswith("USDT"):
+                continue
+            base = sym.replace("USDT", "")
+            if base in STABLECOINS:
+                continue
+            if any(k in sym for k in LEVERAGE_KEYWORDS):
+                continue
+
+            vol   = float(t.get("quoteVolume", 0))
+            price = float(t.get("lastPrice", 0))
+            chg   = float(t.get("priceChangePercent", 0))
+
+            if vol < VOL_SURGE_MIN or price <= 0:
+                continue
+
+            # تحديث الـ baseline
+            prev_vol = _vol_surge_baseline.get(sym, 0)
+            if prev_vol <= 0:
+                _vol_surge_baseline[sym] = vol
+                continue
+
+            # تحديث تدريجي
+            _vol_surge_baseline[sym] = prev_vol * 0.85 + vol * 0.15
+
+            # حساب نسبة الارتفاع
+            spike = vol / prev_vol if prev_vol > 0 else 1.0
+
+            # Cooldown
+            if now - _vol_surge_alerted.get(sym, 0) < VOL_SURGE_COOLDOWN:
+                continue
+            if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN:
+                continue
+
+            # الشرط الرئيسي: حجم ارتفع كثيراً لكن السعر لم يتحرك بعد
+            if spike < VOL_SURGE_SPIKE:
+                continue
+
+            # السعر لم يرتفع كثيراً بعد (< 5%) = فرصة مبكرة
+            if chg > 8.0:
+                continue
+
+            # فحص VDelta
+            stats = analyze_tps_ats(sym)
+            if not stats:
+                continue
+
+            vdelta = stats.get("vdelta", 0.5)
+            ats    = stats.get("ats", 0)
+
+            # تحديد الفئة
+            tier = get_tier_settings(vol)
+            if vdelta < tier["vdelta_min"]:
+                continue
+
+            sector = next((s for s,syms in SECTORS.items() if sym in syms), "")
+
+            msg = (
+                "📡 *VOLUME SURGE* — حجم غير طبيعي!\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💥 *{}* — حجم ارتفع {:.1f}× 🔥\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📊 VDelta: `{:.0f}%` | ATS: `{:.0f}$`\n"
+                "💰 السعر: `{}` | 24h: `{:+.1f}%`\n"
+                "📦 الحجم: `{:.0f}K USDT`\n"
+                "🏷️ القطاع: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⚡ _السعر لم يتحرك بعد — فرصة دخول مبكر_ 🎯"
+            ).format(
+                sym.replace("USDT",""), spike,
+                vdelta*100, ats,
+                fmt_price(price), chg,
+                vol/1000,
+                sector
+            )
+
+            send(msg)
+            _vol_surge_alerted[sym] = now
+            coin_alerted[sym] = now
+            whale_watch_add(sym, ats, vdelta, price)
+
+            log.info("📡 VOL_SURGE | %s | spike=%.1fx | vdelta=%.0f%% | vol=%.0fK",
+                     sym, spike, vdelta*100, vol/1000)
+
+        except (ValueError, TypeError, ZeroDivisionError):
+            continue
+
+
+
 def scan_bottom_fisher(price_map, vol_now, changes_map):
     # type: (dict, dict, dict) -> None
     global bottom_fisher_alerted
@@ -9150,7 +9262,10 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
                     score -= 10  # خصم عند تضارب
 
 
-            if score < 60 or len(signals) < 3:
+            # في DANGER نخفف لالتقاط التجميع المبكر
+            _min_score = 45 if market_state == "DANGER" else 60
+            _min_sigs  = 2  if market_state == "DANGER" else 3
+            if score < _min_score or len(signals) < _min_sigs:
                 continue
 
             price    = price_map.get(sym, closes1h[-1])
@@ -9178,12 +9293,22 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
             strength = "🔥 قوي جداً" if score >= 80 else ("⚡ جيد" if score >= 65 else "🟡 مقبول")
             sig_txt  = " | ".join(signals[:4])
 
-            if _liq_entering:
+            # فحص حيتان BTC في DANGER
+            _btc_vd_now = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+            _danger_buy = (market_state == "DANGER" and
+                          _btc_vd_now >= 0.50 and
+                          vdelta_ma >= 0.65 and
+                          _liq_entering)
 
+            if _danger_buy:
+                # DANGER + حيتان BTC يشترون + تجميع = ادخل الآن!
+                header = "🎣🐋 *BOTTOM FISHER — تجميع في القاع!* 🐋🎣"
+                action = ("✅ *ادخل الآن* — تجميع في السوق الهابط!\n"
+                         "🐋 _حيتان BTC يشترون + تجميع محلي = دخول مبكر_ 💎")
+            elif _liq_entering:
                 header = "🎣🚀 *BOTTOM FISHER — ادخل الآن!* 🚀🎣"
                 action = "✅ *ادخل الآن* — تجميع + سيولة تدخل! 💪"
             else:
-
                 header = "🎣 *BOTTOM FISHER — تجميع مكتشف!*"
                 action = "⏳ _تجميع نشط — انتظر ارتفاع ATS للدخول_ 👁️"
 
@@ -11200,6 +11325,7 @@ def run():
 
             if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
+            scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
             scan_exit_signals(price_map, vol_now, changes_map)
 
