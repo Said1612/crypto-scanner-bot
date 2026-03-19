@@ -866,6 +866,49 @@ def fmt_price(p):
     return "{:,.2f}".format(p)
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📬 SIGNAL QUEUE — نظام قائمة الإشارات
+#   بدل الإرسال المباشر، نجمع الإشارات ثم نرسل الأفضل فقط
+# ═══════════════════════════════════════════════════════════════════
+
+_signal_queue   = []   # قائمة الإشارات المعلقة
+_queue_lock     = False
+MAX_QUEUE_SIZE  = 20   # أقصى عدد في القائمة
+
+def queue_signal(sym, msg, score, sig_type="WATCH"):
+    # type: (str, str, int, str) -> None
+    global _signal_queue
+    # إذا العملة موجودة بالفعل → نحتفظ بالأعلى score فقط
+    for i, item in enumerate(_signal_queue):
+        if item["sym"] == sym:
+            if score > item["score"]:
+                _signal_queue[i] = {"sym": sym, "msg": msg,
+                                    "score": score, "type": sig_type,
+                                    "time": time.time()}
+            return
+    if len(_signal_queue) < MAX_QUEUE_SIZE:
+        _signal_queue.append({"sym": sym, "msg": msg,
+                              "score": score, "type": sig_type,
+                              "time": time.time()})
+
+def flush_signal_queue(max_send=5):
+    # type: (int) -> None
+    global _signal_queue
+    if not _signal_queue:
+        return
+    # رتب حسب Score تنازلياً
+    _signal_queue.sort(key=lambda x: -x["score"])
+    # أرسل أفضل max_send فقط
+    to_send = _signal_queue[:max_send]
+    _signal_queue = _signal_queue[max_send:]
+    for item in to_send:
+        send(item["msg"])
+        log.info("📬 QUEUE_SEND | %s | score=%d | type=%s",
+                 item["sym"], item["score"], item["type"])
+
+
+
 def send(msg, personal_only=False):
     # type: (str, bool) -> None
     """
@@ -9125,13 +9168,15 @@ def scan_volume_surge(price_map, vol_now, changes_map):
                 sector
             )
 
-            send(msg)
+            # حساب score للقائمة
+            _vs_score = int(spike * 10 + vdelta * 100)
+            queue_signal(sym, msg, _vs_score, "VOL_SURGE")
             _vol_surge_alerted[sym] = now
             coin_alerted[sym] = now
             whale_watch_add(sym, ats, vdelta, price)
 
-            log.info("📡 VOL_SURGE | %s | spike=%.1fx | vdelta=%.0f%% | vol=%.0fK",
-                     sym, spike, vdelta*100, vol/1000)
+            log.info("📡 VOL_SURGE QUEUED | %s | spike=%.1fx | score=%d",
+                     sym, spike, _vs_score)
 
         except (ValueError, TypeError, ZeroDivisionError):
             continue
@@ -9357,13 +9402,15 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
             if engine_block:
                 msg = msg + "\n" + engine_block
 
-            send(msg)
+            # إضافة للقائمة بدل الإرسال المباشر
+            _bf_score = score + int(vdelta_ma * 50)
+            queue_signal(sym, msg, _bf_score, "BOTTOM_FISHER")
             bottom_fisher_alerted[sym] = now
             coin_alerted[sym] = now
             whale_watch_add(sym, vol_now.get(sym,0)/10000, vdelta_ma, price)
 
-            log.info("🎣 BOTTOM FISHER | %s | score=%d | vdelta=%.0f%% | signals=%s",
-                     sym, score, vdelta_ma*100, sig_txt)
+            log.info("🎣 BOTTOM FISHER QUEUED | %s | score=%d",
+                     sym, _bf_score)
 
         except (IndexError, ValueError, ZeroDivisionError):
             continue
@@ -11340,6 +11387,8 @@ def run():
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
             scan_exit_signals(price_map, vol_now, changes_map)
+            # إرسال أفضل الإشارات من Queue
+            flush_signal_queue(max_send=5)
 
 
             update_pump_dump_history(price_map, vol_now)
