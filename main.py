@@ -2165,7 +2165,7 @@ def analyze_btc():
             "{icon} السوق: *{state}*\n"
             "₿ BTC: `{ch:+.2f}%` | VD:`{bvd:.0f}%`\n"
             "{btc_tps}"
-            "Ξ ETH: `{eth:+.2f}%`\n"
+            "Ξ ETH: `{eth:+.2f}%` | VD:`{evd:.0f}%`\n"
             "{eth_tps}"
             "📊 VDelta السوق: `{mvd:.0f}%`\n"
             "{hot}"
@@ -2177,6 +2177,7 @@ def analyze_btc():
                 bvd=_btc_vd_now*100,
                 btc_tps=btc_tps_line,
                 eth=eth_change_24h,
+                evd=(eth_tps_stats.get("vdelta",0.5)*100 if eth_tps_stats else 50),
                 eth_tps=eth_tps_line,
                 mvd=_mkt_vd_pct,
                 hot=_hot_line,
