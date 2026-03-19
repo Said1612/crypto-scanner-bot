@@ -1523,6 +1523,109 @@ def calc_atr_stop_loss(sym, price, interval="1h", period=14):
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📈 CVD — Cumulative Volume Delta التراكمي
+#   يتتبع الفرق التراكمي بين ضغط الشراء والبيع
+#   CVD صاعد = تجميع حقيقي مستمر
+#   CVD هابط = تصريف خفي
+# ═══════════════════════════════════════════════════════════════════
+
+_cvd_cache = {}   # {sym: [cvd_values]}
+CVD_PERIOD  = 24  # آخر 24 شمعة (1h = 24 ساعة)
+
+def calc_cvd(sym, interval="1h", period=24):
+    # type: (str, str, int) -> dict
+    """
+    CVD التراكمي — يحسب تراكم ضغط الشراء/البيع
+    يعيد: trend, slope, latest, pct_change
+    trend: rising/falling/flat
+    """
+    kd = get_klines(sym, interval, period + 3)
+    if not kd or len(kd["closes"]) < 10:
+        return {"trend": "flat", "slope": 0.0, "latest": 0.0, "pct_change": 0.0}
+
+    try:
+        closes = kd["closes"]
+        opens  = kd["opens"]
+        vols   = kd["vols"]
+        n      = len(closes)
+
+        # حساب Volume Delta لكل شمعة
+        cvd_values = []
+        cumulative = 0.0
+
+        for i in range(n):
+            vol = vols[i] if i < len(vols) else 0
+            if closes[i] > opens[i]:
+                delta = vol      # شراء
+            elif closes[i] < opens[i]:
+                delta = -vol     # بيع
+            else:
+                delta = 0.0
+
+            cumulative += delta
+            cvd_values.append(cumulative)
+
+        if len(cvd_values) < 5:
+            return {"trend": "flat", "slope": 0.0, "latest": 0.0, "pct_change": 0.0}
+
+        # آخر period قيمة
+        recent = cvd_values[-period:]
+
+        # الميل (slope) — هل CVD يرتفع أم ينزل؟
+        first_half  = sum(recent[:len(recent)//2]) / (len(recent)//2)
+        second_half = sum(recent[len(recent)//2:]) / (len(recent) - len(recent)//2)
+        slope = second_half - first_half
+
+        # نسبة التغيير
+        if abs(first_half) > 0:
+            pct_change = (second_half - first_half) / abs(first_half) * 100
+        else:
+            pct_change = 0.0
+
+        # تحديد الاتجاه
+        if slope > 0 and pct_change > 5:
+            trend = "rising"    # تجميع حقيقي
+        elif slope < 0 and pct_change < -5:
+            trend = "falling"   # تصريف خفي
+        else:
+            trend = "flat"      # محايد
+
+        return {
+            "trend":      trend,
+            "slope":      round(slope, 2),
+            "latest":     round(cvd_values[-1], 2),
+            "pct_change": round(pct_change, 1),
+        }
+
+    except (IndexError, ValueError, ZeroDivisionError):
+        return {"trend": "flat", "slope": 0.0, "latest": 0.0, "pct_change": 0.0}
+
+
+def check_cvd_filter(sym, signal_type="JOKER"):
+    # type: (str, str) -> tuple
+    """
+    فلتر CVD — يرفض الإشارات عند CVD هابط
+    يعيد: (passed, reason)
+    """
+    cvd = calc_cvd(sym, "1h", 12)
+    trend = cvd.get("trend", "flat")
+    pct   = cvd.get("pct_change", 0.0)
+
+    if signal_type == "JOKER":
+        # الجوكر يحتاج CVD صاعد أو محايد
+        if trend == "falling" and pct < -10:
+            return False, "CVD هابط {:.0f}%".format(pct)
+    elif signal_type == "BOTTOM_FISHER":
+        # Bottom Fisher يحتاج CVD صاعد
+        if trend == "falling":
+            return False, "CVD هابط — تصريف خفي"
+
+    return True, trend
+
+
+
 def calc_direction_engine(sym, interval="1h"):
     # type: (str, str) -> dict
     kd = get_klines(sym, interval, 60)
@@ -1805,6 +1908,7 @@ def build_engine_block(sym, include_levels=True):
     hmm       = calc_hmm_regime(sym, "4h")
     garch     = calc_garch_range(sym, "1d") if include_levels else {}
     murray    = calc_murray_math(sym, "1d") if include_levels else {}
+    cvd       = calc_cvd(sym, "1h", 12)
     if not direction and not hmm and not garch:
         return ""
     out = "=" * 18 + "\n"
@@ -1827,6 +1931,13 @@ def build_engine_block(sym, include_levels=True):
         out += "  دعم:`{}` مقاومة:`{}`\n".format(
             fmt_price(garch.get("support", 0)),
             fmt_price(garch.get("resistance", 0)))
+    if cvd and cvd.get("trend") != "flat":
+        _cvd_icon = "📈" if cvd["trend"] == "rising" else "📉"
+        out += "{} CVD: {} ({:+.0f}%)\n".format(
+            _cvd_icon,
+            "تجميع مستمر" if cvd["trend"] == "rising" else "تصريف خفي",
+            cvd.get("pct_change", 0))
+
     if murray and garch:
 
         garch_sup = garch.get("support", 0)
@@ -5913,6 +6024,12 @@ def scan_whale_confirmation(price_map):
             log.info("🚫 MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
             continue
 
+        # CVD التراكمي — تجميع حقيقي؟
+        _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER")
+        if not _cvd_ok:
+            log.info("🚫 CVD FILTER: %s | %s", sym, _cvd_trend)
+            continue
+
 
         price_then  = data["price_then"]
         ats_then    = data["ats_then"]
@@ -9482,6 +9599,11 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
 
             trend_ok, _ = check_trend_filter(sym, chg24)
             if not trend_ok: continue
+
+            # CVD فلتر في Bottom Fisher
+            _cvd_bf_ok, _cvd_bf = check_cvd_filter(sym, "BOTTOM_FISHER")
+            if not _cvd_bf_ok:
+                continue
 
 
             _stats = analyze_tps_ats(sym)
