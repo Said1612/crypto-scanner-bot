@@ -2138,7 +2138,12 @@ def analyze_btc():
                 except (ValueError, TypeError):
                     pass
         _total_mkt = _buy_vol_mkt + _sell_vol_mkt
-        _mkt_vd_pct = (_buy_vol_mkt / _total_mkt * 100) if _total_mkt > 0 else 50
+        _mkt_vd_raw = (_buy_vol_mkt / _total_mkt * 100) if _total_mkt > 0 else 50
+
+        # تعديل بناءً على BTC (الأهم في السوق)
+        _btc_vd_weight = btc_tps_stats.get("vdelta", 0.5) * 100 if btc_tps_stats else 50
+        # BTC وزنه 40% في الحساب النهائي
+        _mkt_vd_pct = _mkt_vd_raw * 0.60 + _btc_vd_weight * 0.40
 
         # أفضل قطاع
         _hot_line = "🔥 أفضل قطاع: *{}*\n".format(hot_sectors[0]) if hot_sectors else ""
