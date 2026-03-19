@@ -972,13 +972,13 @@ def poll_commands():
         r = requests.get(url, timeout=10)
         if r.status_code == 409:
 
-            log.warning("⚠️ getUpdates 409 — حذف Webhook تلقائياً")
+            log.warning("⚠️ getUpdates 409 - حذف Webhook تلقائياً")
             try:
                 requests.get(
                     "https://api.telegram.org/bot{}/deleteWebhook?drop_pending_updates=true".format(TELEGRAM_TOKEN),
                     timeout=10
                 )
-                log.info("✅ Webhook محذوف — إعادة المحاولة")
+                log.info("✅ Webhook محذوف - إعادة المحاولة")
             except Exception as _e:
                 log.error("❌ deleteWebhook فشل: %s", _e)
             return
@@ -1015,7 +1015,7 @@ def poll_commands():
 
                 global all_tickers
                 if not all_tickers:
-                    log.info("📤 /report: all_tickers فارغة — نجلبها الآن")
+                    log.info("📤 /report: all_tickers فارغة - نجلبها الآن")
                     try:
                         _r = safe_get(MEXC_24H)
                         if _r:
@@ -1164,7 +1164,7 @@ def send_daily_report_forced():
     # type: () -> None
     """إرسال التقرير اليومي فوراً بدون قيد الوقت — /report"""
     global daily_report_sent_date, lz_daily_sent_date, _force_daily_report
-    log.info("📤 تقرير يدوي — إعادة تعيين التاريخ")
+    log.info("📤 تقرير يدوي - إعادة تعيين التاريخ")
     daily_report_sent_date = ""   # إلغاء قيد التاريخ
     lz_daily_sent_date     = ""   # إلغاء قيد السيولة
     _force_daily_report    = True # تجاوز قيد الساعة
@@ -1208,7 +1208,7 @@ def safe_get(url, params=None, retries=3):
         except Exception as e:
             wait = 2 ** attempt  # 1s, 2s, 4s
             if attempt < retries - 1:
-                log.debug("API retry %d/%d [%s]: %s — انتظر %ds",
+                log.debug("API retry %d/%d [%s]: %s - انتظر %ds",
                           attempt + 1, retries, url.split("/")[-1], e, wait)
                 time.sleep(wait)
             else:
@@ -5270,7 +5270,7 @@ def auto_expand_sectors():
              total_added, skipped_existing, skipped_filter)
 
     if total_added == 0:
-        log.info("ℹ️ لا عملات جديدة للإضافة — القوائم مكتملة")
+        log.info("ℹ️ لا عملات جديدة للإضافة - القوائم مكتملة")
         return
 
 
@@ -7880,7 +7880,7 @@ def get_tier_settings(vol_24h):
 
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
-    log.info("🔒 scan_tps_ats V20 — VDelta filter >= 65%%")
+    log.info("🔒 scan_tps_ats V20 - VDelta filter >= 65%%")
     """
     يفحص أفضل 40 عملة بالحجم
     يبحث عن: TPS spike + ATS حيتان + VDelta قوي
@@ -9832,7 +9832,7 @@ def run_daily_liquidity_scan():
 
 
         if target_price <= daily_close:
-            log.info("⏭️ تخطي %s — الهدف أقل من الدخول", sym)
+            log.info("⏭️ تخطي %s - الهدف أقل من الدخول", sym)
             continue
 
 
@@ -10141,7 +10141,7 @@ def _send_daily_report_body(today, now_utc):
                 for s,g,e,c in loses[:3]:
                     bt_msg += "  ❌ *{}* `{}→{}` `{}%`\n".format(s,e,round(c,6),g)
             send(bt_msg)
-    log.info("📅 Daily Report — إرسال تقرير إغلاق اليوم...")
+    log.info("📅 Daily Report - إرسال تقرير إغلاق اليوم...")
 
     if not all_tickers:
         log.warning("📊 التقرير: all_tickers فارغة")
@@ -10848,7 +10848,7 @@ def redis_save(data):
         )
         ok = resp.status_code == 200
         if ok:
-            log.info("☁️ Redis saved — %d bytes", len(payload))
+            log.info("☁️ Redis saved - %d bytes", len(payload))
         else:
             log.warning("⚠️ Redis save failed: %s", resp.text[:100])
         return ok
@@ -10877,7 +10877,7 @@ def redis_load():
         if not raw:
             return {}
         data = _json.loads(raw)
-        log.info("☁️ Redis loaded — %d bytes", len(raw))
+        log.info("☁️ Redis loaded - %d bytes", len(raw))
         return data
     except Exception as e:
         log.error("❌ redis_load error: %s", e)
@@ -10930,7 +10930,7 @@ def save_state():
             json.dump(state, f)
 
         redis_save(state)
-        log.info("💾 State saved — %d gems | %d watchlist | %d BT",
+        log.info("💾 State saved - %d gems | %d watchlist | %d BT",
                  len(gem_watchlist), len(watchlist), len(backtest_signals))
     except Exception as e:
         log.error("❌ save_state error: %s", e)
@@ -10957,7 +10957,7 @@ def load_state():
 
     if not state:
         if not os.path.exists(STATE_FILE):
-            log.info("📂 لا يوجد حفظ — بداية جديدة")
+            log.info("📂 لا يوجد حفظ - بداية جديدة")
             return
         try:
             with open(STATE_FILE, "r") as f:
@@ -10973,7 +10973,7 @@ def load_state():
     try:
         saved_at   = state.get("saved_at", 0)
         age_hours  = (time.time() - saved_at) / 3600
-        log.info("📂 تحميل State — عمره: %.1f ساعة", age_hours)
+        log.info("📂 تحميل State - عمره: %.1f ساعة", age_hours)
 
         bottom_price_history.update(state.get("bottom_price_history", {}))
         bottom_vol_history.update(state.get("bottom_vol_history", {}))
@@ -11723,7 +11723,7 @@ def run():
 
             if now - last_expand      >= EXPAND_EVERY:
 
-                log.info("🔄 تحديث يومي — Auto Expand Sectors")
+                log.info("🔄 تحديث يومي - Auto Expand Sectors")
                 auto_expand_sectors()
                 last_expand = now
             if now - last_stale       >= STALE_EVERY:
@@ -11870,4 +11870,4 @@ def run():
 
                 pre_scored.sort(key=lambda x: -x[3])
 
-                log.info("🔍 Deep Scan — %d 
+                log.info("Deep Scan: %d coin
