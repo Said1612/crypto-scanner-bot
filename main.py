@@ -1391,6 +1391,138 @@ def calc_vdelta_ma(sym, period=10, interval="15m"):
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📊 TECHNICAL INDICATORS — مؤشرات تقنية متقدمة
+#   1. Wick Filter — فلتر ذيل الشمعة
+#   2. MACD Histogram — زخم الحركة
+#   3. ATR — متوسط المدى الحقيقي للـ Stop Loss
+# ═══════════════════════════════════════════════════════════════════
+
+def calc_wick_filter(sym, interval="15m"):
+    # type: (str, str) -> tuple
+    """
+    فلتر ذيل الشمعة — يكشف التصريف
+    يعيد: (passed, reason)
+    True = شمعة نظيفة | False = ذيل تصريف
+    """
+    kd = get_klines(sym, interval, 5)
+    if not kd or len(kd["closes"]) < 3:
+        return True, ""
+    try:
+        closes = kd["closes"]
+        opens  = kd["opens"]
+        highs  = kd["highs"]
+        lows   = kd["lows"]
+
+        # آخر 3 شموع
+        for i in range(-3, 0):
+            body   = abs(closes[i] - opens[i])
+            high   = highs[i]
+            low    = lows[i]
+            close  = closes[i]
+            open_  = opens[i]
+
+            if body <= 0:
+                continue
+
+            # ذيل علوي = high - max(close, open)
+            upper_wick = high - max(close, open_)
+            # ذيل سفلي = min(close, open) - low
+            lower_wick = min(close, open_) - low
+
+            # إذا الذيل العلوي > 50% من الجسم = تصريف (Rejection)
+            if upper_wick > body * 1.5:
+                return False, "ذيل تصريف علوي {:.0f}%".format(
+                    upper_wick / body * 100)
+
+        return True, ""
+    except (IndexError, ValueError, ZeroDivisionError):
+        return True, ""
+
+
+def calc_macd_histogram(sym, interval="1h"):
+    # type: (str, str) -> float
+    """
+    MACD Histogram — زخم الحركة
+    양수 = زخم صاعد | سالب = زخم هابط
+    """
+    kd = get_klines(sym, interval, 35)
+    if not kd or len(kd["closes"]) < 26:
+        return 0.0
+    try:
+        closes = kd["closes"]
+        n = len(closes)
+
+        # EMA حساب
+        def ema(data, period):
+            k = 2.0 / (period + 1)
+            result = [data[0]]
+            for i in range(1, len(data)):
+                result.append(data[i] * k + result[-1] * (1 - k))
+            return result
+
+        ema12 = ema(closes, 12)
+        ema26 = ema(closes, 26)
+        macd_line = [ema12[i] - ema26[i] for i in range(n)]
+        signal    = ema(macd_line, 9)
+        histogram = [macd_line[i] - signal[i] for i in range(n)]
+
+        # هل الهيستوجرام يرتفع؟
+        if len(histogram) >= 3:
+            return histogram[-1] - histogram[-2]  #양수 = صاعد
+        return 0.0
+    except (IndexError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def calc_atr_stop_loss(sym, price, interval="1h", period=14):
+    # type: (str, float, str, int) -> float
+    """
+    ATR Stop Loss — وقف خسارة ديناميكي
+    يعيد: سعر Stop Loss المناسب لتذبذب العملة
+    """
+    kd = get_klines(sym, interval, period + 5)
+    if not kd or len(kd["closes"]) < period:
+        return price * 0.95  # افتراضي -5%
+    try:
+        closes = kd["closes"]
+        highs  = kd["highs"]
+        lows   = kd["lows"]
+
+        # حساب True Range
+        tr_values = []
+        for i in range(1, len(closes)):
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i-1]),
+                abs(lows[i] - closes[i-1])
+            )
+            tr_values.append(tr)
+
+        if not tr_values:
+            return price * 0.95
+
+        # ATR = متوسط آخر period شمعة
+        atr = sum(tr_values[-period:]) / min(period, len(tr_values))
+
+        # Stop Loss = السعر - (2 × ATR)
+        sl = price - (2.0 * atr)
+
+        # الحد الأدنى -5% والحد الأقصى -3%
+        sl_pct = (sl - price) / price * 100
+        if sl_pct < -5.0:
+            sl = price * 0.95
+        elif sl_pct > -3.0:
+            sl = price * 0.97
+
+        return round(sl, 8)
+
+    except (IndexError, ValueError, ZeroDivisionError):
+        return price * 0.95
+
+
+
 def calc_direction_engine(sym, interval="1h"):
     # type: (str, str) -> dict
     kd = get_klines(sym, interval, 60)
@@ -1663,7 +1795,6 @@ def format_murray_block(sym):
 
     out  = "📐 *Murray Math* منطقة `{}`\n".format(zone)
     out += "  {} | دعم:`{}` مقاومة:`{}`\n".format(zname, sup, res)
-    out += "  🛡️ Stop Loss المقترح: `{}`\n".format(sl)
     return out
 
 
@@ -5764,10 +5895,22 @@ def scan_whale_confirmation(price_map):
         if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale or _small_cap):
             continue
 
-        # فلتر التصريف — هل السيولة شرائية أم بيعية؟
+        # فلتر التصريف
         _is_dist, _dist_reason = detect_distribution(sym, price, vdelta, ats)
         if _is_dist:
-            log.info("🚫 DISTRIBUTION DETECTED: %s | %s", sym, _dist_reason)
+            log.info("🚫 DISTRIBUTION: %s | %s", sym, _dist_reason)
+            continue
+
+        # فلتر Wick — ذيل التصريف
+        _wick_ok, _wick_reason = calc_wick_filter(sym, "15m")
+        if not _wick_ok:
+            log.info("🚫 WICK FILTER: %s | %s", sym, _wick_reason)
+            continue
+
+        # MACD Histogram — زخم صاعد؟
+        _macd_hist = calc_macd_histogram(sym, "1h")
+        if _macd_hist < 0:
+            log.info("🚫 MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
             continue
 
 
@@ -5850,7 +5993,14 @@ def scan_whale_confirmation(price_map):
 
 
         # الأهداف الذكية عند المقاومات
-        _smart = calc_smart_targets(sym, price)
+        # Stop Loss ديناميكي من ATR
+        _atr_sl  = calc_atr_stop_loss(sym, price, "1h")
+        _smart   = calc_smart_targets(sym, price)
+        # نستخدم ATR إذا كان أفضل من Murray
+        if _atr_sl > _smart.get("sl", 0) and _atr_sl < price:
+            _smart["sl"]    = _atr_sl
+            _smart["sl_pct"] = (_atr_sl - price) / price * 100
+
         _tblock = "━━━━━━━━━━━━━━━━━━\n🎯 *الأهداف عند المقاومات:*\n"
         _nums = ["1","2","3"]
         for _ii, _tgt in enumerate(_smart.get("targets", [])[:3]):
