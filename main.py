@@ -1626,6 +1626,42 @@ def check_cvd_filter(sym, signal_type="JOKER"):
 
 
 
+
+def calc_ob_imbalance(sym, min_vol=500_000):
+    # type: (str, float) -> dict
+    """
+    OB Imbalance — نسبة الاختلال في دفتر الطلبات
+    Bids > Asks = دعم مخفي = إشارة شراء
+    يعيد: ratio, signal, bids, asks
+    """
+    ob = get_order_book(sym)
+    if not ob:
+        return {"ratio": 1.0, "signal": "neutral", "bids": 0, "asks": 0}
+
+    bids = ob.get("bid", 0)
+    asks = ob.get("ask", 0)
+    ratio = ob.get("imb", 1.0)
+
+    if ratio >= 2.0:
+        signal = "strong_buy"    # دعم قوي جداً
+    elif ratio >= 1.5:
+        signal = "buy"           # دعم معتدل
+    elif ratio <= 0.5:
+        signal = "strong_sell"   # ضغط بيع قوي
+    elif ratio <= 0.7:
+        signal = "sell"          # ضغط بيع معتدل
+    else:
+        signal = "neutral"
+
+    return {
+        "ratio":  round(ratio, 2),
+        "signal": signal,
+        "bids":   round(bids, 0),
+        "asks":   round(asks, 0),
+    }
+
+
+
 def calc_direction_engine(sym, interval="1h"):
     # type: (str, str) -> dict
     kd = get_klines(sym, interval, 60)
@@ -1937,6 +1973,14 @@ def build_engine_block(sym, include_levels=True):
             _cvd_icon,
             "تجميع مستمر" if cvd["trend"] == "rising" else "تصريف خفي",
             cvd.get("pct_change", 0))
+
+    # OB Imbalance
+    _ob_data = calc_ob_imbalance(sym)
+    _ob_r = _ob_data.get("ratio", 1.0)
+    if _ob_r >= 1.5:
+        out += "📊 OB: Bids/Asks `{:.1f}:1` — دعم مخفي 💪\n".format(_ob_r)
+    elif _ob_r <= 0.7:
+        out += "📊 OB: Bids/Asks `{:.1f}:1` — ضغط بيع ⚠️\n".format(_ob_r)
 
     if murray and garch:
 
@@ -6028,6 +6072,14 @@ def scan_whale_confirmation(price_map):
         _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER")
         if not _cvd_ok:
             log.info("🚫 CVD FILTER: %s | %s", sym, _cvd_trend)
+            continue
+
+        # OB Imbalance — دعم مخفي؟
+        _ob = calc_ob_imbalance(sym)
+        _ob_ratio  = _ob.get("ratio", 1.0)
+        _ob_signal = _ob.get("signal", "neutral")
+        if _ob_signal == "strong_sell":
+            log.info("🚫 OB IMBALANCE: %s | ratio=%.2f", sym, _ob_ratio)
             continue
 
 
