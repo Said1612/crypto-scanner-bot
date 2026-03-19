@@ -85,6 +85,7 @@ TPS_LIMIT      = 100     # آخر 100 صفقة
 EXTRA_COINS = [
     # ── Meme coins ────────────────────────────
     "FLOKIUSDT", "PEPEUSDT", "WIFUSDT", "BOMEUSDT", "MEWUSDT",
+"PUNCHUSDT",
     "PEOPLEUSDT", "1000SHIBUSDT", "BANANAUSDT", "NEIROUSDT",
     "SUNDOGUSDT", "MOODENGUSDT", "FWOGUSDT", "GORKYUSDT",
 
@@ -427,6 +428,7 @@ SECTOR_KEYWORDS = {
         "MASKSOL","MASKSOLUSDT",
         "BANANA","PENG","NEIRO","SUNDOG","MOODENG","FWOG","GORK","MICHI","MAGA",
         "MANEKI","BOOMER","MEW","RETARDIO","POPCAT","GMEOW","INUVERSE","PUPS",
+        "PUNCHUSDT",
     ],
     "Oracle": [
         "LINK","BAND","UMA","DIA","PYTH","STORK","SXT","TELL","CHR",
