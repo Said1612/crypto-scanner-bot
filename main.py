@@ -11444,6 +11444,97 @@ def add_to_exit_watchlist(sym, entry_price, targets=None):
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🌐 SMART MARKET SCANNER — مسح ذكي لكل MEXC
+#   بدل الاعتماد على قائمة محددة
+#   يبني candidates من كل العملات مرتبةً حسب:
+#   1. تغير الحجم % (الأهم)
+#   2. VDelta
+#   3. التغيير السعري
+# ═══════════════════════════════════════════════════════════════════
+
+_smart_scan_last  = 0.0
+_smart_scan_every = 300   # كل 5 دقائق
+
+def smart_market_scan():
+    # type: () -> None
+    global candidates, _smart_scan_last
+    now = time.time()
+    if now - _smart_scan_last < _smart_scan_every:
+        return
+    _smart_scan_last = now
+
+    if not all_tickers:
+        return
+
+    scored = []
+
+    for t in all_tickers:
+        try:
+            sym   = t.get("symbol", "")
+            if not sym.endswith("USDT"):
+                continue
+            base = sym.replace("USDT", "")
+            if base in STABLECOINS:
+                continue
+            if any(k in sym for k in LEVERAGE_KEYWORDS):
+                continue
+
+            vol   = float(t.get("quoteVolume", 0))
+            price = float(t.get("lastPrice", 0))
+            chg   = float(t.get("priceChangePercent", 0))
+
+            # تجاهل العملات بحجم ضعيف جداً
+            if vol < 10_000 or price <= 0:
+                continue
+
+            # تجاهل Pump واضح جداً
+            if chg > 200:
+                continue
+
+            # حساب تغير الحجم
+            prev_vol = _vol_surge_baseline.get(sym, vol)
+            vol_change_pct = (vol - prev_vol) / prev_vol * 100 if prev_vol > 0 else 0
+
+            # Score = مزيج من الحجم والتغيير
+            score = (
+                min(vol_change_pct, 500) * 0.4 +   # تغير الحجم (الأهم)
+                max(chg, 0) * 0.3 +                  # التغيير السعري الإيجابي
+                min(vol / 1_000_000, 10) * 0.3       # الحجم المطلق
+            )
+
+            if score > 0:
+                scored.append((sym, score, vol, chg))
+
+        except (ValueError, TypeError):
+            continue
+
+    if not scored:
+        return
+
+    # رتب تنازلياً
+    scored.sort(key=lambda x: -x[1])
+
+    # أفضل 100 عملة تدخل candidates
+    new_candidates = [s for s, _, _, _ in scored[:100]]
+
+    # أضف EXTRA_COINS والقطاعات دائماً
+    static = list(set(
+        EXTRA_COINS +
+        [sym for syms in SECTORS.values() for sym in syms]
+    ))
+
+    # دمج الكل
+    all_candidates = list(set(new_candidates + static))
+    candidates[:] = all_candidates
+
+    log.info("🌐 Smart Scan | %d عملة في candidates | top: %s",
+             len(candidates),
+             [s.replace("USDT","") for s,_,_,_ in scored[:5]])
+
+
+
 def run():
     # type: () -> None
     global all_tickers   # ✅ إصلاح V11: تأكيد أن all_tickers global
@@ -11708,6 +11799,8 @@ def run():
 
             if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
+            # مسح ذكي لكل MEXC — يحدث candidates
+            smart_market_scan()
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
             scan_exit_signals(price_map, vol_now, changes_map)
