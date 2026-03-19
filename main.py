@@ -4398,7 +4398,7 @@ def scan_ath_distance(price_map=None):  # معطّل
                               "since": now, "score": gem["score"]}
 
         import datetime as _dt
-        _today = _dt.datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        _today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         if daily_gem_count["date"] != _today:
             daily_gem_count["date"] = _today; daily_gem_count["count"] = 0
         daily_gem_count["count"] += 1
@@ -11870,4 +11870,4 @@ def run():
 
                 pre_scored.sort(key=lambda x: -x[3])
 
-                log.info("🔍 Deep Scan —
+                log.info("🔍 Deep Scan — %d 
