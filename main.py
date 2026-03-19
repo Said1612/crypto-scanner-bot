@@ -28,7 +28,7 @@ import time
 import json
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple, Any, Set
 
 # ═══════════════════════════════════════════════
@@ -11870,32 +11870,4 @@ def run():
 
                 pre_scored.sort(key=lambda x: -x[3])
 
-                log.info("🔍 Deep Scan — %d عملة (أفضل 20 تأخذ OrderBook)...",
-                         len(pre_scored))
-
-                scanned = 0
-                for rank, (sym, price, change, _) in enumerate(pre_scored):
-
-                    fetch_ob = (rank < 20)
-                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
-                    scanned += 1
-                    if scanned % 10 == 0:
-                        time.sleep(0.5)
-
-                last_deep_scan = now
-                log.info("✅ Deep Scan انتهى | %d عملة", scanned)
-
-            cycle += 1
-
-            time.sleep(CHECK_INTERVAL)
-
-        except KeyboardInterrupt:
-            send("⛔ *MAFIO-BOT* — تم الإيقاف")
-            break
-        except Exception as e:
-            log.error("خطأ: %s", e, exc_info=True)
-            time.sleep(10)
-
-
-if __name__ == "__main__":
-    run()
+                log.info("🔍 Deep Scan —
