@@ -1591,7 +1591,8 @@ def calc_smart_targets(sym, price):
     return {
         "targets": sorted(targets, key=lambda x: x["price"])[:3],
         "sl":      round(sl, 8),
-        "sl_pct":  round(sl_pct, 1),
+        "sl_pct":  round(max(sl_pct, -5.0), 1),
+        "sl":      round(max(sl, price * 0.95), 8),
     }
 
 def format_murray_block(sym):
@@ -5812,10 +5813,10 @@ def scan_whale_confirmation(price_map):
                 fmt_price(price*1.10), fmt_price(price*1.20))
         _sl_val = _smart.get("sl", price*0.96)
         _sl_pct = (_sl_val - price) / price * 100 if price > 0 else -4
-        # Stop Loss لا يتجاوز -6% من السعر
-        if _sl_pct < -6.0:
-            _sl_val = price * 0.94
-            _sl_pct = -6.0
+        # Stop Loss لا يتجاوز -5% من السعر
+        if _sl_pct < -5.0:
+            _sl_val = price * 0.95
+            _sl_pct = -5.0
         _tblock += "🛡️ *Stop Loss:* `{}` ({:.1f}%)\n".format(
             fmt_price(_sl_val), _sl_pct)
         msg = msg + "\n" + _tblock
