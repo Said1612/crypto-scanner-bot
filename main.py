@@ -11166,7 +11166,7 @@ def run():
     last_sr_alert   = 0.0
 
     send(
-        "💀 💀 *MAFIO-BOT* 💀\n"
+        "💀 *MAFIO-BOT* 💀\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
