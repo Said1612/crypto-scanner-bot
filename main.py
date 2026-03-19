@@ -2112,8 +2112,8 @@ def analyze_btc():
                 "📊 نشاط طبيعي"
             )
             return (
-                "  TPS:`{:.1f}` ATS:`{:.0f}$` {} VD:`{:.0f}%`\n"
-                "  ↳ {}\n".format(_tps, _ats, _bt, _vd*100, _verdict)
+                "  TPS:`{:.1f}` ATS:`{:.0f}$` {}\n"
+                "  ↳ {}\n".format(_tps, _ats, _bt, _verdict)
             )
 
         btc_tps_line = _tps_line(btc_tps_stats, "BTC")
