@@ -5671,6 +5671,12 @@ def scan_whale_confirmation(price_map):
     now     = time.time()
     to_del  = []
 
+    # فلتر السوق — لا جوكر في DANGER مع حيتان يبيعون
+    _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+    if market_state == "DANGER" and _btc_vd < 0.50:
+        log.info("🚫 JOKER BLOCKED: السوق DANGER + حيتان يبيعون VD=%.0f%%", _btc_vd*100)
+        return
+
     for sym, data in list(whale_watchlist.items()):
 
         if now - data["time"] > WHALE_WATCH_TTL:
