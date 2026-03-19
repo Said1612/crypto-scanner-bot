@@ -9075,9 +9075,21 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             if spike < VOL_SURGE_SPIKE:
                 continue
 
-            # السعر لم يرتفع كثيراً بعد (< 5%) = فرصة مبكرة
+            # السعر لم يرتفع كثيراً بعد (< 8%) = فرصة مبكرة
             if chg > 8.0:
                 continue
+
+            # فحص القاع الأسبوعي — نريد السعر قريباً من القاع
+            kd_check = get_klines(sym, "1h", 168)  # آخر 7 أيام
+            if kd_check and len(kd_check["lows"]) >= 24:
+                low_7d  = min(kd_check["lows"])
+                high_7d = max(kd_check["highs"]) if kd_check.get("highs") else price
+                if low_7d > 0:
+                    rise_from_low = (price - low_7d) / low_7d * 100
+                    # السعر يجب أن يكون قريباً من القاع (< 40% فوقه)
+                    if rise_from_low > 40.0:
+                        log.info("🚫 VOL_SURGE SKIP: %s بعيد عن القاع +%.0f%%", sym, rise_from_low)
+                        continue
 
             # فحص VDelta
             stats = analyze_tps_ats(sym)
@@ -9092,7 +9104,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             if vdelta < tier["vdelta_min"]:
                 continue
 
-            sector = next((s for s,syms in SECTORS.items() if sym in syms), "")
+            sector = next((s for s,syms in SECTORS.items() if sym in syms), "غير محدد")
 
             msg = (
                 "📡 *VOLUME SURGE* — حجم غير طبيعي!\n"
