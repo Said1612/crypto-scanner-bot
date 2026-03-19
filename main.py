@@ -2080,6 +2080,16 @@ def analyze_btc():
         if time.time() - last_market_report < MARKET_REPORT_EVERY:
             log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
             return
+
+        # DANGER + نشاط طبيعي = CAUTION
+        if market_state == "DANGER":
+            _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+            _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
+            if 0.40 <= _btc_vd <= 0.65 and _btc_ats < 2000:
+                market_state = "CAUTION"
+                log.info("📊 DANGER→CAUTION نشاط طبيعي VD=%.0f%% ATS=%.0f$",
+                         _btc_vd*100, _btc_ats)
+
         last_market_report = time.time()
         icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}
         notes = {
@@ -2109,28 +2119,61 @@ def analyze_btc():
         btc_tps_line = _tps_line(btc_tps_stats, "BTC")
         eth_tps_line = _tps_line(eth_tps_stats, "ETH")
 
+        # VDelta السوق العام — مرجح بالحجم
+        _buy_vol_mkt  = 0.0
+        _sell_vol_mkt = 0.0
+        _mkt_n        = 0
+        if all_tickers:
+            for _t in all_tickers:
+                try:
+                    _vol = float(_t.get("quoteVolume", 0))
+                    _chg = float(_t.get("priceChangePercent", 0))
+                    if _vol < 10000:
+                        continue
+                    if _chg > 0:
+                        _buy_vol_mkt  += _vol
+                    else:
+                        _sell_vol_mkt += _vol
+                    _mkt_n += 1
+                except (ValueError, TypeError):
+                    pass
+        _total_mkt = _buy_vol_mkt + _sell_vol_mkt
+        _mkt_vd_pct = (_buy_vol_mkt / _total_mkt * 100) if _total_mkt > 0 else 50
+
+        # أفضل قطاع
+        _hot_line = "🔥 أفضل قطاع: *{}*\n".format(hot_sectors[0]) if hot_sectors else ""
+
+        # التوصية
+        _btc_vd_now = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+        if market_state == "SAFE":
+            _rec = "✅ *ادخل* — السوق مناسب"
+        elif market_state == "CAUTION":
+            _rec = "🟡 *انتظر* — حيتان يشترون" if _btc_vd_now >= 0.65 else "🟡 *انتظر* — السوق غير مستقر"
+        else:
+            _rec = "⚠️ *انتظر* — حيتان يشترون لكن السوق هابط" if _btc_vd_now >= 0.65 else "🔴 *ابتعد* — ضغط بيع قوي"
+
         send(
             "📊 *تقرير السوق*\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "{icon} السوق: *{state}*\n"
-            "₿ BTC 24h: `{ch:+.2f}%`\n"
-            "{h4_txt}"
-            "{h1_txt}"
+            "₿ BTC: `{ch:+.2f}%` | VD:`{bvd:.0f}%`\n"
             "{btc_tps}"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "Ξ ETH 24h: `{eth:+.2f}%`\n"
+            "Ξ ETH: `{eth:+.2f}%`\n"
             "{eth_tps}"
+            "📊 VDelta السوق: `{mvd:.0f}%`\n"
+            "{hot}"
             "━━━━━━━━━━━━━━━━━━\n"
-            "_{note}_\n"
-            "📡 _قوة الإشارة: {confirm}/3_".format(
+            "{rec}\n"
+            "📡 قوة الإشارة: {confirm}/3".format(
                 icon=icons[market_state], state=market_state,
                 ch=btc_change_24h,
-                h4_txt="₿ BTC 4h:  `{:+.2f}%`\n".format(btc_trend_4h) if abs(btc_trend_4h) >= 0.05 else "",
-                h1_txt="₿ BTC 1h:  `{:+.2f}%`\n".format(btc_trend_1h) if abs(btc_trend_1h) >= 0.05 else "",
+                bvd=_btc_vd_now*100,
                 btc_tps=btc_tps_line,
                 eth=eth_change_24h,
                 eth_tps=eth_tps_line,
-                note=notes[market_state],
+                mvd=_mkt_vd_pct,
+                hot=_hot_line,
+                rec=_rec,
                 confirm=BTC_CONFIRM_COUNT,
             )
         )
@@ -9892,10 +9935,10 @@ def _send_daily_report_body(today, now_utc):
         buy_vol=("{:.2f}B".format(_buy_vol/1_000_000_000) if _buy_vol>=1_000_000_000 else "{:.0f}M".format(_buy_vol/1_000_000)),
         sell_vol=("{:.2f}B".format(_sell_vol/1_000_000_000) if _sell_vol>=1_000_000_000 else "{:.0f}M".format(_sell_vol/1_000_000)),
         arrow=vol_arrow,
-        vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "اول يوم 📊"),
+        vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة 📊"),
         
         total_vol=("{:.2f}B".format(_total_vol/1_000_000_000) if _total_vol>=1_000_000_000 else "{:.0f}M".format(_total_vol/1_000_000)),
-        vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "أول يوم"),
+        vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة"),
 
         flow=flow_sum,
         action=whale_action,
