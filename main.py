@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO BOT SIGNAL V20 — UNIFIED ENGINE            ║
+║           MAFIO-BOT — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
 ║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -1096,7 +1096,7 @@ def poll_commands():
 
             elif text_lower in ("/help", "/مساعدة"):
                 send(
-                    "🤖 *MAFIO BOT — الأوامر:*\n"
+                    "🤖 *MAFIO-BOT — الأوامر:*\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     "📊 /status      — حالة البوت\n"
                     "₿ /btc         — سعر BTC والاتجاه\n"
@@ -3216,7 +3216,7 @@ def can_send_signal():
     # type: () -> bool
     """هل يمكن إرسال إشارة اليوم؟ الحد الأقصى 10"""
     global daily_signals
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
     if daily_signals["date"] != today:
         daily_signals = {"date": today, "count": 0}
     return daily_signals["count"] < MAX_DAILY_SIGNALS
@@ -3226,7 +3226,7 @@ def register_signal():
     # type: () -> None
     """تسجيل إشارة جديدة في العداد اليومي"""
     global daily_signals
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
     if daily_signals["date"] != today:
         daily_signals = {"date": today, "count": 0}
     daily_signals["count"] += 1
@@ -4069,7 +4069,7 @@ def scan_ath_distance(price_map=None):  # معطّل
                               "since": now, "score": gem["score"]}
 
         import datetime as _dt
-        _today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        _today = _dt.datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         if daily_gem_count["date"] != _today:
             daily_gem_count["date"] = _today; daily_gem_count["count"] = 0
         daily_gem_count["count"] += 1
@@ -8755,7 +8755,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
     mkt_icon = {"SAFE":"🟢","CAUTION":"🟡","DANGER":"🚨"}.get(market_state,"⚪")
 
     send(
-        "👑 *MAFIO BOT V14*\n"
+        "👑 *MAFIO-BOT*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *{sym}*\n"
         "{label} | {stype}\n"
@@ -9383,7 +9383,7 @@ def run_daily_liquidity_scan():
     coin_alerted      = {}
     coin_whale_done   = {}
 
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     today   = now_utc.strftime("%Y-%m-%d")
 
 
@@ -9713,7 +9713,7 @@ def send_daily_report(force=False):
     # type: (bool) -> None
     global daily_report_sent_date, daily_market_vol_history
 
-    now_utc  = datetime.utcnow()
+    now_utc  = datetime.now(timezone.utc).replace(tzinfo=None)
     today    = now_utc.strftime("%Y-%m-%d")
 
 
@@ -10185,7 +10185,7 @@ def _send_daily_report_body(today, now_utc):
 def send_breakout_report():
     global market_activity_history, breakout_report_sent
     if not all_tickers: return
-    today = datetime.utcnow().strftime('%Y-%m-%d')
+    today = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d')
     if breakout_report_sent.get('date') == today: return
     ALPHA_MIN = 10
     STABLES = {'FDUSD','USDC','BUSD','DAI','TUSD','BFUSD','USDE','CRVUSD','USDD','XUSD'}
@@ -11107,7 +11107,7 @@ def run():
     global last_sr_alert                     # 🌊 Sector Rotation
     global perf_signals, perf_id_counter     # 📊 Performance Tracker
 
-    log.info("🚀 MAFIO BOT V20 يبدأ...")
+    log.info("🚀 MAFIO-BOT يبدأ...")
 
 
     try:
@@ -11166,7 +11166,7 @@ def run():
     last_sr_alert   = 0.0
 
     send(
-        "🤖 *MAFIO BOT SIGNAL V20* ✅ v3.18 🔥\n"
+        "💀 💀 *MAFIO-BOT* 💀\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ Anti Rate-Limit (~8 req/min)\n"
         "✅ Smart Cache (15m/1h/4h)\n"
@@ -11424,7 +11424,7 @@ def run():
             time.sleep(CHECK_INTERVAL)
 
         except KeyboardInterrupt:
-            send("⛔ *MAFIO BOT V17* — تم الإيقاف")
+            send("⛔ *MAFIO-BOT* — تم الإيقاف")
             break
         except Exception as e:
             log.error("خطأ: %s", e, exc_info=True)
