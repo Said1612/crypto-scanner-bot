@@ -2538,7 +2538,7 @@ def analyze_btc():
                 rec=_rec,
                 confirm=(
                     3 if market_state == "SAFE" else
-                    2 if (btc_tps_stats or {}).get("vdelta",0) >= 0.65 else
+                    2 if market_state == "CAUTION" and (btc_tps_stats or {}).get("vdelta",0) >= 0.65 else
                     1
                 ),
             )
@@ -11463,8 +11463,9 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
     icon = "🚨" if urgent else "⚠️"
     action = "🔴 *اخرج الآن فوراً!*" if urgent else "🟡 *فكر في جني الأرباح*"
 
+    title = "خروج سيولة!" if urgent else "تحذير سيولة"
     msg = (
-        "{icon} *{'خروج سيولة!' if urgent else 'تحذير سيولة'}*\n"
+        "{icon} *{title}*\\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💥 *{sym}* — {reason}\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -11474,6 +11475,7 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
         "{action}"
     ).format(
         icon=icon,
+        title=title,
         sym=sym.replace("USDT", ""),
         reason=exit_reason,
         price=fmt_price(current_price),
