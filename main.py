@@ -1028,7 +1028,7 @@ def poll_commands():
                 lz_daily_sent_date     = ""
                 send_daily_report(force=True)
             elif text_lower in ("/status", "/حالة"):
-                send("\u2705 البوت يعمل | عملات: " + str(len(candidates)) +
+                send("\u2705 البوت يعمل | " + str(len(candidates)) + " عملة تحت المراقبة" +
                      " | جواهر: " + str(len(gem_watchlist)))
             elif text_lower in ("/watchlist", "/مراقبة"):
                 if not watchlist:
@@ -9415,6 +9415,7 @@ bottom_fisher_alerted = {}  # type: dict
 _vol_surge_baseline = {}   # {sym: avg_vol}
 _vol_surge_alerted  = {}   # {sym: ts}
 VOL_SURGE_SPIKE     = 3.0
+VOL_SURGE_ATS_MIN   = 200
 VOL_SURGE_MIN       = 50_000
 VOL_SURGE_COOLDOWN  = 7200
 
@@ -9488,6 +9489,8 @@ def scan_volume_surge(price_map, vol_now, changes_map):
 
             vdelta = stats.get("vdelta", 0.5)
             ats    = stats.get("ats", 0)
+            if ats < VOL_SURGE_ATS_MIN:
+                continue
 
 
             tier = get_tier_settings(vol)
