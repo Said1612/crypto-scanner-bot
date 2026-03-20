@@ -11438,9 +11438,12 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
     urgent = False
 
 
-    if vdelta < 0.35:
-        exit_reason = "VDelta انهار {:.0f}%".format(vdelta * 100)
+    if vdelta < 0.35 and ats >= 500:
+        exit_reason = "VDelta انهار {:.0f}% + حيتان يبيعون".format(vdelta * 100)
         urgent = True
+    elif vdelta < 0.35:
+        exit_reason = "VDelta انهار {:.0f}%".format(vdelta * 100)
+        urgent = False
 
 
     elif ats >= 2000 and vdelta < 0.40:
@@ -11453,7 +11456,7 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
         urgent = True
 
 
-    elif vdelta < 0.45 and pnl > 2.0:
+    elif vdelta < 0.50 and pnl > 3.0:
         exit_reason = "VDelta يضعف {:.0f}% — احمِ أرباحك".format(vdelta * 100)
         urgent = False
 
@@ -11465,7 +11468,7 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
 
     title = "خروج سيولة!" if urgent else "تحذير سيولة"
     msg = (
-        "{icon} *{title}*\\n"
+        "{icon} *{title}*\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💥 *{sym}* — {reason}\n"
         "━━━━━━━━━━━━━━━━━━\n"
