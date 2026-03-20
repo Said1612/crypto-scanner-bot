@@ -6045,6 +6045,13 @@ def scan_whale_confirmation(price_map):
             to_del.append(sym)
             continue
 
+        # تجاهل العملات الجديدة اقل من 3 أيام
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+            continue
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
 
         if now - whale_confirmed.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
@@ -9411,6 +9418,8 @@ bottom_fisher_alerted = {}  # type: dict
 
 
 _vol_surge_baseline = {}   # {sym: avg_vol}
+_coin_first_seen    = {}   # {sym: timestamp} اول مرة يراها البوت
+NEW_COIN_MIN_DAYS   = 3    # تجاهل العملات الجديدة اقل من 3 أيام
 _vol_surge_alerted  = {}   # {sym: ts}
 VOL_SURGE_SPIKE     = 3.0
 VOL_SURGE_ATS_MIN   = 200
@@ -9440,6 +9449,16 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             chg   = float(t.get("priceChangePercent", 0))
 
             if vol < VOL_SURGE_MIN or price <= 0:
+                continue
+
+            # تتبع اول مرة نرى العملة
+            if sym not in _coin_first_seen:
+                _coin_first_seen[sym] = now
+                continue
+
+            # تجاهل العملات الجديدة اقل من 3 أيام
+            days_known = (now - _coin_first_seen[sym]) / 86400
+            if days_known < NEW_COIN_MIN_DAYS:
                 continue
 
 
@@ -11429,7 +11448,7 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
     global exit_alerted
 
     now = time.time()
-    if now - exit_alerted.get(sym, 0) < 1800:
+    if now - exit_alerted.get(sym, 0) < 7200:
         return False
 
     pnl = (current_price - entry_price) / entry_price * 100 if entry_price > 0 else 0
@@ -11456,7 +11475,7 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
         urgent = True
 
 
-    elif vdelta < 0.50 and pnl > 3.0:
+    elif vdelta < 0.50 and pnl > 3.0 and ats >= 200:
         exit_reason = "VDelta يضعف {:.0f}% — احمِ أرباحك".format(vdelta * 100)
         urgent = False
 
