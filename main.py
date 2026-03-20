@@ -2382,23 +2382,25 @@ def analyze_btc():
     _mkt_vd_w = _mkt_vd * 0.60 + _btc_vd * 0.40
 
     if _crash_4h or btc_trend_1h <= -2.0:
+        # انهيار سريع = DANGER دائماً بغض النظر عن VDelta
         suggested = "DANGER"
-    elif btc_signal <= danger_enter and _mkt_vd_w < 0.45:
-        suggested = "DANGER"
-    elif btc_signal <= danger_enter and _btc_vd >= 0.65 and _btc_ats >= 2000:
+    elif _mkt_vd_w >= 0.60:
+        # VDelta السوق قوي = SAFE حتى لو BTC ينزل قليلاً
+        suggested = "SAFE"
+    elif _mkt_vd_w >= 0.50 and btc_signal >= caution_enter:
+        # VDelta متوسط + BTC مستقر = SAFE
+        suggested = "SAFE"
+    elif _mkt_vd_w >= 0.45:
+        # VDelta معقول = CAUTION
         suggested = "CAUTION"
-    elif btc_signal <= danger_enter:
+    elif btc_signal <= danger_enter and _mkt_vd_w < 0.40:
+        # BTC ينزل كثيراً + VDelta ضعيف = DANGER
         suggested = "DANGER"
     elif _mkt_vd_w < 0.40:
+        # VDelta ضعيف = DANGER
         suggested = "DANGER"
-    elif btc_signal <= caution_enter or _crash_1h or _mkt_vd_w < 0.50:
-        suggested = "CAUTION"
-    elif btc_signal >= caution_exit and _mkt_vd_w >= 0.55:
-        suggested = "SAFE"
-    elif btc_signal >= caution_exit:
-        suggested = "CAUTION"
     else:
-        suggested = market_state
+        suggested = "CAUTION" 
 
 
     if suggested == "DANGER":
