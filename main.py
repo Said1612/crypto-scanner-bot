@@ -2288,7 +2288,6 @@ def analyze_btc():
     global btc_change_24h, btc_trend_1h, btc_trend_4h, market_state, last_btc
     global last_market_report
     global eth_change_24h
-    global _last_mkt_vd_pct
 
 
     data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
@@ -2381,9 +2380,7 @@ def analyze_btc():
     _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
     _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
     _mkt_vd_w = _mkt_vd * 0.60 + _btc_vd * 0.40
-    # استخدام VDelta التقرير إذا متاح
-    if _last_mkt_vd_pct > 0:
-        _mkt_vd_w = _last_mkt_vd_pct / 100.0
+    # استخدام VDelta المحسوب
 
     if _crash_4h or btc_trend_1h <= -2.0:
         # انهيار سريع = DANGER دائماً بغض النظر عن VDelta
