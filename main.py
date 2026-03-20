@@ -11801,8 +11801,9 @@ def scan_exit_signals(price_map, vol_now, changes_map):
         sector = next((s for s,syms in SECTORS.items() if sym in syms), "")
         icon   = "🚨" if exit_urgent else "⚠️"
 
+        title = "اخرج الآن!" if exit_urgent else "تحذير خروج"
         msg = (
-            "{icon} *{'اخرج الآن!' if exit_urgent else 'تحذير خروج'}* {icon}\n"
+            "{icon} *{title}* {icon}\\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💥 *{sym}* — {reason}\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -11813,6 +11814,7 @@ def scan_exit_signals(price_map, vol_now, changes_map):
             "{action}"
         ).format(
             icon=icon,
+            title=title,
             sym=sym.replace("USDT",""),
             reason=exit_reason,
             price=fmt_price(price),
