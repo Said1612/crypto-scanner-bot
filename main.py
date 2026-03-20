@@ -50,7 +50,7 @@ REDIS_KEY  = "mafio_state_v16"  # مفتاح الحفظ في Redis
 
 
 BLOCKED_WATCHLIST = {
-    "CULTUSDT",   # حجم ضعيف + ترند هابط
+    "CULTUSDT",
 }
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
