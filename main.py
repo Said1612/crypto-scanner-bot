@@ -6224,8 +6224,6 @@ def scan_whale_confirmation(price_map):
         send(msg)
         _tgts = calc_smart_targets(sym, price)
         add_to_exit_watchlist(sym, price, _tgts.get("targets", []))
-        _tgts = calc_smart_targets(sym, price)
-        add_to_exit_watchlist(sym, price, _tgts.get("targets", []))
         if _golden:
             log.info(" GOLDEN ENTRY! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, _btcd_val, ats)
         whale_confirmed[sym]  = now
@@ -11293,7 +11291,9 @@ def track_global_liquidity():
 
 
 
-exit_watchlist  = {}   # {sym: {"entry": price, "time": ts, "targets": [...]}}
+exit_watchlist  = {
+    "PMMUSDT": {"entry": 0.0121, "time": 0.0, "targets": []},
+}
 exit_alerted    = {}   # {sym: ts}
 EXIT_CHECK_EVERY = 120
 last_exit_check  = 0.0
@@ -11486,6 +11486,224 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
     send(msg)
     exit_alerted[sym] = now
     return urgent
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   📉 EXIT SIGNAL 5M — كشف انعكاس الاتجاه على فريم 5 دقائق
+#   Lower Low على 5m + حجم يرتفع = خروج مبكر
+# ═══════════════════════════════════════════════════════════════════
+
+def detect_reversal_5m(sym, entry_price):
+    # type: (str, float) -> tuple
+    """
+    يكشف انعكاس الاتجاه على 5m
+    يعيد: (is_reversal, reason, urgency)
+    """
+    kd = get_klines(sym, "5m", 20)
+    if not kd or len(kd["closes"]) < 6:
+        return False, "", 0
+
+    try:
+        closes = kd["closes"]
+        opens  = kd["opens"]
+        highs  = kd["highs"]
+        lows   = kd["lows"]
+        vols   = kd["vols"]
+        n      = len(closes)
+
+        # 1. Lower Lows على آخر 3 شموع حمراء
+        red_candles = []
+        for i in range(n-1, max(n-8, 0), -1):
+            if closes[i] < opens[i]:
+                red_candles.append({
+                    "close": closes[i],
+                    "open":  opens[i],
+                    "low":   lows[i],
+                    "vol":   vols[i] if i < len(vols) else 0,
+                })
+            if len(red_candles) >= 3:
+                break
+
+        if len(red_candles) >= 2:
+            # فحص Lower Low
+            lower_lows = all(
+                red_candles[i]["close"] < red_candles[i+1]["close"]
+                for i in range(len(red_candles)-1)
+            )
+
+            if lower_lows:
+                # فحص حجم يرتفع مع البيع
+                vol_increasing = red_candles[0]["vol"] > red_candles[-1]["vol"] * 0.8
+
+                current_price = closes[-1]
+                pnl = (current_price - entry_price) / entry_price * 100 if entry_price > 0 else 0
+
+                if vol_increasing and pnl > 2.0:
+                    return True, "Lower Lows على 5m + حجم بيع يرتفع", 2
+                elif lower_lows and pnl > 0:
+                    return True, "Lower Lows على 5m", 1
+
+        # 2. شمعة كبيرة حمراء تكسر آخر دعم
+        last_close = closes[-1]
+        last_open  = opens[-1]
+        body = abs(last_close - last_open)
+        avg_body = sum(abs(closes[i] - opens[i]) for i in range(n-5, n-1)) / 4
+
+        if last_close < last_open and body > avg_body * 2.0:
+            pnl = (last_close - entry_price) / entry_price * 100 if entry_price > 0 else 0
+            if pnl > 0:
+                return True, "شمعة حمراء ضخمة على 5m", 2
+
+        return False, "", 0
+
+    except (IndexError, ValueError, ZeroDivisionError):
+        return False, "", 0
+
+
+def scan_reversal_exit(price_map):
+    # type: (dict) -> None
+    """
+    يفحص كل العملات في exit_watchlist
+    ويرسل إشارة خروج عند انعكاس 5m
+    """
+    now = time.time()
+    if not exit_watchlist:
+        return
+
+    for sym, data in list(exit_watchlist.items()):
+        if now - exit_alerted.get(sym, 0) < 900:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        entry = data.get("entry", price)
+        pnl   = (price - entry) / entry * 100 if entry > 0 else 0
+
+        if pnl <= 0:
+            continue
+
+        is_reversal, reason, urgency = detect_reversal_5m(sym, entry)
+        if not is_reversal:
+            continue
+
+        icon   = "🚨" if urgency >= 2 else "⚠️"
+        action = "🔴 *اخرج الآن!* — انعكاس قوي" if urgency >= 2 else "🟡 *فكر في الخروج* — تحذير مبكر"
+
+        msg = (
+            "{icon} *إشارة خروج — {sym}*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📉 {reason}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💰 السعر: `{price}` | P&L: `{pnl:+.1f}%`\n"
+            "📊 دخول: `{entry}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "{action}"
+        ).format(
+            icon=icon,
+            sym=sym.replace("USDT", ""),
+            reason=reason,
+            price=fmt_price(price),
+            pnl=pnl,
+            entry=fmt_price(entry),
+            action=action
+        )
+
+        send(msg)
+        exit_alerted[sym] = now
+        # إضافة لمراقبة إعادة الدخول
+        add_to_reentry_watch(sym, price, entry)
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   🔄 RE-ENTRY ALERT — إشارة إعادة الدخول
+#   بعد الخروج، يراقب السيولة للعودة للصفقة
+#   إذا VDelta عاد للارتفاع + CVD صاعد = أعد الدخول
+# ═══════════════════════════════════════════════════════════════════
+
+_reentry_watchlist = {}   # {sym: {"exit_price": p, "exit_time": t, "entry": p}}
+_reentry_alerted   = {}   # {sym: ts}
+REENTRY_COOLDOWN   = 1800  # 30 دقيقة بعد الخروج قبل إعادة الدخول
+REENTRY_WATCH_TTL  = 7200  # ساعتان فقط بعد الخروج
+
+def add_to_reentry_watch(sym, exit_price, original_entry):
+    # type: (str, float, float) -> None
+    _reentry_watchlist[sym] = {
+        "exit_price":      exit_price,
+        "original_entry":  original_entry,
+        "exit_time":       time.time(),
+    }
+
+def scan_reentry(price_map):
+    # type: (dict) -> None
+    now = time.time()
+    if not _reentry_watchlist:
+        return
+
+    for sym, data in list(_reentry_watchlist.items()):
+        # انتهت فترة المراقبة
+        if now - data["exit_time"] > REENTRY_WATCH_TTL:
+            _reentry_watchlist.pop(sym, None)
+            continue
+
+        # انتظر cooldown بعد الخروج
+        if now - data["exit_time"] < REENTRY_COOLDOWN:
+            continue
+
+        if now - _reentry_alerted.get(sym, 0) < REENTRY_COOLDOWN:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        # جلب VDelta الحالي
+        stats = analyze_tps_ats(sym)
+        if not stats:
+            continue
+
+        vdelta = stats.get("vdelta", 0.5)
+        ats    = stats.get("ats", 0)
+
+        # شروط إعادة الدخول
+        # 1. VDelta عاد للارتفاع بقوة
+        vd_strong = vdelta >= 0.70 and ats >= 300
+
+        # 2. CVD صاعد مجدداً
+        cvd = calc_cvd(sym, "15m", 12)
+        cvd_rising = cvd.get("trend") == "rising"
+
+        # 3. السعر لم يرتفع كثيراً بعد الخروج
+        exit_price = data["exit_price"]
+        price_above_exit = (price - exit_price) / exit_price * 100 if exit_price > 0 else 0
+
+        if vd_strong and cvd_rising and price_above_exit < 5.0:
+            _reentry_alerted[sym] = now
+
+            msg = (
+                "🔄 *إعادة دخول — {sym}*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "✅ السيولة عادت بقوة!\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📊 VDelta: `{vd:.0f}%` | ATS: `{ats:.0f}$`\n"
+                "📈 CVD: تجميع مستمر\n"
+                "💰 السعر: `{price}` ({diff:+.1f}% من خروجك)\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💡 _خرجت مبكراً؟ الاتجاه استمر — يمكن العودة_"
+            ).format(
+                sym=sym.replace("USDT", ""),
+                vd=vdelta * 100,
+                ats=ats,
+                price=fmt_price(price),
+                diff=price_above_exit
+            )
+
+            send(msg)
 
 
 
@@ -11956,6 +12174,8 @@ def run():
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
             scan_exit_signals(price_map, vol_now, changes_map)
+            scan_reversal_exit(price_map)
+            scan_reentry(price_map)
 
             flush_signal_queue(max_send=5)
 
