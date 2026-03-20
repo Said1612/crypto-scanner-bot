@@ -2498,6 +2498,8 @@ def analyze_btc():
         _btc_vd_weight = btc_tps_stats.get("vdelta", 0.5) * 100 if btc_tps_stats else 50
         # BTC وزنه 40% في الحساب النهائي
         _mkt_vd_pct = _mkt_vd_raw * 0.60 + _btc_vd_weight * 0.40
+        # تتبع خروج السيولة
+        track_liquidity_exit(_mkt_vd_pct)
 
         # أفضل قطاع
         _hot_line = "🔥 أفضل قطاع: *{}*\n".format(hot_sectors[0]) if hot_sectors else ""
@@ -11366,6 +11368,124 @@ def detect_distribution(sym, price, vdelta, ats):
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🚨 LIQUIDITY EXIT DETECTOR
+#   نظام كشف خروج السيولة المفاجئ
+#   1. خروج من السوق كله
+#   2. خروج من عملة دخل فيها الجوكر
+# ═══════════════════════════════════════════════════════════════════
+
+_market_vd_history  = []   # تاريخ VDelta السوق
+_liq_exit_alerted   = 0.0  # آخر تحذير
+LIQ_EXIT_COOLDOWN   = 600  # 10 دقائق بين التحذيرات
+LIQ_EXIT_DROP       = 8.0  # VDelta نزل 8% في 5 دقائق = خطر
+
+def track_liquidity_exit(mkt_vd_pct):
+    # type: (float) -> None
+    global _market_vd_history, _liq_exit_alerted
+    now = time.time()
+
+    _market_vd_history.append((now, mkt_vd_pct))
+    # احتفظ بآخر 10 قراءات فقط
+    _market_vd_history = _market_vd_history[-10:]
+
+    if len(_market_vd_history) < 3:
+        return
+    if now - _liq_exit_alerted < LIQ_EXIT_COOLDOWN:
+        return
+
+    # فحص التغيير في آخر 5 دقائق
+    recent = [(t, v) for t, v in _market_vd_history if now - t <= 300]
+    if len(recent) < 2:
+        return
+
+    oldest_vd = recent[0][1]
+    latest_vd = recent[-1][1]
+    drop = oldest_vd - latest_vd  # كم نزل VDelta
+
+    if drop >= LIQ_EXIT_DROP:
+        _liq_exit_alerted = now
+        msg = (
+            "🚨 *تحذير — سيولة تخرج من السوق!*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 VDelta السوق: `{:.0f}%` (كان `{:.0f}%`)\n"
+            "📉 انخفض: `-{:.1f}%` في 5 دقائق\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⛔ *أوقف الدخول في أي صفقة جديدة!*"
+        ).format(latest_vd, oldest_vd, drop)
+        send(msg)
+
+
+def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
+    # type: (str, float, float, float, float) -> bool
+    """
+    يفحص إذا خرجت السيولة من عملة بعد الدخول
+    يعيد True = خرج، أرسل تحذير
+    """
+    global exit_alerted
+
+    now = time.time()
+    if now - exit_alerted.get(sym, 0) < 1800:
+        return False
+
+    pnl = (current_price - entry_price) / entry_price * 100 if entry_price > 0 else 0
+
+    exit_reason = ""
+    urgent = False
+
+    # 1. VDelta انقلب للبيع فجأة
+    if vdelta < 0.35:
+        exit_reason = "VDelta انهار {:.0f}%".format(vdelta * 100)
+        urgent = True
+
+    # 2. حيتان يبيعون بكميات كبيرة
+    elif ats >= 2000 and vdelta < 0.40:
+        exit_reason = "حيتان يبيعون! ATS {:.0f}$".format(ats)
+        urgent = True
+
+    # 3. وصل Stop Loss
+    elif pnl <= -5.0:
+        exit_reason = "Stop Loss -5% مكسور"
+        urgent = True
+
+    # 4. تحذير مبكر
+    elif vdelta < 0.45 and pnl > 2.0:
+        exit_reason = "VDelta يضعف {:.0f}% — احمِ أرباحك".format(vdelta * 100)
+        urgent = False
+
+    if not exit_reason:
+        return False
+
+    icon = "🚨" if urgent else "⚠️"
+    action = "🔴 *اخرج الآن فوراً!*" if urgent else "🟡 *فكر في جني الأرباح*"
+
+    msg = (
+        "{icon} *{'خروج سيولة!' if urgent else 'تحذير سيولة'}*\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💥 *{sym}* — {reason}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💰 السعر: `{price}` | P&L: `{pnl:+.1f}%`\n"
+        "📊 VDelta: `{vd:.0f}%` | ATS: `{ats:.0f}$`\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{action}"
+    ).format(
+        icon=icon,
+        sym=sym.replace("USDT", ""),
+        reason=exit_reason,
+        price=fmt_price(current_price),
+        pnl=pnl,
+        vd=vdelta * 100,
+        ats=ats,
+        action=action
+    )
+
+    send(msg)
+    exit_alerted[sym] = now
+    return urgent
+
+
+
 def scan_exit_signals(price_map, vol_now, changes_map):
     # type: (dict, dict, dict) -> None
     global last_exit_check
@@ -11396,6 +11516,9 @@ def scan_exit_signals(price_map, vol_now, changes_map):
         vdelta = stats.get("vdelta", 0.5)
         ats    = stats.get("ats", 0)
         tps    = stats.get("tps", 0)
+
+        # فحص خروج السيولة من العملة
+        check_coin_liquidity_exit(sym, entry, price, vdelta, ats)
 
         exit_reason = ""
         exit_urgent = False
@@ -11804,122 +11927,4 @@ def run():
             for sym in list(tracked.keys()):
                 if sym in price_map:
                     if not check_trailing(sym, price_map[sym]):
-                        pass  # check_progression — معطّل (SIGNAL #2 قديم)
-
-
-            update_sector_flow(ticker_map)
-            flow_cycle += 1
-
-
-            if flow_cycle >= FLOW_WINDOW:
-                analyze_sector_flow()
-                flow_cycle = 0
-
-
-            # detect_momentum(price_map, change_now, vol_now, high_map, low_map)
-
-
-            if now - last_ts_scan >= TS_SCAN_EVERY:
-                perf_check(price_map)
-
-
-            if now - last_lh_scan >= 600:   # 10 دقائق = 600 ثانية
-                scan_hidden_accumulation(price_map, vol_now, changes_map)
-            # مسح ذكي لكل MEXC — يحدث candidates
-            smart_market_scan()
-            scan_volume_surge(price_map, vol_now, changes_map)
-            scan_bottom_fisher(price_map, vol_now, changes_map)
-            scan_exit_signals(price_map, vol_now, changes_map)
-            # إرسال أفضل الإشارات من Queue
-            flush_signal_queue(max_send=5)
-
-
-            update_pump_dump_history(price_map, vol_now)
-            scan_pump_dump(price_map, vol_now, change_now)
-
-
-            # scan_market_pulse(price_map, vol_now, change_now)
-
-
-            track_liquidity_flow(vol_now, change_now)
-
-
-
-            if now - last_tps_scan >= TPS_SCAN_EVERY:
-                check_liquidity_exit(vol_now, price_map)
-                scan_tps_ats(price_map, vol_now, change_now)
-                scan_lz_tps_fusion(price_map, vol_now, change_now)  # 🎯 الدمج
-                last_tps_scan = now
-
-
-            if now - last_whale_check >= WHALE_CHECK_EVERY:
-                scan_whale_confirmation(price_map)
-                last_whale_check = now
-
-            if now - last_lh_scan >= LH_SCAN_EVERY:
-                liquidity_hunter(price_map, vol_now, changes_map)
-                last_lh_scan = now
-
-
-            if now - last_sc_refresh >= SC_REFRESH_EVERY:
-                refresh_small_caps()
-
-
-            if now - last_lh_scan < 10 and small_caps:
-                liquidity_hunter_small_caps(price_map, vol_now, changes_map)
-
-            # Deep Scan
-            if now - last_deep_scan >= DEEP_SCAN_EVERY:
-                # V15: pre-score coins before deep scan
-                # sort by: high volume + positive change first
-                pre_scored = []
-                for sym in candidates:
-                    if sym in tracked: continue
-                    price  = price_map.get(sym, 0)
-                    change = changes_map.get(sym, 0)
-                    vol    = vol_now.get(sym, 0)
-                    if price <= 0: continue
-
-                    in_hot       = sym in hot_symbols
-                    in_watchlist = sym in watchlist
-                    wl_priority  = watchlist.get(sym, {}).get("priority","") == "🔥 HIGH"
-
-                    pre_score = (
-                        (vol / 1_000_000) * 0.5 +
-                        max(change, 0) * 0.3 +
-                        (2  if in_hot       else 0) +
-                        (5  if in_watchlist else 0) +   # 🆕 watchlist أولوية
-                        (10 if wl_priority  else 0)     # 🆕 قطاع ساخن + تجميع = أقصى أولوية
-                    )
-                    pre_scored.append((sym, price, change, pre_score))
-
-
-                pre_scored.sort(key=lambda x: -x[3])
-
-
-                scanned = 0
-                for rank, (sym, price, change, _) in enumerate(pre_scored):
-
-                    fetch_ob = (rank < 20)
-                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
-                    scanned += 1
-                    if scanned % 10 == 0:
-                        time.sleep(0.5)
-
-                last_deep_scan = now
-                log.info(" Deep Scan  | %d ", scanned)
-
-            cycle += 1
-
-            time.sleep(CHECK_INTERVAL)
-
-        except KeyboardInterrupt:
-            send("⛔ *MAFIO-BOT* — تم الإيقاف")
-            break
-        except Exception as e:
-            log.error(": %s", e, exc_info=True)
-            time.sleep(10)
-
-
-if __name__ == "__main__":
-    run()
+   
