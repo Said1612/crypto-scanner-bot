@@ -11870,4 +11870,4 @@ def run():
 
                 pre_scored.sort(key=lambda x: -x[3])
 
-                log.info("Deep Scan: %d coin
+                log.info("Deep Scan started:
