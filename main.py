@@ -2288,6 +2288,7 @@ def analyze_btc():
     global btc_change_24h, btc_trend_1h, btc_trend_4h, market_state, last_btc
     global last_market_report
     global eth_change_24h
+    global _last_mkt_vd_pct
 
 
     data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
