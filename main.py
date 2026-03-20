@@ -905,7 +905,7 @@ def flush_signal_queue(max_send=5):
     _signal_queue = _signal_queue[max_send:]
     for item in to_send:
         send(item["msg"])
-        log.info("📬 QUEUE_SEND | %s | score=%d | type=%s",
+        log.info(" QUEUE_SEND | %s | score=%d | type=%s",
                  item["sym"], item["score"], item["type"])
 
 
@@ -933,7 +933,7 @@ def send(msg, personal_only=False):
             _t = get_tier_settings(vol_usdt)
             min_vd = int(_t["vdelta_min"] * 100)
             if vd_val < min_vd:
-                log.info("🚫 send() BLOCKED [%s]: VDelta=%d%% < %d%% | %s",
+                log.info(" send() BLOCKED [%s]: VDelta=%d%% < %d%% | %s",
                          _t["label"], vd_val, min_vd, msg[:50])
                 return
 
@@ -973,26 +973,26 @@ def poll_commands():
         r = requests.get(url, timeout=10)
         if r.status_code == 409:
 
-            log.warning("⚠️ getUpdates 409 - حذف Webhook تلقائياً")
+            log.warning(" getUpdates 409 -  Webhook ")
             try:
                 requests.get(
                     "https://api.telegram.org/bot{}/deleteWebhook?drop_pending_updates=true".format(TELEGRAM_TOKEN),
                     timeout=10
                 )
-                log.info("✅ Webhook محذوف - إعادة المحاولة")
+                log.info(" Webhook  -  ")
             except Exception as _e:
-                log.error("❌ deleteWebhook فشل: %s", _e)
+                log.error(" deleteWebhook : %s", _e)
             return
         if r.status_code != 200:
-            log.warning("⚠️ getUpdates HTTP %d", r.status_code)
+            log.warning(" getUpdates HTTP %d", r.status_code)
             return
         data = r.json()
         if not data.get("ok"):
-            log.warning("⚠️ getUpdates not ok: %s", data)
+            log.warning(" getUpdates not ok: %s", data)
             return
         updates = data.get("result", [])
         if updates:
-            log.info("📨 getUpdates: %d رسالة جديدة", len(updates))
+            log.info(" getUpdates: %d  ", len(updates))
         for update in updates:
             _tg_offset = update["update_id"] + 1
 
@@ -1001,29 +1001,29 @@ def poll_commands():
 
             text_lower = text.lower()
             chat_id = str(msg.get("chat", {}).get("id", ""))
-            log.info("📨 update: chat_id=%s text='%s'", chat_id, text)
+            log.info(" update: chat_id=%s text='%s'", chat_id, text)
 
             allowed = [str(CHAT_ID)]
             if GROUP_ID and GROUP_ID != "YOUR_GROUP_ID":
                 allowed.append(str(GROUP_ID))
             if chat_id not in allowed:
-                log.warning("⛔ chat_id غير معروف: %s | allowed: %s", chat_id, allowed)
+                log.warning(" chat_id  : %s | allowed: %s", chat_id, allowed)
                 continue
 
             if text_lower in ("/report", "/تقرير"):
-                log.info("📤 /report طُلب من chat_id=%s", chat_id)
+                log.info(" /report   chat_id=%s", chat_id)
                 send("\U0001f4e4 جاري إعداد التقرير...")
 
                 global all_tickers
                 if not all_tickers:
-                    log.info("📤 /report: all_tickers فارغة - نجلبها الآن")
+                    log.info(" /report: all_tickers  -  ")
                     try:
                         _r = safe_get(MEXC_24H)
                         if _r:
                             all_tickers = _r
-                            log.info("📤 all_tickers جُلبت: %d عملة", len(all_tickers))
+                            log.info(" all_tickers : %d ", len(all_tickers))
                     except Exception as _e:
-                        log.error("📤 فشل جلب all_tickers: %s", _e)
+                        log.error("   all_tickers: %s", _e)
                 daily_report_sent_date = ""
                 lz_daily_sent_date     = ""
                 send_daily_report(force=True)
@@ -1165,14 +1165,14 @@ def send_daily_report_forced():
     # type: () -> None
     """إرسال التقرير اليومي فوراً بدون قيد الوقت — /report"""
     global daily_report_sent_date, lz_daily_sent_date, _force_daily_report
-    log.info("📤 تقرير يدوي - إعادة تعيين التاريخ")
+    log.info("   -   ")
     daily_report_sent_date = ""   # إلغاء قيد التاريخ
     lz_daily_sent_date     = ""   # إلغاء قيد السيولة
     _force_daily_report    = True # تجاوز قيد الساعة
     try:
         send_daily_report()
     except Exception as e:
-        log.error("❌ خطأ في التقرير اليدوي: %s", e)
+        log.error("    : %s", e)
         send("❌ خطأ في التقرير: {}".format(str(e)))
     finally:
         _force_daily_report = False
@@ -1200,7 +1200,7 @@ def safe_get(url, params=None, retries=3):
             if _elapsed >= 60:
 
                 _rate = int(api_calls_minute / (_elapsed / 60))
-                log.info("📡 API: %d طلب/دقيقة | إجمالي: %d",
+                log.info(" API: %d / | : %d",
                          _rate, api_calls_total)
                 api_calls_minute = 0
                 api_minute_reset = _now
@@ -1209,11 +1209,11 @@ def safe_get(url, params=None, retries=3):
         except Exception as e:
             wait = 2 ** attempt  # 1s, 2s, 4s
             if attempt < retries - 1:
-                log.debug("API retry %d/%d [%s]: %s - انتظر %ds",
+                log.debug("API retry %d/%d [%s]: %s -  %ds",
                           attempt + 1, retries, url.split("/")[-1], e, wait)
                 time.sleep(wait)
             else:
-                log.debug("API فشل نهائي [%s]: %s", url.split("/")[-1], e)
+                log.debug("API   [%s]: %s", url.split("/")[-1], e)
 
     return None
 
@@ -2411,7 +2411,7 @@ def analyze_btc():
     if old != market_state:
 
         if time.time() - last_market_report < MARKET_REPORT_EVERY:
-            log.info("📊 Market changed %s→%s لكن cooldown 4h", old, market_state)
+            log.info(" Market changed %s%s  cooldown 4h", old, market_state)
             return
 
         # DANGER + نشاط طبيعي = CAUTION
@@ -2420,7 +2420,7 @@ def analyze_btc():
             _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
             if 0.40 <= _btc_vd <= 0.65 and _btc_ats < 2000:
                 market_state = "CAUTION"
-                log.info("📊 DANGER→CAUTION نشاط طبيعي VD=%.0f%% ATS=%.0f$",
+                log.info(" DANGERCAUTION   VD=%.0f%% ATS=%.0f$",
                          _btc_vd*100, _btc_ats)
 
         last_market_report = time.time()
@@ -2516,7 +2516,7 @@ def analyze_btc():
                 confirm=BTC_CONFIRM_COUNT,
             )
         )
-        log.info("📊 Market: %s→%s | BTC %.2f%% | confirm=%d",
+        log.info(" Market: %s%s | BTC %.2f%% | confirm=%d",
                  old, market_state, btc_change_24h, BTC_CONFIRM_COUNT)
 
 
@@ -2599,10 +2599,10 @@ def analyze_sectors():
             msg += "📤 *سيولة خرجت:* `{}`\n".format(", ".join(exited))
         msg += "\n₿ BTC: `{:+.2f}%` | `{}`".format(btc_change_24h, market_state)
         send(msg)
-        log.info("🔄 Sectors: %s → %s", list(old_hot), new_hot)
+        log.info(" Sectors: %s  %s", list(old_hot), new_hot)
 
     if hot_sectors:
-        log.info("🔥 Hot: %s", ", ".join(hot_sectors))
+        log.info(" Hot: %s", ", ".join(hot_sectors))
 
 
 # ═══════════════════════════════════════════════
@@ -2775,7 +2775,7 @@ def analyze_sector_flow():
                 mst=market_state,
             )
         )
-        log.info("💸 Flow IN | %s | ratio=%.2f | ch=%.1f%%", sector, info["vol_ratio"], info["ch"])
+        log.info(" Flow IN | %s | ratio=%.2f | ch=%.1f%%", sector, info["vol_ratio"], info["ch"])
 
 
 
@@ -2823,7 +2823,7 @@ def analyze_sector_flow():
                     out=out_txt, btc=btc_change_24h, mst=market_state
                 )
             )
-            log.info("📤 Flow OUT | %s", [i["sector"] for i in outflows])
+            log.info(" Flow OUT | %s", [i["sector"] for i in outflows])
 
 
 
@@ -2967,7 +2967,7 @@ def detect_sector_rotation():
     )
 
     send(msg)
-    log.info("🌊 Sector Rotation | OUT:%s → IN:%s",
+    log.info(" Sector Rotation | OUT:%s  IN:%s",
              [s for s, _ in leaving[:3]],
              [s for s, _ in entering[:3]])
 
@@ -2976,13 +2976,13 @@ def detect_sector_rotation():
     for s, p in entering[:3]:
         if s not in hot_sectors:
             hot_sectors.append(s)
-            log.info("🔥 hot_sector مضاف: %s (+%.1f%%)", s, p)
+            log.info(" hot_sector : %s (+%.1f%%)", s, p)
     for s, p in leaving[:3]:
         if s in hot_sectors:
             hot_sectors.remove(s)
-            log.info("❄️ hot_sector محذوف: %s (%.1f%%)", s, p)
+            log.info(" hot_sector : %s (%.1f%%)", s, p)
     hot_symbols = {c for sec in hot_sectors for c in SECTORS.get(sec, [])}
-    log.info("🎯 hot_sectors: %s | %d عملة", hot_sectors, len(hot_symbols))
+    log.info(" hot_sectors: %s | %d ", hot_sectors, len(hot_symbols))
 
 def get_flow_summary():
     # type: () -> str
@@ -3130,7 +3130,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
             rsi_val = calc_rsi(kd_rsi["closes"])
 
             if rsi_val > RSI_OVERBOUGHT:
-                log.debug("🔴 RSI رفض: %s RSI=%.1f", sym, rsi_val)
+                log.debug(" RSI : %s RSI=%.1f", sym, rsi_val)
                 continue
 
 
@@ -3173,7 +3173,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
         })
 
     if not scored:
-        log.info("🔍 Top10 [%s]: لا عملات تحقق الشروط", sector)
+        log.info(" Top10 [%s]:    ", sector)
         return
 
 
@@ -3254,7 +3254,7 @@ def smart_top10_alert(sector, ticker_map, price_map, vol_now, change_now, high_m
     )
 
     send(msg)
-    log.info("🚨 Top10 V15 | %s | %d عملة | أفضل: %s (%.1f نقطة) | RSI جيد: %d",
+    log.info(" Top10 V15 | %s | %d  | : %s (%.1f ) | RSI : %d",
              sector, len(top10), top10[0]["sym"], top10[0]["score"], good_rsi_count)
 
 
@@ -3280,7 +3280,7 @@ def register_backtest(sym, price, sector):
         "result_4h":    None,
         "result_24h":   None,
     }
-    log.info("📋 Backtest سجّل: %s @ %s", sym, price)
+    log.info(" Backtest : %s @ %s", sym, price)
 
 
 def check_backtest(price_map):
@@ -3304,19 +3304,19 @@ def check_backtest(price_map):
             data["checked_1h"] = True
             data["result_1h"]  = gain
             data["price_now"]  = price
-            log.info("📊 BT-1H | %s | %+.2f%%", sym, gain)
+            log.info(" BT-1H | %s | %+.2f%%", sym, gain)
 
         elif not data["checked_4h"] and elapsed >= BACKTEST_CHECK_4H:
             data["checked_4h"] = True
             data["result_4h"]  = gain
             data["price_now"]  = price
-            log.info("📊 BT-4H | %s | %+.2f%%", sym, gain)
+            log.info(" BT-4H | %s | %+.2f%%", sym, gain)
 
         elif not data["checked_24h"] and elapsed >= BACKTEST_CHECK_24H:
             data["checked_24h"] = True
             data["result_24h"]  = gain
             data["price_now"]   = price
-            log.info("🏁 BT-24H | %s | %+.2f%%", sym, gain)
+            log.info(" BT-24H | %s | %+.2f%%", sym, gain)
 
 
 def get_backtest_stats():
@@ -3394,7 +3394,7 @@ def perf_register(sym, price, system, score=0, signals_desc=""):
         "checked_4h":   False,
         "checked_24h":  False,
     }
-    log.info("📊 Perf registered | %s | %s | score=%d", system, sym, score)
+    log.info(" Perf registered | %s | %s | score=%d", system, sym, score)
     return sid
 
 
@@ -3560,7 +3560,7 @@ def register_signal():
     if daily_signals["date"] != today:
         daily_signals = {"date": today, "count": 0}
     daily_signals["count"] += 1
-    log.info("📊 إشارات اليوم: %d/%d", daily_signals["count"], MAX_DAILY_SIGNALS)
+    log.info("  : %d/%d", daily_signals["count"], MAX_DAILY_SIGNALS)
 
 
 # ═══════════════════════════════════════════════
@@ -3582,7 +3582,7 @@ def ts_register_entry(sym, entry_price, sector="Unknown"):
         "since":     time.time(),
         "entry_vol": _vol_ref,  # حجم الدخول كمرجع
     }
-    log.info("📌 TS Registered | %s | entry=%.8f", sym, entry_price)
+    log.info(" TS Registered | %s | entry=%.8f", sym, entry_price)
 
 
 def check_trailing_stops():
@@ -3641,7 +3641,7 @@ def check_trailing_stops():
             if new_stop > stop:
                 ts_positions[sym]["stop"]   = new_stop
                 ts_positions[sym]["locked"] = max(locked, new_stop / entry * 100 - 100)
-                log.info("📈 TS Updated | %s | peak=+%.1f%% | stop=%.8f",
+                log.info(" TS Updated | %s | peak=+%.1f%% | stop=%.8f",
                          sym, peak_pct, new_stop)
 
 
@@ -3693,7 +3693,7 @@ def check_trailing_stops():
                     )
                     send(msg)
                     ts_sell_alerted[sym] = now
-                    log.info("🔴 SMART EXIT | %s | pl=%.1f%% | vol=%.1fx | market=%s",
+                    log.info(" SMART EXIT | %s | pl=%.1f%% | vol=%.1fx | market=%s",
                              sym, _pl, _vol_ratio, market_state)
             except: pass
 
@@ -3739,7 +3739,7 @@ def check_trailing_stops():
 
             send(msg)
             ts_sell_alerted[sym] = now
-            log.info("🔴 SELL SIGNAL | %s | profit=%.1f%% | peak=+%.1f%%",
+            log.info(" SELL SIGNAL | %s | profit=%.1f%% | peak=+%.1f%%",
                      sym, profit_pct, peak_pct)
 
 
@@ -3755,7 +3755,7 @@ def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
 
     _blocked = {"CULTUSDT"}  # عملات محظورة
     if sym in _blocked:
-        log.debug("🚫 WL Blocked | %s", sym)
+        log.debug(" WL Blocked | %s", sym)
         return
 
 
@@ -3775,7 +3775,7 @@ def add_to_liquidity_watchlist(sym, reason, vol, price, sector):
             "priority": "HIGH" if vol >= 3_000_000 else "NORMAL",
         }
         wl_price_snapshot[sym] = price
-        log.info("👀 WL Added | %s | reason=%s | vol=%.1fM | price=%s",
+        log.info(" WL Added | %s | reason=%s | vol=%.1fM | price=%s",
                  sym, reason, vol/1e6, price)
 
 
@@ -3797,7 +3797,7 @@ def check_watchlist_entries():
             pass  # الثابتة لا تنتهي أبداً
         elif now - info.get("since", now) > WL_EXPIRY:
             to_remove.append(sym)
-            log.info("👀 WL Expired | %s", sym)
+            log.info(" WL Expired | %s", sym)
             continue
 
         t = ticker_map.get(sym)
@@ -3870,7 +3870,7 @@ def check_watchlist_entries():
         wl_entry_alerted[sym] = now
 
         ts_register_entry(sym, price, info.get("sector","Unknown"))
-        log.info("👁️ WL silent track | %s | move=+%.1f%% | vol=%.1fM",
+        log.info(" WL silent track | %s | move=+%.1f%% | vol=%.1fM",
                  sym, move_since_add, vol/1e6)
 
 
@@ -3879,7 +3879,7 @@ def check_watchlist_entries():
         wl_price_snapshot.pop(sym, None)
 
     if watchlist:
-        log.info("👀 WL Check | watching=%d | expired=%d", len(watchlist), len(to_remove))
+        log.info(" WL Check | watching=%d | expired=%d", len(watchlist), len(to_remove))
 
 
 def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):  # معطّل
@@ -3972,10 +3972,10 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):  # مع
         if sym not in candidates: candidates.append(sym)
         add_to_liquidity_watchlist(sym, "move_"+str(round(m["change"],0))+"%",
                                    m["vol"], m["price"], m["sector"])
-        log.info("⚡ Instant Mover | %s | +%.1f%% | vol=%s | score=%d",
+        log.info(" Instant Mover | %s | +%.1f%% | vol=%s | score=%d",
                  sym, m["change"], vol_str, m["score"])
 
-    log.info("⚡ Instant Scan | movers=%d", len(movers))
+    log.info(" Instant Scan | movers=%d", len(movers))
 
 
 def scan_realtime_liquidity(price_map=None, vol_now=None):  # معطّل
@@ -4115,10 +4115,10 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):  # معطّل
         add_to_liquidity_watchlist(sym, "liq_spike_"+str(round(a["vol_spike"],1))+"x",
                                    a["vol"], a["price"], a["sector"])
 
-        log.info("💧 RT Liquidity | %s | spike=%.1fx | change=%.1f%% | strength=%d",
+        log.info(" RT Liquidity | %s | spike=%.1fx | change=%.1f%% | strength=%d",
                  sym, a["vol_spike"], a["change"], a["strength"])
 
-    log.info("💧 RT Scan done | alerts=%d", len(alerts))
+    log.info(" RT Scan done | alerts=%d", len(alerts))
 
 
 def scan_hot_market(price_map=None, vol_now=None):  # معطّل
@@ -4243,10 +4243,10 @@ def scan_hot_market(price_map=None, vol_now=None):  # معطّل
 
         if sym not in candidates:
             candidates.append(sym)
-        log.info("🔥 Hot Market | %s | +%.1f%% | vol=%.1fM | strength=%d",
+        log.info(" Hot Market | %s | +%.1f%% | vol=%.1fM | strength=%d",
                  sym, coin["change"], coin["vol"]/1e6, coin["strength"])
 
-    log.info("🔥 Hot Scan | found=%d", len(hot))
+    log.info(" Hot Scan | found=%d", len(hot))
 
 
 def scan_ath_distance(price_map=None):  # معطّل
@@ -4412,10 +4412,10 @@ def scan_ath_distance(price_map=None):  # معطّل
                 "reason":   "ath_gem_" + drop_str + "pct",
                 "sector":   "Unknown",
             }
-        log.info("💎 ATH Gem | %s | drop=%.1f%% | vol_ratio=%.1fx | score=%d",
+        log.info(" ATH Gem | %s | drop=%.1f%% | vol_ratio=%.1fx | score=%d",
                  sym, gem["drop_pct"]*100, gem["vol_ratio"], gem["score"])
 
-    log.info("💎 ATH Scan | gems=%d", len(gems))
+    log.info(" ATH Scan | gems=%d", len(gems))
 
 
 def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
@@ -4579,10 +4579,10 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):  # معطّل
 
         if sym not in candidates:
             candidates.append(sym)
-            log.info("📊 Bottom Accumulation → candidates | %s | strength=%d | vol_ratio=%.1f×",
+            log.info(" Bottom Accumulation  candidates | %s | strength=%d | vol_ratio=%.1f",
                      sym, coin["strength"], coin["vol_ratio"])
 
-    log.info("📊 Bottom Scan | found=%d", len(found))
+    log.info(" Bottom Scan | found=%d", len(found))
 
 
 
@@ -4742,10 +4742,10 @@ def scan_volume_explosion():
                 "reason":   "volume_explosion",
                 "sector":   "Unknown",
             }
-        log.info("💥 Volume Explosion | %s | mult=%.1fx | change=+%.1f%%",
+        log.info(" Volume Explosion | %s | mult=%.1fx | change=+%.1f%%",
                  sym, coin["vol_mult"], coin["change"])
 
-    log.info("💥 Explosion Scan | found=%d", len(explosions))
+    log.info(" Explosion Scan | found=%d", len(explosions))
 
 
 def analyze_smart_money(force_report=False):
@@ -4862,7 +4862,7 @@ def analyze_smart_money(force_report=False):
                 fall=falling_pct,
             )
         )
-        log.info("🚨 Urgent Smart Money! %d stables | sigma_max=%.1f",
+        log.info(" Urgent Smart Money! %d stables | sigma_max=%.1f",
                  len(urgent), max(d["sigma"] for d in urgent))
 
     if not force_report and not detected:
@@ -4925,7 +4925,7 @@ def analyze_smart_money(force_report=False):
             warning=warning_line,
         )
     )
-    log.info("🐋 Smart Money | accum=%s | stables=%d | falling=%.0f%%",
+    log.info(" Smart Money | accum=%s | stables=%d | falling=%.0f%%",
              is_accumulation, len(detected), falling_pct)
 
 
@@ -5010,7 +5010,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                         time=datetime.now().strftime("%H:%M:%S"),
                     )
                 )
-                log.info("🟡 Stage2 | %s | +%.2f%% | vol_ratio=%.1f", sym, gain, vol_ratio)
+                log.info(" Stage2 | %s | +%.2f%% | vol_ratio=%.1f", sym, gain, vol_ratio)
 
 
         elif sd["stage"] == 2 and not sd.get("alerted_3"):
@@ -5038,7 +5038,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
                     )
                 )
                 deep_scan(sym, price, change_24h)
-                log.info("🟢 Stage3 | %s | +%.2f%%", sym, gain)
+                log.info(" Stage3 | %s | +%.2f%%", sym, gain)
 
 
     for sym, price in price_map.items():
@@ -5113,7 +5113,7 @@ def detect_momentum(price_map, change_now, vol_now, high_map, low_map):
             "entry_time": now, "alerted_2": False, "alerted_3": False,
         }
 
-        log.info("🔵 Stage1 | %s | +%.2f%% | 24h:%.1f%% | vol:%.0f | sector:%s | flow:%s",
+        log.info(" Stage1 | %s | +%.2f%% | 24h:%.1f%% | vol:%.0f | sector:%s | flow:%s",
                  sym, move, change_24h, vol, sector, flow_state)
 
         send(
@@ -5191,11 +5191,11 @@ def auto_expand_sectors():
     4. إضافة فقط العملات غير الموجودة حتى نصل 50/قطاع
     5. إرسال تقرير Telegram بكل ما أُضيف
     """
-    log.info("🔍 Auto Expand: جلب عملات MEXC...")
+    log.info(" Auto Expand:   MEXC...")
 
     data = safe_get(MEXC_24H)
     if not data:
-        log.warning("⚠️ Auto Expand: فشل جلب البيانات")
+        log.warning(" Auto Expand:   ")
         return
 
 
@@ -5267,20 +5267,20 @@ def auto_expand_sectors():
 
 
     total_added = sum(len(v) for v in added_per_sector.values())
-    log.info("✅ Auto Expand انتهى | أُضيف: %d عملة | موجودة: %d | مُرشَّح: %d",
+    log.info(" Auto Expand  | : %d  | : %d | : %d",
              total_added, skipped_existing, skipped_filter)
 
     if total_added == 0:
-        log.info("ℹ️ لا عملات جديدة للإضافة - القوائم مكتملة")
+        log.info("     -  ")
         return
 
 
-    log.info("🔄 AUTO EXPAND | أُضيف %d عملة جديدة", total_added)
+    log.info(" AUTO EXPAND |  %d  ", total_added)
 
 
     global hot_symbols
     hot_symbols = {c for s in hot_sectors for c in SECTORS[s]}
-    log.info("🔥 hot_symbols محدَّثة | %d عملة", len(hot_symbols))
+    log.info(" hot_symbols  | %d ", len(hot_symbols))
 
 
 # ═══════════════════════════════════════════════
@@ -5316,7 +5316,7 @@ def scan_sector_activity():
             if t.get("symbol","").endswith("USDT")
         }
         price_snapshot_time = now
-        log.info("📸 Price snapshot محدّث | %d عملة", len(price_snapshot))
+        log.info(" Price snapshot  | %d ", len(price_snapshot))
 
     def real_change(sym, t):
         """التغيير الحقيقي من آخر snapshot (ساعة)"""
@@ -5541,7 +5541,7 @@ def scan_sector_activity():
     )
 
     send(msg)
-    log.info("🌊 Sector Report | hot=%s | whale_accum=%d",
+    log.info(" Sector Report | hot=%s | whale_accum=%d",
              ", ".join(s for s,_ in sorted_sectors[:3]), len(whale_accumulation))
 
 
@@ -5587,7 +5587,7 @@ def refresh_tickers():
     ]
     last_tickers = time.time()
 
-    log.info("📋 Candidates: %d عملة من قائمتنا | Hot: %s",
+    log.info(" Candidates: %d    | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
 
@@ -5745,7 +5745,7 @@ def whale_watch_add(sym, ats, vdelta, price):
     global whale_watchlist
 
     if vdelta < 0.60:
-        log.debug("🚫 whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
+        log.debug(" whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
         return
     if sym not in whale_watchlist:
         whale_watchlist[sym] = {
@@ -5754,7 +5754,7 @@ def whale_watch_add(sym, ats, vdelta, price):
             "vdelta_then": vdelta,
             "price_then":  price,
         }
-        log.info("👁️ Whale Watch: %s | ATS=%.0f$ | VD=%.0f%%", sym, ats, vdelta*100)
+        log.info(" Whale Watch: %s | ATS=%.0f$ | VD=%.0f%%", sym, ats, vdelta*100)
 
 
 
@@ -5987,7 +5987,7 @@ def should_send_signal(sym, vdelta, ats, vol, change_24h, signal_type="WATCH"):
     """واجهة بسيطة للفلتر — True = أرسل | False = لا ترسل"""
     passed, reason = unified_signal_check(sym, vdelta, ats, vol, change_24h, signal_type)
     if not passed:
-        log.info("🛡️ FILTER_REJECT [%s] %s | %s", signal_type, sym, reason)
+        log.info(" FILTER_REJECT [%s] %s | %s", signal_type, sym, reason)
     return passed
 
 
@@ -6004,7 +6004,7 @@ def scan_whale_confirmation(price_map):
     # فلتر السوق — لا جوكر في DANGER مع حيتان يبيعون
     _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
     if market_state == "DANGER" and _btc_vd < 0.50:
-        log.info("🚫 JOKER BLOCKED: السوق DANGER + حيتان يبيعون VD=%.0f%%", _btc_vd*100)
+        log.info(" JOKER BLOCKED:  DANGER +   VD=%.0f%%", _btc_vd*100)
         return
 
     for sym, data in list(whale_watchlist.items()):
@@ -6054,25 +6054,25 @@ def scan_whale_confirmation(price_map):
         # فلتر التصريف
         _is_dist, _dist_reason = detect_distribution(sym, price, vdelta, ats)
         if _is_dist:
-            log.info("🚫 DISTRIBUTION: %s | %s", sym, _dist_reason)
+            log.info(" DISTRIBUTION: %s | %s", sym, _dist_reason)
             continue
 
         # فلتر Wick — ذيل التصريف
         _wick_ok, _wick_reason = calc_wick_filter(sym, "15m")
         if not _wick_ok:
-            log.info("🚫 WICK FILTER: %s | %s", sym, _wick_reason)
+            log.info(" WICK FILTER: %s | %s", sym, _wick_reason)
             continue
 
         # MACD Histogram — زخم صاعد؟
         _macd_hist = calc_macd_histogram(sym, "1h")
         if _macd_hist < 0:
-            log.info("🚫 MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
+            log.info(" MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
             continue
 
         # CVD التراكمي — تجميع حقيقي؟
         _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER")
         if not _cvd_ok:
-            log.info("🚫 CVD FILTER: %s | %s", sym, _cvd_trend)
+            log.info(" CVD FILTER: %s | %s", sym, _cvd_trend)
             continue
 
         # OB Imbalance — دعم مخفي؟
@@ -6080,7 +6080,7 @@ def scan_whale_confirmation(price_map):
         _ob_ratio  = _ob.get("ratio", 1.0)
         _ob_signal = _ob.get("signal", "neutral")
         if _ob_signal == "strong_sell":
-            log.info("🚫 OB IMBALANCE: %s | ratio=%.2f", sym, _ob_ratio)
+            log.info(" OB IMBALANCE: %s | ratio=%.2f", sym, _ob_ratio)
             continue
 
 
@@ -6200,13 +6200,13 @@ def scan_whale_confirmation(price_map):
         _tgts = calc_smart_targets(sym, price)
         add_to_exit_watchlist(sym, price, _tgts.get("targets", []))
         if _golden:
-            log.info("💎 GOLDEN ENTRY! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, _btcd_val, ats)
+            log.info(" GOLDEN ENTRY! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, _btcd_val, ats)
         whale_confirmed[sym]  = now
         coin_whale_done[sym]  = now   # 🔒 يغلق العملة 4 ساعات
         coin_alerted[sym]     = now
         to_del.append(sym)  # أزل من المراقبة بعد التأكيد
         perf_register(sym, price, "whale_confirm", 95, "Whale confirmed after retail")
-        log.info("🐋 Whale Confirmed! %s | ATS=%.0f$ | VD=%.0f%% | +%.1f%% منذ الإشارة",
+        log.info(" Whale Confirmed! %s | ATS=%.0f$ | VD=%.0f%% | +%.1f%%  ",
                  sym, ats, vdelta*100, price_chg)
 
 
@@ -6395,13 +6395,13 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
 
 
         if rr < 1.5:
-            log.debug("⚖️ LZ+TPS skip %s: R/R=%.1f < 1.5", sym, rr)
+            log.debug(" LZ+TPS skip %s: R/R=%.1f < 1.5", sym, rr)
             continue
 
 
 
         if tps < 0.2:
-            log.debug("🐌 LZ+TPS skip %s: TPS=%.2f < 0.2", sym, tps)
+            log.debug(" LZ+TPS skip %s: TPS=%.2f < 0.2", sym, tps)
             continue
 
         sector  = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
@@ -6420,7 +6420,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                     "ats_then":   ats,
                     "reason":     "LZ+TPS silent add",
                 }
-                log.info("👁️ LZ+TPS silent watchlist add: %s", sym)
+                log.info(" LZ+TPS silent watchlist add: %s", sym)
             continue
 
 
@@ -6509,7 +6509,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         coin_alerted[sym]   = now
         whale_watch_add(sym, ats, vdelta, price)
         perf_register(sym, price, "lz_tps_fusion", score, " | ".join(signals))
-        log.info("👁️ WATCH+LZ | %s | score=%d | rr=%.1f | ats=%.0f | vdelta=%.0f%%",
+        log.info(" WATCH+LZ | %s | score=%d | rr=%.1f | ats=%.0f | vdelta=%.0f%%",
                  sym, score, rr, ats, vdelta * 100)
 
 
@@ -6665,7 +6665,7 @@ def check_liquidity_exit(vol_now, price_map):
 
     send(msg)
     liq_exit_alerted = now
-    log.warning("📊 SCENARIO: %s | BTC24h=%.1f%% | BTCD_chg=%.1f%% | vol_drop=%.1f%%",
+    log.warning(" SCENARIO: %s | BTC24h=%.1f%% | BTCD_chg=%.1f%% | vol_drop=%.1f%%",
                 scenario, btc_24h, btcd_chg, vol_drop * 100)
 
 
@@ -6803,7 +6803,7 @@ def scan_pump_dump(price_map, vol_now, change_now):
             ).format(base, move, vol_mult, fmt_price(price),
                      change_now.get(sym, 0), sector)
             send(msg)
-            log.info("🚨 PUMP | %s | move=%.1f%% | vol=%.1fx", sym, move, vol_mult)
+            log.info(" PUMP | %s | move=%.1f%% | vol=%.1fx", sym, move, vol_mult)
 
         # ══ DUMP ══
         elif move <= DUMP_THRESHOLD and vol_mult >= PUMP_VOL_MULT:
@@ -6822,7 +6822,7 @@ def scan_pump_dump(price_map, vol_now, change_now):
             ).format(base, move, vol_mult, fmt_price(price),
                      change_now.get(sym, 0), sector)
             send(msg)
-            log.info("🔴 DUMP | %s | move=%.1f%% | vol=%.1fx", sym, move, vol_mult)
+            log.info(" DUMP | %s | move=%.1f%% | vol=%.1fx", sym, move, vol_mult)
 
 
 def scan_market_pulse(price_map, vol_now, change_now):
@@ -6924,7 +6924,7 @@ def scan_market_pulse(price_map, vol_now, change_now):
     )
 
     send(msg)
-    log.info("🌊 PULSE | rising=%.0f%% | buy=%.0f%% | total=%d",
+    log.info(" PULSE | rising=%.0f%% | buy=%.0f%% | total=%d",
              rising_pct, buy_pct, total)
 
 
@@ -7046,7 +7046,7 @@ def track_liquidity_flow(vol_now, change_now):
             top_in[0]
         )
         send(msg)
-        log.info("🔄 ROTATION | out=%s → in=%s | ratio=%.1fx",
+        log.info(" ROTATION | out=%s  in=%s | ratio=%.1fx",
                  top_out[0], top_in[0], top_in[1])
         return
 
@@ -7075,7 +7075,7 @@ def track_liquidity_flow(vol_now, change_now):
             " | ".join(["*{}*".format(c) for c in coins]) or "—"
         )
         send(msg)
-        log.info("💰 FLOW IN | %s | ratio=%.1fx | chg=%.1f%%",
+        log.info(" FLOW IN | %s | ratio=%.1fx | chg=%.1f%%",
                  top[0], top[1], top[2])
 
 
@@ -7103,7 +7103,7 @@ def track_liquidity_flow(vol_now, change_now):
             " | ".join(["*{}*".format(c) for c in coins]) or "—"
         )
         send(msg)
-        log.info("🚨 FLOW OUT | %s | ratio=%.1fx | chg=%.1f%%",
+        log.info(" FLOW OUT | %s | ratio=%.1fx | chg=%.1f%%",
                  top[0], top[1], top[2])
 
 
@@ -7223,7 +7223,7 @@ def scan_explosion_catcher(price_map, vol_now, change_now):
             send(msg)
             explosion_alerted[sym] = now
             coin_alerted[sym] = now
-            log.info("💥 EXPLOSION | %s | vol=%.1fx | tps=%.1fx | vdelta=%.0f%%",
+            log.info(" EXPLOSION | %s | vol=%.1fx | tps=%.1fx | vdelta=%.0f%%",
                      sym, vol_mult, tps_mult, vdelta * 100)
 
 
@@ -7364,7 +7364,7 @@ def track_liquidity_accumulation(price_map, vol_now, change_now):
 
             whale_watch_add(sym, ats, avg_vdelta, price)
 
-            log.info("🌊 LAT | %s | vol_growth=%.1fx | vdelta=%.0f%% | hours=%.1f",
+            log.info(" LAT | %s | vol_growth=%.1fx | vdelta=%.0f%% | hours=%.1f",
                      sym, vol_growth, avg_vdelta * 100, hours)
 
 
@@ -7457,7 +7457,7 @@ def auto_sector_discovery(vol_now, change_now):
     )
 
     send(msg)
-    log.info("🔍 ASD | %d عملة صاعدة | %d جديدة",
+    log.info(" ASD | %d   | %d ",
              len(strong_movers), len(unknown))
 
 
@@ -7530,7 +7530,7 @@ def scan_delisting_hunter(vol_now, change_now, price_map):
 
             send(msg)
             delisting_alerted[sym] = now
-            log.warning("⚠️ DELISTING | %s | vol_ratio=%.2f | chg=%.1f%%",
+            log.warning(" DELISTING | %s | vol_ratio=%.2f | chg=%.1f%%",
                         sym, vol_ratio, chg)
 
 
@@ -7623,7 +7623,7 @@ def scan_small_cap_hunter(price_map, vol_now, change_now):
         sc_hunter_alerted[sym] = now
         coin_alerted[sym] = now
         whale_watch_add(sym, ats, vdelta, price)
-        log.info("🎯 SCH | %s | vol=%.2fM | spike=%.1fx | vdelta=%.0f%%",
+        log.info(" SCH | %s | vol=%.2fM | spike=%.1fx | vdelta=%.0f%%",
                  sym, vol/1_000_000, vol_spike, vdelta*100)
 
 
@@ -7707,7 +7707,7 @@ def update_bull_mode(vol_now=None, change_now=None):
             "💡 _السيولة تدخل — اغتنم الفرصة_ 🎯"
         ).format(bull_reason)
         send(msg)
-        log.info("🚀 BULL MODE | reason=%s", bull_reason)
+        log.info(" BULL MODE | reason=%s", bull_reason)
 
 
 def check_btc_dominance(vol_now):
@@ -7730,7 +7730,7 @@ def check_btc_dominance(vol_now):
     if len(btcd_history) > 24:
         btcd_history.pop(0)
 
-    log.info("📊 BTC.D = %.2f%% | تاريخ: %d قراءة", btcd, len(btcd_history))
+    log.info(" BTC.D = %.2f%% | : %d ", btcd, len(btcd_history))
 
     if len(btcd_history) < 2:
         return
@@ -7773,7 +7773,7 @@ def check_btc_dominance(vol_now):
         )
         send(msg)
         btcd_alert_sent = now
-        log.info("🚀 Alt Season Alert! BTC.D=%.2f%% change=%.2f%%", btcd, change_24h)
+        log.info(" Alt Season Alert! BTC.D=%.2f%% change=%.2f%%", btcd, change_24h)
 
 
     elif (change_24h >= BTCD_RISE_ALERT and
@@ -7790,7 +7790,7 @@ def check_btc_dominance(vol_now):
         )
         send(msg)
         btcd_alert_sent = now
-        log.info("🐋 BTC Dominance Rising! BTC.D=%.2f%% change=%.2f%%", btcd, change_24h)
+        log.info(" BTC Dominance Rising! BTC.D=%.2f%% change=%.2f%%", btcd, change_24h)
 
 
 def _btc_1h_tag():
@@ -7881,7 +7881,7 @@ def get_tier_settings(vol_24h):
 
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
-    log.info("🔒 scan_tps_ats V20 - VDelta filter >= 65%%")
+    log.info(" scan_tps_ats V20 - VDelta filter >= 65%%")
     """
     يفحص أفضل 40 عملة بالحجم
     يبحث عن: TPS spike + ATS حيتان + VDelta قوي
@@ -7932,7 +7932,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
 
         if vdelta < _vd_min:
-            log.info("🔴 VDELTA_REJECT [%s]: %s | %.0f%% < %.0f%%",
+            log.info(" VDELTA_REJECT [%s]: %s | %.0f%% < %.0f%%",
                      _tier["label"], sym, vdelta*100, _vd_min*100)
             continue
 
@@ -7998,7 +7998,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         if coin_signal_count.get(sym, 0) >= 1:
             if sym not in whale_watchlist:
                 whale_watch_add(sym, stats["ats"], stats["vdelta"], price_map.get(sym, 0))
-                log.info("👁️ TPS silent add: %s (already watched)", sym)
+                log.info(" TPS silent add: %s (already watched)", sym)
             continue
 
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
@@ -8130,7 +8130,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
         if ats < WHALE_ATS_MIN and vdelta >= 0.65:
             whale_watch_add(sym, ats, vdelta, price_map.get(sym, 0))
-        log.info("⚡ TPS/ATS | %s | score=%d | tps=%.1f | ats=%.0f | vdelta=%.0f%%",
+        log.info(" TPS/ATS | %s | score=%d | tps=%.1f | ats=%.0f | vdelta=%.0f%%",
                  sym, score, stats["tps"], stats["ats"], stats["vdelta"] * 100)
 
 
@@ -8298,7 +8298,7 @@ def liquidity_hunter(price_map, vol_now, changes_map):
         lh_alerted[sym] = now
         coin_alerted[sym] = now   # 🔒 موحد
         perf_register(sym, price, "lh_big", score, " | ".join(signals))
-        log.info("🔥 LiqHunter | %s | score=%d | %s", sym, score, " | ".join(signals))
+        log.info(" LiqHunter | %s | score=%d | %s", sym, score, " | ".join(signals))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -8317,7 +8317,7 @@ def refresh_small_caps():
     النتيجة: تغطية كاملة لكل قطاع حتى بعملاته الصغيرة
     """
     global small_caps, last_sc_refresh
-    log.info("📋 Small Caps: تحديث القائمة...")
+    log.info(" Small Caps:  ...")
 
     data = safe_get(MEXC_24H)
     if not data:
@@ -8377,7 +8377,7 @@ def refresh_small_caps():
 
 
     sector_info = " | ".join("{}:{}".format(s, n) for s, n in stats.items())
-    log.info("📋 Small Caps: %d عملة | قطاعات: %s | جديدة: %d",
+    log.info(" Small Caps: %d  | : %s | : %d",
              len(small_caps), sector_info, len(new_sc[:100]))
 
 
@@ -8520,7 +8520,7 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
         sc_alerted[sym] = now
         coin_alerted[sym] = now   # 🔒 موحد
         perf_register(sym, price, "lh_small", score, " | ".join(signals))
-        log.info("🔍 SmallCapHunter | %s | score=%d | %s", sym, score, " | ".join(signals))
+        log.info(" SmallCapHunter | %s | score=%d | %s", sym, score, " | ".join(signals))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -8724,7 +8724,7 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
         hidden_accum_alerted[sym] = now
         coin_alerted[sym] = now   # 🔒 موحد
         perf_register(sym, price, "hidden", acc_score, acc_desc)
-        log.info("👁️ Hidden Accum | %s | score=%d | %s", sym, acc_score, acc_desc)
+        log.info(" Hidden Accum | %s | score=%d | %s", sym, acc_score, acc_desc)
 
 
 def detect_pump_dump(kd):
@@ -8901,7 +8901,7 @@ def check_trailing(symbol, price):
                 fmt_price(peak)
             )
         )
-        log.info("🛑 Trailing: %s | %.2f%%", symbol, result)
+        log.info(" Trailing: %s | %.2f%%", symbol, result)
         del tracked[symbol]
         return True
 
@@ -8916,7 +8916,7 @@ def check_trailing(symbol, price):
                 fmt_price(entry), fmt_price(price)
             )
         )
-        log.info("🛑 SL: %s | %.2f%%", symbol, change)
+        log.info(" SL: %s | %.2f%%", symbol, change)
         del tracked[symbol]
         return True
 
@@ -9014,42 +9014,42 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
     if symbol in tracked: return
 
     if market_state == "DANGER" and symbol not in hot_symbols:
-        log.debug("⛔ %s رُفض: DANGER + ليس hot", symbol)
+        log.debug(" %s : DANGER +  hot", symbol)
         return
 
     kd = get_klines(symbol, "15m", 50)
     if not kd:
-        log.debug("⛔ %s رُفض: لا klines", symbol)
+        log.debug(" %s :  klines", symbol)
         return
 
     is_pd, pd_r = detect_pump_dump(kd)
     if is_pd:
-        log.debug("🚫 P&D: %s | %s", symbol, pd_r)
+        log.debug(" P&D: %s | %s", symbol, pd_r)
         return
 
     vol_ratio_kd = kd["vols"][-1] / kd["avg_vol"] if kd["avg_vol"] > 0 else 0
     if vol_ratio_kd < 1.2:
-        log.debug("⛔ %s رُفض: حجم منخفض %.2fx", symbol, vol_ratio_kd)
+        log.debug(" %s :   %.2fx", symbol, vol_ratio_kd)
         return
 
     st = get_supertrend(kd)
     if st == "DOWN" and symbol not in hot_symbols:
-        log.debug("⛔ %s رُفض: Supertrend DOWN", symbol)
+        log.debug(" %s : Supertrend DOWN", symbol)
         return
 
     ig, gp = detect_green_candles(kd)
     if not ig:
-        log.debug("⛔ %s رُفض: شموع خضراء %.0f%%", symbol, gp)
+        log.debug(" %s :   %.0f%%", symbol, gp)
         return
 
 
     ob = get_order_book(symbol) if fetch_orderbook else None
     if ob:
         if ob["imb"] < MIN_IMBALANCE or ob["imb"] > MAX_IMBALANCE:
-            log.debug("⛔ %s رُفض: OB Imbalance %.2f", symbol, ob["imb"])
+            log.debug(" %s : OB Imbalance %.2f", symbol, ob["imb"])
             return
         if ob["bid"] < MIN_BID_DEPTH:
-            log.debug("⛔ %s رُفض: Bid صغير %.0f", symbol, ob["bid"])
+            log.debug(" %s : Bid  %.0f", symbol, ob["bid"])
             return
 
     vol_spike   = detect_volume_spike(kd)
@@ -9068,7 +9068,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
     min_s = GOLD_MIN if market_state == "CAUTION" else SCORE_MIN
     label = score_label(score)
     if not label or score < min_s:
-        log.debug("⛔ %s رُفض: Score=%d (min=%d) ST=%s hot=%s", symbol, score, min_s, st, in_hot)
+        log.debug(" %s : Score=%d (min=%d) ST=%s hot=%s", symbol, score, min_s, st, in_hot)
         return
 
     sl_pct = calc_sl(kd, score, ob, is_bo)
@@ -9138,7 +9138,7 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
             sl=sl_pct, trail=TRAIL_DROP_TRIGGER,
         )
     )
-    log.info("🟢 SIGNAL | %s | score=%d | hot=%s bo=%s sl=%.1f%%",
+    log.info(" SIGNAL | %s | score=%d | hot=%s bo=%s sl=%.1f%%",
              symbol, score, in_hot, is_bo, sl_pct)
 
 
@@ -9165,14 +9165,14 @@ def check_progression(symbol, price):
             label, symbol, gain, fmt_price(price), sl))
         tracked[symbol]["level"]      = 2
         tracked[symbol]["last_alert"] = now
-        log.info("🔵 #2 | %s +%.2f%%", symbol, gain)
+        log.info(" #2 | %s +%.2f%%", symbol, gain)
 
     elif level == 2 and gain >= SIGNAL3_GAIN:
         send("{} *SIGNAL #3* | `{}`\n🔥 *+{:.2f}%*\n💵 `{}` | SL:`-{}%`".format(
             label, symbol, gain, fmt_price(price), sl))
         tracked[symbol]["level"]      = 3
         tracked[symbol]["last_alert"] = now
-        log.info("🔥 #3 | %s +%.2f%%", symbol, gain)
+        log.info(" #3 | %s +%.2f%%", symbol, gain)
 
 
 # ═══════════════════════════════════════════════
@@ -9183,7 +9183,7 @@ def cleanup():
     now = time.time()
     for s in [s for s,d in list(tracked.items())
               if now - d["entry_time"] > STALE_REMOVE_SEC]:
-        log.info("🗑️ %s", s)
+        log.info(" %s", s)
         del tracked[s]
     clear_expired_cache()
 
@@ -9451,7 +9451,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
                     rise_from_low = (price - low_7d) / low_7d * 100
                     # السعر يجب أن يكون قريباً من القاع (< 40% فوقه)
                     if rise_from_low > 40.0:
-                        log.info("🚫 VOL_SURGE SKIP: %s بعيد عن القاع +%.0f%%", sym, rise_from_low)
+                        log.info(" VOL_SURGE SKIP: %s    +%.0f%%", sym, rise_from_low)
                         continue
 
             # فحص VDelta
@@ -9495,7 +9495,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             coin_alerted[sym] = now
             whale_watch_add(sym, ats, vdelta, price)
 
-            log.info("📡 VOL_SURGE QUEUED | %s | spike=%.1fx | score=%d",
+            log.info(" VOL_SURGE QUEUED | %s | spike=%.1fx | score=%d",
                      sym, spike, _vs_score)
 
         except (ValueError, TypeError, ZeroDivisionError):
@@ -9734,7 +9734,7 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
             coin_alerted[sym] = now
             whale_watch_add(sym, vol_now.get(sym,0)/10000, vdelta_ma, price)
 
-            log.info("🎣 BOTTOM FISHER QUEUED | %s | score=%d",
+            log.info(" BOTTOM FISHER QUEUED | %s | score=%d",
                      sym, _bf_score)
 
         except (IndexError, ValueError, ZeroDivisionError):
@@ -9765,7 +9765,7 @@ def run_daily_liquidity_scan():
         return
 
     lz_daily_sent_date = today
-    log.info("🌊 V16: بدء الفحص اليومي للسيولة...")
+    log.info(" V16:    ...")
 
     signals_found = 0
     tv_signals    = []
@@ -9833,7 +9833,7 @@ def run_daily_liquidity_scan():
 
 
         if target_price <= daily_close:
-            log.info("⏭️ تخطي %s - الهدف أقل من الدخول", sym)
+            log.info("  %s -    ", sym)
             continue
 
 
@@ -9904,14 +9904,14 @@ def run_daily_liquidity_scan():
         signals_found += 1
         _lz_count += 1
         if _lz_count >= 5: break  # أفضل 5 فقط
-        log.info("🌊 Daily LZ Signal | %s | sigma=%d | close=%.8f",
+        log.info(" Daily LZ Signal | %s | sigma=%d | close=%.8f",
                  sym, sigma, daily_close)
 
         time.sleep(1)  # لا نضغط على Telegram
 
     if tv_signals:
         send_tv_scripts(tv_signals)
-    log.info("🌊 Daily Liquidity Scan انتهى | إشارات: %d", signals_found)
+    log.info(" Daily Liquidity Scan  | : %d", signals_found)
 
     if signals_found == 0:
         send(
@@ -10093,10 +10093,10 @@ def send_daily_report(force=False):
         if now_utc.hour != 0:
             return
         if daily_report_sent_date == today:
-            log.debug("📊 تقرير اليوم أُرسل مسبقاً: %s", today)
+            log.debug("    : %s", today)
             return
 
-    log.info("📊 إرسال التقرير اليومي | %s | الساعة: %02d:%02d UTC",
+    log.info("    | %s | : %02d:%02d UTC",
              today, now_utc.hour, now_utc.minute)
 
     daily_report_sent_date = today  # ✅ نسجل مبكراً لمنع التكرار
@@ -10104,7 +10104,7 @@ def send_daily_report(force=False):
     try:
         _send_daily_report_body(today, now_utc)
     except Exception as _err:
-        log.error("❌ send_daily_report فشل: %s", _err, exc_info=True)
+        log.error(" send_daily_report : %s", _err, exc_info=True)
         send("❌ خطأ في التقرير: `{}`".format(str(_err)[:200]))
 
 def _send_daily_report_body(today, now_utc):
@@ -10142,10 +10142,10 @@ def _send_daily_report_body(today, now_utc):
                 for s,g,e,c in loses[:3]:
                     bt_msg += "  ❌ *{}* `{}→{}` `{}%`\n".format(s,e,round(c,6),g)
             send(bt_msg)
-    log.info("📅 Daily Report - إرسال تقرير إغلاق اليوم...")
+    log.info(" Daily Report -    ...")
 
     if not all_tickers:
-        log.warning("📊 التقرير: all_tickers فارغة")
+        log.warning(" : all_tickers ")
         send("⚠️ البيانات غير جاهزة — أعد المحاولة بعد دقيقة")
         return
     vol_now = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in all_tickers}
@@ -10232,7 +10232,7 @@ def _send_daily_report_body(today, now_utc):
     falling     = int(sell_vol / 1_000_000)
     total_coins = int(total_trade_vol / 1_000_000)
 
-    log.info("📊 Buy/Sell | buy=%.1f%% (%.0fM) | sell=%.1f%% (%.0fM)",
+    log.info(" Buy/Sell | buy=%.1f%% (%.0fM) | sell=%.1f%% (%.0fM)",
              buy_pct, buy_vol/1_000_000, sell_pct, sell_vol/1_000_000)
 
     top_gainers.sort(key=lambda x: -x[1])
@@ -10664,7 +10664,7 @@ def send_market_activity_trend():
     msg += "🟢=شراء | 🔴=بيع | σ=عدد Sigma coins"
 
     send(msg)
-    log.info("📊 Market Activity Trend | %d days", len(recent))
+    log.info(" Market Activity Trend | %d days", len(recent))
 
 
 # ═══════════════════════════════════════════════════════
@@ -10748,7 +10748,7 @@ def send_tv_scripts(signals):
             "━━━━━━━━━━━━━━━━━━\n"
             "```\n{}\n```".format(base, script[:3000])
         )
-        log.info("📄 TV Script → %s", s["sym"])
+        log.info(" TV Script  %s", s["sym"])
 
 
 
@@ -10849,12 +10849,12 @@ def redis_save(data):
         )
         ok = resp.status_code == 200
         if ok:
-            log.info("☁️ Redis saved - %d bytes", len(payload))
+            log.info(" Redis saved - %d bytes", len(payload))
         else:
-            log.warning("⚠️ Redis save failed: %s", resp.text[:100])
+            log.warning(" Redis save failed: %s", resp.text[:100])
         return ok
     except Exception as e:
-        log.error("❌ redis_save error: %s", e)
+        log.error(" redis_save error: %s", e)
         return False
 
 
@@ -10871,17 +10871,17 @@ def redis_load():
             timeout=10,
         )
         if resp.status_code != 200:
-            log.info("📂 Redis: لا توجد بيانات محفوظة")
+            log.info(" Redis:    ")
             return {}
         result = resp.json()
         raw = result.get("result")
         if not raw:
             return {}
         data = _json.loads(raw)
-        log.info("☁️ Redis loaded - %d bytes", len(raw))
+        log.info(" Redis loaded - %d bytes", len(raw))
         return data
     except Exception as e:
-        log.error("❌ redis_load error: %s", e)
+        log.error(" redis_load error: %s", e)
         return {}
 
 
@@ -10931,10 +10931,10 @@ def save_state():
             json.dump(state, f)
 
         redis_save(state)
-        log.info("💾 State saved - %d gems | %d watchlist | %d BT",
+        log.info(" State saved - %d gems | %d watchlist | %d BT",
                  len(gem_watchlist), len(watchlist), len(backtest_signals))
     except Exception as e:
-        log.error("❌ save_state error: %s", e)
+        log.error(" save_state error: %s", e)
 
 
 def load_state():
@@ -10953,19 +10953,19 @@ def load_state():
 
 
     state = redis_load()
-    log.info("☁️ Redis state: %d keys", len(state))
+    log.info(" Redis state: %d keys", len(state))
 
 
     if not state:
         if not os.path.exists(STATE_FILE):
-            log.info("📂 لا يوجد حفظ - بداية جديدة")
+            log.info("    -  ")
             return
         try:
             with open(STATE_FILE, "r") as f:
                 state = json.load(f)
-            log.info("📂 State loaded from local file")
+            log.info(" State loaded from local file")
         except Exception as e:
-            log.error("❌ load local error: %s", e)
+            log.error(" load local error: %s", e)
             return
 
     if not state:
@@ -10974,7 +10974,7 @@ def load_state():
     try:
         saved_at   = state.get("saved_at", 0)
         age_hours  = (time.time() - saved_at) / 3600
-        log.info("📂 تحميل State - عمره: %.1f ساعة", age_hours)
+        log.info("  State - : %.1f ", age_hours)
 
         bottom_price_history.update(state.get("bottom_price_history", {}))
         bottom_vol_history.update(state.get("bottom_vol_history", {}))
@@ -11014,7 +11014,7 @@ def load_state():
         if isinstance(_mah, list):
             market_activity_history.extend(_mah[-30:])
 
-        log.info("✅ State loaded | gems=%d | watchlist=%d | ath=%d | BT=%d",
+        log.info(" State loaded | gems=%d | watchlist=%d | ath=%d | BT=%d",
                  len(gem_watchlist), len(watchlist), len(ath_tracker), len(backtest_signals))
 
         send("♻️ *Bot Restarted* — تم استعادة البيانات\n"
@@ -11024,7 +11024,7 @@ def load_state():
                  len(backtest_signals), age_hours))
 
     except Exception as e:
-        log.error("❌ load_state error: %s", e)
+        log.error(" load_state error: %s", e)
 
 
 def init_static_watchlist():
@@ -11033,7 +11033,7 @@ def init_static_watchlist():
     global watchlist, wl_price_snapshot
 
     if not all_tickers:
-        log.warning("⚠️ init_static_watchlist: all_tickers فارغ")
+        log.warning(" init_static_watchlist: all_tickers ")
         return
 
     ticker_map = {t["symbol"]: t for t in all_tickers}
@@ -11097,7 +11097,7 @@ def init_static_watchlist():
 
         t = ticker_map.get(sym)
         if not t:
-            log.warning("⚠️ Static WL: %s غير موجودة في السوق", sym)
+            log.warning(" Static WL: %s    ", sym)
             continue
 
         try:
@@ -11116,7 +11116,7 @@ def init_static_watchlist():
         wl_price_snapshot[sym] = price
         added += 1
 
-    log.info("👁️ Static Watchlist: أضفنا %d عملة | إجمالي: %d", added, len(watchlist))
+    log.info(" Static Watchlist:  %d  | : %d", added, len(watchlist))
 
 
 
@@ -11223,7 +11223,7 @@ def track_global_liquidity():
                 if s not in hot_sectors:
                     hot_sectors.append(s)
             hot_symbols = {c for sec in hot_sectors for c in SECTORS.get(sec, [])}
-            log.info("💧 LIQUIDITY FLOW | IN: %s | OUT: %s",
+            log.info(" LIQUIDITY FLOW | IN: %s | OUT: %s",
                      list(added), list(removed))
 
 
@@ -11426,7 +11426,7 @@ def scan_exit_signals(price_map, vol_now, changes_map):
 
         send(msg)
         exit_alerted[sym] = now
-        log.info("🚨 EXIT SIGNAL | %s | VD=%.0f%% | PnL=%.1f%% | %s",
+        log.info(" EXIT SIGNAL | %s | VD=%.0f%% | PnL=%.1f%% | %s",
                  sym, vdelta*100, pnl_pct, exit_reason)
 
         # حذف من القائمة إذا خسارة
@@ -11441,7 +11441,7 @@ def add_to_exit_watchlist(sym, entry_price, targets=None):
         "time":    time.time(),
         "targets": targets or [],
     }
-    log.info("👁️ EXIT WATCH: %s | entry=%.8f", sym, entry_price)
+    log.info(" EXIT WATCH: %s | entry=%.8f", sym, entry_price)
 
 
 
@@ -11530,7 +11530,7 @@ def smart_market_scan():
     all_candidates = list(set(new_candidates + static))
     candidates[:] = all_candidates
 
-    log.info("🌐 Smart Scan | %d عملة في candidates | top: %s",
+    log.info(" Smart Scan | %d   candidates | top: %s",
              len(candidates),
              [s.replace("USDT","") for s,_,_,_ in scored[:5]])
 
@@ -11570,7 +11570,7 @@ def run():
     global last_sr_alert                     # 🌊 Sector Rotation
     global perf_signals, perf_id_counter     # 📊 Performance Tracker
 
-    log.info("🚀 MAFIO-BOT يبدأ...")
+    log.info(" MAFIO-BOT ...")
 
 
     try:
@@ -11579,7 +11579,7 @@ def run():
             "https://api.telegram.org/bot{}/deleteWebhook?drop_pending_updates=true".format(TELEGRAM_TOKEN),
             timeout=10
         )
-        log.info("✅ Webhook محذوف عند البداية")
+        log.info(" Webhook   ")
     except Exception as _e:
         log.warning("deleteWebhook error: %s", _e)
 
@@ -11588,7 +11588,7 @@ def run():
 
     load_state()  # استعادة البيانات من آخر تشغيل
 
-    log.info("⏳ تحميل بيانات السوق...")
+    log.info("   ...")
     analyze_btc()
 
     refresh_tickers()
@@ -11604,20 +11604,20 @@ def run():
         if _d.get("ok") and _d.get("result"):
             global _tg_offset
             _tg_offset = _d["result"][-1]["update_id"] + 1
-            log.info("📨 Telegram offset initialized: %d", _tg_offset)
+            log.info(" Telegram offset initialized: %d", _tg_offset)
     except Exception as _e:
         log.warning("offset init error: %s", _e)
     refresh_tickers()
     init_static_watchlist()  # all_tickers جاهز الآن
 
-    log.info("🔍 تشغيل Auto Expand Sectors...")
+    log.info("  Auto Expand Sectors...")
     auto_expand_sectors()
     last_expand = time.time()
 
     analyze_sectors()
 
     last_sector_report = time.time()  # منع إرسال ثانٍ فوراً
-    log.info("✅ جاهز | Candidates: %d | Hot: %s",
+    log.info("  | Candidates: %d | Hot: %s",
              len(candidates), ", ".join(hot_sectors) or "لا يوجد")
 
     last_deep_scan = 0
@@ -11724,7 +11724,7 @@ def run():
 
             if now - last_expand      >= EXPAND_EVERY:
 
-                log.info("🔄 تحديث يومي - Auto Expand Sectors")
+                log.info("   - Auto Expand Sectors")
                 auto_expand_sectors()
                 last_expand = now
             if now - last_stale       >= STALE_EVERY:
@@ -11871,4 +11871,30 @@ def run():
 
                 pre_scored.sort(key=lambda x: -x[3])
 
-                log.in
+
+                scanned = 0
+                for rank, (sym, price, change, _) in enumerate(pre_scored):
+
+                    fetch_ob = (rank < 20)
+                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
+                    scanned += 1
+                    if scanned % 10 == 0:
+                        time.sleep(0.5)
+
+                last_deep_scan = now
+                log.info(" Deep Scan  | %d ", scanned)
+
+            cycle += 1
+
+            time.sleep(CHECK_INTERVAL)
+
+        except KeyboardInterrupt:
+            send("⛔ *MAFIO-BOT* — تم الإيقاف")
+            break
+        except Exception as e:
+            log.error(": %s", e, exc_info=True)
+            time.sleep(10)
+
+
+if __name__ == "__main__":
+    run()
