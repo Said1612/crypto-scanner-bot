@@ -2363,20 +2363,39 @@ def analyze_btc():
     _crash_1h = btc_trend_1h  <= BTC_CRASH_1H  # انهار -1.5% في ساعة
 
 
-    if btc_signal <= danger_enter or btc_trend_1h <= -2.0 or _crash_4h:
-        suggested = "DANGER"
-        # اذا حيتان يشترون بقوة → CAUTION بدل DANGER
-        _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
-        _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
-        if _btc_vd >= 0.65 and _btc_ats >= 2000:
-            suggested = "CAUTION"
-            log.info("BTC VD=%.0f%% ATS=%.0f$ DANGER->CAUTION", _btc_vd*100, _btc_ats)
-    elif btc_signal <= caution_enter or _crash_1h:
-        suggested = "CAUTION"
-    elif btc_signal >= caution_exit:
-        suggested = "SAFE"
-    else:
+    
+    # VDelta السوق
+    _mkt_buy = 0.0; _mkt_sell = 0.0
+    if all_tickers:
+        for _t in all_tickers:
+            try:
+                _v = float(_t.get("quoteVolume", 0))
+                _c = float(_t.get("priceChangePercent", 0))
+                if _v < 10000: continue
+                if _c > 0: _mkt_buy += _v
+                else: _mkt_sell += _v
+            except: pass
+    _mkt_total = _mkt_buy + _mkt_sell
+    _mkt_vd = (_mkt_buy / _mkt_total) if _mkt_total > 0 else 0.5
+    _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+    _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
+    _mkt_vd_w = _mkt_vd * 0.60 + _btc_vd * 0.40
 
+    if _crash_4h or btc_trend_1h <= -2.0:
+        suggested = "DANGER"
+    elif btc_signal <= danger_enter and _mkt_vd_w < 0.45:
+        suggested = "DANGER"
+    elif btc_signal <= danger_enter and _btc_vd >= 0.65 and _btc_ats >= 2000:
+        suggested = "CAUTION"
+    elif btc_signal <= danger_enter:
+        suggested = "DANGER"
+    elif btc_signal <= caution_enter or _crash_1h or _mkt_vd_w < 0.45:
+        suggested = "CAUTION"
+    elif btc_signal >= caution_exit and _mkt_vd_w >= 0.55:
+        suggested = "SAFE"
+    elif btc_signal >= caution_exit:
+        suggested = "CAUTION"
+    else:
         suggested = market_state
 
 
