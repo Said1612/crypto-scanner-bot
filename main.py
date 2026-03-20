@@ -11871,4 +11871,4 @@ def run():
 
                 pre_scored.sort(key=lambda x: -x[3])
 
-                pass  
+                log.in
