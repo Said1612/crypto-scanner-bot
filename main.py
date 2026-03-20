@@ -2385,8 +2385,7 @@ def analyze_btc():
     if _crash_4h or btc_trend_1h <= -2.0:
         # انهيار سريع = DANGER دائماً بغض النظر عن VDelta
         suggested = "DANGER"
-    elif _mkt_vd_w >= 0.60:
-        # VDelta السوق قوي = SAFE حتى لو BTC ينزل قليلاً
+    elif _mkt_vd_w >= 0.55:
         suggested = "SAFE"
     elif _mkt_vd_w >= 0.50 and btc_signal >= caution_enter:
         # VDelta متوسط + BTC مستقر = SAFE
@@ -2509,13 +2508,14 @@ def analyze_btc():
 
 
         _btc_vd_now = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
-        if market_state == "SAFE":
-            _rec = "✅ *ادخل* — السوق مناسب"
-        elif market_state == "CAUTION":
-            _rec = "🟡 *انتظر* — حيتان يشترون" if _btc_vd_now >= 0.65 else "🟡 *انتظر* — السوق غير مستقر"
-        else:
-            _rec = "⚠️ *انتظر* — حيتان يشترون لكن السوق هابط" if _btc_vd_now >= 0.65 else "🔴 *ابتعد* — ضغط بيع قوي"
 
+        _eth_vd_now = eth_tps_stats.get("vdelta", 0.5) if eth_tps_stats else 0.5
+        if market_state == "SAFE":
+            _rec = "\u2705 *ادخل* — السوق مناسب للتداول"
+        elif market_state == "CAUTION":
+            _rec = "\U0001f7e1 *انتظر* — حيتان يشترون" if _btc_vd_now >= 0.65 or _eth_vd_now >= 0.65 else "\U0001f7e1 *انتظر* — السوق غير مستقر"
+        else:
+            _rec = "\u26a0\ufe0f *انتظر* — حيتان يشترون لكن السوق هابط" if _btc_vd_now >= 0.65 or _eth_vd_now >= 0.65 else "\U0001f534 *ابتعد* — ضغط بيع قوي"
         send(
             "📊 *تقرير السوق*\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -12212,7 +12212,6 @@ def run():
             smart_market_scan()
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
-            scan_exit_signals(price_map, vol_now, changes_map)
             scan_reversal_exit(price_map)
             scan_reentry(price_map)
 
