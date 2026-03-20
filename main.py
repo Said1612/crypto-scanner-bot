@@ -727,7 +727,7 @@ btc_tps_stats  = {}
 eth_tps_stats  = {}
 market_state        = "SAFE"
 last_market_report  = 0.0
-MARKET_REPORT_EVERY = 14400
+MARKET_REPORT_EVERY = 21600
 
 
 _btc_danger_count  = 0
@@ -11509,6 +11509,8 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
 
     send(msg)
     exit_alerted[sym] = now
+    # حذف من exit_watchlist — إشارة واحدة فقط
+    exit_watchlist.pop(sym, None)
     return urgent
 
 
@@ -11597,7 +11599,7 @@ def scan_reversal_exit(price_map):
         return
 
     for sym, data in list(exit_watchlist.items()):
-        if now - exit_alerted.get(sym, 0) < 900:
+        if now - exit_alerted.get(sym, 0) < 14400:
             continue
 
         price = price_map.get(sym, 0)
@@ -11640,6 +11642,8 @@ def scan_reversal_exit(price_map):
         exit_alerted[sym] = now
         # إضافة لمراقبة إعادة الدخول
         add_to_reentry_watch(sym, price, entry)
+        # حذف من exit_watchlist — إشارة واحدة فقط
+        exit_watchlist.pop(sym, None)
 
 
 
