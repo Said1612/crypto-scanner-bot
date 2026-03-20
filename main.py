@@ -2534,7 +2534,11 @@ def analyze_btc():
                 mvd=_mkt_vd_pct,
                 hot=_hot_line,
                 rec=_rec,
-                confirm=BTC_CONFIRM_COUNT,
+                confirm=(
+                    3 if market_state == "SAFE" else
+                    2 if (btc_tps_stats or {}).get("vdelta",0) >= 0.65 else
+                    1
+                ),
             )
         )
         log.info(" Market: %s%s | BTC %.2f%% | confirm=%d",
