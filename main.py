@@ -2389,7 +2389,9 @@ def analyze_btc():
         suggested = "CAUTION"
     elif btc_signal <= danger_enter:
         suggested = "DANGER"
-    elif btc_signal <= caution_enter or _crash_1h or _mkt_vd_w < 0.45:
+    elif _mkt_vd_w < 0.40:
+        suggested = "DANGER"
+    elif btc_signal <= caution_enter or _crash_1h or _mkt_vd_w < 0.50:
         suggested = "CAUTION"
     elif btc_signal >= caution_exit and _mkt_vd_w >= 0.55:
         suggested = "SAFE"
