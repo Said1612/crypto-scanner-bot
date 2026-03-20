@@ -2365,22 +2365,23 @@ def analyze_btc():
 
     
 
-    _mkt_buy = 0.0; _mkt_sell = 0.0
+    # VDelta السوق - نفس طريقة حساب التقرير
+    _buy_vol = 0.0; _sell_vol = 0.0
     if all_tickers:
         for _t in all_tickers:
             try:
                 _v = float(_t.get("quoteVolume", 0))
                 _c = float(_t.get("priceChangePercent", 0))
                 if _v < 10000: continue
-                if _c > 0: _mkt_buy += _v
-                else: _mkt_sell += _v
+                if _c > 0: _buy_vol += _v
+                else: _sell_vol += _v
             except: pass
-    _mkt_total = _mkt_buy + _mkt_sell
-    _mkt_vd = (_mkt_buy / _mkt_total) if _mkt_total > 0 else 0.5
+    _total_vol = _buy_vol + _sell_vol
+    _mkt_vd_raw = (_buy_vol / _total_vol) if _total_vol > 0 else 0.5
     _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
     _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
-    _mkt_vd_w = _mkt_vd * 0.60 + _btc_vd * 0.40
-    # استخدام VDelta المحسوب
+    # وزن BTC 40% + السوق 60% - نفس طريقة التقرير
+    _mkt_vd_w = _mkt_vd_raw * 0.60 + _btc_vd * 0.40
 
     if _crash_4h or btc_trend_1h <= -2.0:
         # انهيار سريع = DANGER دائماً بغض النظر عن VDelta
@@ -11313,9 +11314,7 @@ def track_global_liquidity():
 
 
 
-exit_watchlist  = {
-    "PMMUSDT": {"entry": 0.0121, "time": 0.0, "targets": []},
-}
+exit_watchlist  = {}
 exit_alerted    = {}   # {sym: ts}
 EXIT_CHECK_EVERY = 120
 last_exit_check  = 0.0
@@ -12212,8 +12211,7 @@ def run():
             smart_market_scan()
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
-            scan_reversal_exit(price_map)
-            scan_reentry(price_map)
+
 
             flush_signal_queue(max_send=5)
 
