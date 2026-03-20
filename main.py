@@ -2380,6 +2380,9 @@ def analyze_btc():
     _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
     _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
     _mkt_vd_w = _mkt_vd * 0.60 + _btc_vd * 0.40
+    # استخدام VDelta التقرير إذا متاح
+    if _last_mkt_vd_pct > 0:
+        _mkt_vd_w = _last_mkt_vd_pct / 100.0
 
     if _crash_4h or btc_trend_1h <= -2.0:
         # انهيار سريع = DANGER دائماً بغض النظر عن VDelta
@@ -11450,7 +11453,10 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
     global exit_alerted
 
     now = time.time()
+    # منع الإرسال المزدوج مع scan_reversal_exit
     if now - exit_alerted.get(sym, 0) < 7200:
+        return False
+    if sym not in exit_watchlist:
         return False
 
     pnl = (current_price - entry_price) / entry_price * 100 if entry_price > 0 else 0
@@ -11775,9 +11781,12 @@ def scan_exit_signals(price_map, vol_now, changes_map):
         exit_urgent = False
 
 
-        if vdelta < 0.40:
+        if vdelta < 0.40 and ats >= 200:
             exit_reason = "VDelta انقلب للبيع {:.0f}%".format(vdelta*100)
             exit_urgent = True
+        elif vdelta < 0.40:
+            exit_reason = "VDelta ضعيف {:.0f}%".format(vdelta*100)
+            exit_urgent = False
 
 
         elif ats >= 500 and vdelta < 0.45:
@@ -11803,7 +11812,7 @@ def scan_exit_signals(price_map, vol_now, changes_map):
 
         title = "اخرج الآن!" if exit_urgent else "تحذير خروج"
         msg = (
-            "{icon} *{title}* {icon}\\n"
+            "{icon} *{title}* {icon}\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💥 *{sym}* — {reason}\n"
             "━━━━━━━━━━━━━━━━━━\n"
