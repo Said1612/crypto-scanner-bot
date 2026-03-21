@@ -2496,6 +2496,18 @@ def analyze_btc():
 
         track_liquidity_exit(_mkt_vd_pct)
 
+        # تحديث market_state بناءً على VDelta الفعلي
+        _eth_vd_report = eth_tps_stats.get("vdelta", 0.5) if eth_tps_stats else 0.5
+        _btc_vd_report = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+        _real_combined = _btc_vd_report * 0.50 + _eth_vd_report * 0.30 + (_mkt_vd_pct/100) * 0.20
+        if not (_btc_trend_4h_crash if 'btc_trend_4h' in dir() else False):
+            if _real_combined >= 0.55:
+                market_state = "SAFE"
+            elif _real_combined >= 0.45:
+                market_state = "CAUTION"
+            else:
+                market_state = "DANGER" 
+
 
         _hot_line = "🔥 أفضل قطاع: *{}*\n".format(hot_sectors[0]) if hot_sectors else ""
 
