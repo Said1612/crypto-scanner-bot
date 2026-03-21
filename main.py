@@ -10385,7 +10385,7 @@ def _send_daily_report_body(today, now_utc):
 
         whale_verdict  = "🟢 *السوق صاعد — زخم إيجابي*"
         whale_desc     = "شراء {:.0f}% من السيولة — أموال تدخل السوق 💰".format(buy_pct)
-        whale_action   = "✅ _يمكن الدخول بحذر_"
+        whale_action   = "✅ _ادخل — السوق مناسب_"
         whale_icon     = "📈🟢"
 
     elif _sell_pressure:
