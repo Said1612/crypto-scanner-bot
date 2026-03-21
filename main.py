@@ -2388,13 +2388,28 @@ def analyze_btc():
     # وزن BTC 50% + ETH 30% + السوق 20%
     _combined_vd = _btc_vd * 0.50 + _eth_vd * 0.30 + _mkt_vd_raw * 0.20
 
+    # القرار يعتمد على VDelta + ATS/TPS
+    _btc_ats_big  = _btc_ats >= 2000
+    _btc_buying   = _btc_vd >= 0.60 and _btc_ats_big
+    _btc_selling  = _btc_vd < 0.40 and _btc_ats_big
+
     if _crash_4h or btc_trend_1h <= -2.0:
+        # انهيار سريع = DANGER دائماً
         suggested = "DANGER"
-    elif _combined_vd >= 0.55:
+    elif _btc_selling:
+        # حيتان BTC يبيعون بقوة = DANGER
+        suggested = "DANGER"
+    elif _combined_vd >= 0.60:
+        # VDelta قوي = SAFE
+        suggested = "SAFE"
+    elif _combined_vd >= 0.50 and _btc_buying:
+        # VDelta معقول + حيتان BTC يشترون = SAFE
         suggested = "SAFE"
     elif _combined_vd >= 0.45:
+        # VDelta متوسط = CAUTION
         suggested = "CAUTION"
     else:
+        # VDelta ضعيف = DANGER
         suggested = "DANGER"
     if suggested == "DANGER":
         _btc_danger_count  += 1
