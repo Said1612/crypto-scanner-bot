@@ -8025,7 +8025,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         if _vdelta < 0.66:
             continue
 
-        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready:
+        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 50:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
