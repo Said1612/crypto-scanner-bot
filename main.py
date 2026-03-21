@@ -2382,19 +2382,20 @@ def analyze_btc():
     _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
     _mkt_vd_w = _mkt_vd_raw * 0.60 + _btc_vd * 0.40
 
-    # منطق بسيط يعتمد على BTC وETH VDelta
-    _eth_vd_now = eth_tps_stats.get("vdelta", 0.5) if eth_tps_stats else 0.5
-    _combined_vd = _mkt_vd_raw * 0.50 + _btc_vd * 0.30 + _eth_vd_now * 0.20
+    # VDelta مبسط يعتمد على BTC وETH فقط (الأكثر دقة)
+    _eth_vd  = eth_tps_stats.get("vdelta", 0.5) if eth_tps_stats else 0.5
+    _eth_ats = eth_tps_stats.get("ats", 0) if eth_tps_stats else 0
+    # وزن BTC 50% + ETH 30% + السوق 20%
+    _combined_vd = _btc_vd * 0.50 + _eth_vd * 0.30 + _mkt_vd_raw * 0.20
 
     if _crash_4h or btc_trend_1h <= -2.0:
         suggested = "DANGER"
-    elif _combined_vd >= 0.60:
+    elif _combined_vd >= 0.58:
         suggested = "SAFE"
     elif _combined_vd >= 0.45:
         suggested = "CAUTION"
     else:
         suggested = "DANGER"
-
     if suggested == "DANGER":
         _btc_danger_count  += 1
         _btc_caution_count  = 0
