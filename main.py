@@ -2288,7 +2288,6 @@ def analyze_btc():
     global btc_change_24h, btc_trend_1h, btc_trend_4h, market_state, last_btc
     global last_market_report
     global eth_change_24h
-    global _daily_buy_pct
 
 
     data = safe_get(MEXC_24H, {"symbol": "BTCUSDT"})
@@ -2381,32 +2380,20 @@ def analyze_btc():
     _mkt_vd_raw = (_buy_vol / _total_vol) if _total_vol > 0 else 0.5
     _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
     _btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
-    # نستخدم buy_pct من التقرير اليومي إذا متاح
-    if _daily_buy_pct > 0:
-        _mkt_vd_w = _daily_buy_pct / 100.0
-    else:
-        _mkt_vd_w = _mkt_vd_raw * 0.60 + _btc_vd * 0.40
+    _mkt_vd_w = _mkt_vd_raw * 0.60 + _btc_vd * 0.40
+
+    # منطق بسيط يعتمد على BTC وETH VDelta
+    _eth_vd_now = eth_tps_stats.get("vdelta", 0.5) if eth_tps_stats else 0.5
+    _combined_vd = _mkt_vd_raw * 0.50 + _btc_vd * 0.30 + _eth_vd_now * 0.20
 
     if _crash_4h or btc_trend_1h <= -2.0:
-        # انهيار سريع = DANGER دائماً بغض النظر عن VDelta
         suggested = "DANGER"
-    elif _mkt_vd_w >= 0.55:
+    elif _combined_vd >= 0.60:
         suggested = "SAFE"
-    elif _mkt_vd_w >= 0.50 and btc_signal >= caution_enter:
-        # VDelta متوسط + BTC مستقر = SAFE
-        suggested = "SAFE"
-    elif _mkt_vd_w >= 0.45:
-        # VDelta معقول = CAUTION
+    elif _combined_vd >= 0.45:
         suggested = "CAUTION"
-    elif btc_signal <= danger_enter and _mkt_vd_w < 0.40:
-        # BTC ينزل كثيراً + VDelta ضعيف = DANGER
-        suggested = "DANGER"
-    elif _mkt_vd_w < 0.40:
-        # VDelta ضعيف = DANGER
-        suggested = "DANGER"
     else:
-        suggested = "CAUTION" 
-
+        suggested = "DANGER"
 
     if suggested == "DANGER":
         _btc_danger_count  += 1
@@ -10138,7 +10125,6 @@ def _get_smart_money_summary():
 
 def send_daily_report(force=False):
     # type: (bool) -> None
-    global _daily_buy_pct
     global daily_report_sent_date, daily_market_vol_history
 
     now_utc  = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -10278,7 +10264,6 @@ def _send_daily_report_body(today, now_utc):
 
     total_trade_vol = buy_vol + sell_vol
     buy_pct         = buy_vol  / total_trade_vol * 100 if total_trade_vol > 0 else 50
-    _daily_buy_pct  = buy_pct
     sell_pct        = sell_vol / total_trade_vol * 100 if total_trade_vol > 0 else 50
 
 
