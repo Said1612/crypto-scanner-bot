@@ -2528,14 +2528,18 @@ def analyze_btc():
 
 
         _btc_vd_now = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+        _btc_ats_now = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
 
         _eth_vd_now = eth_tps_stats.get("vdelta", 0.5) if eth_tps_stats else 0.5
+        _eth_ats_now = eth_tps_stats.get("ats", 0) if eth_tps_stats else 0
+        _real_whales = (_btc_vd_now >= 0.65 and _btc_ats_now >= 2000) or (_eth_vd_now >= 0.65 and _eth_ats_now >= 2000)
+
         if market_state == "SAFE":
             _rec = "\u2705 *ادخل* — السوق مناسب للتداول"
         elif market_state == "CAUTION":
-            _rec = "\U0001f7e1 *انتظر* — حيتان يشترون" if _btc_vd_now >= 0.65 or _eth_vd_now >= 0.65 else "\U0001f7e1 *انتظر* — السوق غير مستقر"
+            _rec = "\U0001f7e1 *انتظر* — حيتان يشترون، تحسن قريب" if _real_whales else "\U0001f7e1 *انتظر* — السوق غير مستقر"
         else:
-            _rec = "\u26a0\ufe0f *انتظر* — حيتان يشترون لكن السوق هابط" if _btc_vd_now >= 0.65 or _eth_vd_now >= 0.65 else "\U0001f534 *ابتعد* — ضغط بيع قوي"
+            _rec = "\u26a0\ufe0f *انتظر* — حيتان يشترون" if _real_whales else "\U0001f534 *ابتعد* — ضغط بيع قوي"
         send(
             "📊 *تقرير السوق*\n"
             "━━━━━━━━━━━━━━━━━━\n"
