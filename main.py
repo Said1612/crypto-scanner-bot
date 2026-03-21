@@ -11947,6 +11947,214 @@ def smart_market_scan():
 
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   📊 DEFI LLAMA TRACKER — تتبع TVL والسيولة الحقيقية
+#   يراقب دخول وخروج السيولة من البروتوكولات والقطاعات
+#   API مجاني: https://api.llama.fi
+# ═══════════════════════════════════════════════════════════════════
+
+LLAMA_CHAINS_URL    = "https://api.llama.fi/v2/chains"
+LLAMA_PROTOCOLS_URL = "https://api.llama.fi/protocols"
+
+_llama_last_scan    = 0.0
+_llama_scan_every   = 3600   # كل ساعة
+_llama_prev_tvl     = {}     # {chain: tvl}
+_llama_prev_proto   = {}     # {protocol: tvl}
+
+# القطاعات المهمة للمراقبة
+LLAMA_WATCH_CHAINS = [
+    "Ethereum", "BSC", "Solana", "Arbitrum",
+    "Polygon", "Avalanche", "Base"
+]
+
+LLAMA_WATCH_PROTOCOLS = [
+    "aave", "uniswap", "curve", "lido",
+    "makerdao", "compound", "pancakeswap"
+]
+
+def scan_defi_llama():
+    # type: () -> None
+    global _llama_last_scan, _llama_prev_tvl, _llama_prev_proto
+    now = time.time()
+    if now - _llama_last_scan < _llama_scan_every:
+        return
+    _llama_last_scan = now
+
+    alerts = []
+
+    try:
+        # 1. TVL السلاسل
+        chains_data = safe_get(LLAMA_CHAINS_URL)
+        if chains_data and isinstance(chains_data, list):
+            for chain in chains_data:
+                name = chain.get("name", "")
+                if name not in LLAMA_WATCH_CHAINS:
+                    continue
+                tvl = float(chain.get("tvl", 0))
+                prev = _llama_prev_tvl.get(name, 0)
+
+                if prev > 0 and tvl > 0:
+                    change_pct = (tvl - prev) / prev * 100
+                    if change_pct >= 5.0:
+                        alerts.append({
+                            "type": "chain_inflow",
+                            "name": name,
+                            "tvl": tvl,
+                            "change": change_pct,
+                        })
+                    elif change_pct <= -5.0:
+                        alerts.append({
+                            "type": "chain_outflow",
+                            "name": name,
+                            "tvl": tvl,
+                            "change": change_pct,
+                        })
+                _llama_prev_tvl[name] = tvl
+
+        # 2. TVL البروتوكولات
+        proto_data = safe_get(LLAMA_PROTOCOLS_URL)
+        if proto_data and isinstance(proto_data, list):
+            for proto in proto_data:
+                slug = proto.get("slug", "").lower()
+                if slug not in LLAMA_WATCH_PROTOCOLS:
+                    continue
+                tvl = float(proto.get("tvl", 0))
+                chg1d = float(proto.get("change_1d", 0) or 0)
+                prev  = _llama_prev_proto.get(slug, 0)
+
+                if abs(chg1d) >= 8.0:
+                    alerts.append({
+                        "type": "protocol_flow",
+                        "name": proto.get("name", slug),
+                        "tvl": tvl,
+                        "change": chg1d,
+                    })
+                _llama_prev_proto[slug] = tvl
+
+    except Exception as e:
+        log.info("LLAMA API error: %s", e)
+        return
+
+    if not alerts:
+        return
+
+    # إرسال تقرير TVL
+    inflows  = [a for a in alerts if a["change"] > 0]
+    outflows = [a for a in alerts if a["change"] < 0]
+
+    msg = "📊 *تقرير TVL — DefiLlama*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+
+    if inflows:
+        msg += "💰 *سيولة تدخل DeFi:*\n"
+        for a in inflows[:3]:
+            tvl_b = a["tvl"] / 1_000_000_000
+            msg += "  🟢 {} +{:.1f}% | TVL: {:.2f}B$\n".format(
+                a["name"], a["change"], tvl_b)
+
+    if outflows:
+        msg += "🚨 *سيولة تخرج من DeFi:*\n"
+        for a in outflows[:3]:
+            tvl_b = a["tvl"] / 1_000_000_000
+            msg += "  🔴 {} {:.1f}% | TVL: {:.2f}B$\n".format(
+                a["name"], a["change"], tvl_b)
+
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+    if inflows and not outflows:
+        msg += "✅ _أموال تدخل DeFi — إشارة إيجابية_"
+    elif outflows and not inflows:
+        msg += "⚠️ _أموال تخرج من DeFi — كن حذراً_"
+    else:
+        msg += "📊 _تدفقات مختلطة — راقب السوق_"
+
+    send(msg)
+    log.info("LLAMA | %d inflows | %d outflows",
+             len(inflows), len(outflows))
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   📈 FUNDING RATE TRACKER — مؤشر معنويات السوق
+#   Funding Rate سالب = حيتان يشترون Spot = فرصة 🎯
+#   Funding Rate إيجابي عالي = السوق متفائل أكثر = خطر انعكاس
+# ═══════════════════════════════════════════════════════════════════
+
+MEXC_FUNDING_URL  = "https://api.mexc.com/api/v1/contract/funding_rate/{}"
+_funding_last     = 0.0
+_funding_every    = 3600   # كل ساعة
+_funding_alerted  = {}     # {sym: ts}
+
+FUNDING_SYMBOLS = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
+
+def scan_funding_rates():
+    # type: () -> None
+    global _funding_last
+    now = time.time()
+    if now - _funding_last < _funding_every:
+        return
+    _funding_last = now
+
+    alerts = []
+
+    for sym in FUNDING_SYMBOLS:
+        try:
+            data = safe_get(MEXC_FUNDING_URL.format(sym))
+            if not data or not data.get("data"):
+                continue
+
+            rate = float(data["data"].get("fundingRate", 0))
+            rate_pct = rate * 100
+
+            base = sym.replace("_USDT", "")
+
+            # Funding Rate سالب جداً = فرصة شراء
+            if rate_pct <= -0.03:
+                alerts.append({
+                    "sym": base,
+                    "rate": rate_pct,
+                    "signal": "buy",
+                    "msg": "Funding سالب {:.4f}% = حيتان يشترون Spot!".format(rate_pct)
+                })
+            # Funding Rate إيجابي عالي = خطر
+            elif rate_pct >= 0.10:
+                alerts.append({
+                    "sym": base,
+                    "rate": rate_pct,
+                    "signal": "warning",
+                    "msg": "Funding مرتفع {:.4f}% = السوق متفائل أكثر من اللازم!".format(rate_pct)
+                })
+
+        except Exception:
+            continue
+
+    if not alerts:
+        return
+
+    msg = "📈 *Funding Rate — معنويات السوق*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+
+    for a in alerts:
+        if a["signal"] == "buy":
+            msg += "🟢 *{}*: {}\n".format(a["sym"], a["msg"])
+        else:
+            msg += "🔴 *{}*: {}\n".format(a["sym"], a["msg"])
+
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+
+    buy_signals = [a for a in alerts if a["signal"] == "buy"]
+    warn_signals = [a for a in alerts if a["signal"] == "warning"]
+
+    if buy_signals:
+        msg += "💡 _Funding سالب = المراهنون على النزول يدفعون = فرصة صعود_"
+    elif warn_signals:
+        msg += "⚠️ _Funding مرتفع = السوق محموم = احتمال تصحيح_"
+
+    send(msg)
+
+
+
 def run():
     # type: () -> None
     global all_tickers
@@ -12213,6 +12421,8 @@ def run():
                 scan_hidden_accumulation(price_map, vol_now, changes_map)
 
             smart_market_scan()
+            scan_defi_llama()
+            scan_funding_rates()
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
 
