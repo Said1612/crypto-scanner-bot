@@ -2390,7 +2390,7 @@ def analyze_btc():
 
     if _crash_4h or btc_trend_1h <= -2.0:
         suggested = "DANGER"
-    elif _combined_vd >= 0.58:
+    elif _combined_vd >= 0.55:
         suggested = "SAFE"
     elif _combined_vd >= 0.45:
         suggested = "CAUTION"
