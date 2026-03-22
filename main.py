@@ -10959,6 +10959,9 @@ def redis_save(data):
     # type: (dict) -> bool
     """حفظ البيانات في Upstash Redis"""
     if not REDIS_URL or not REDIS_TOKEN:
+        log.warning(" Redis: URL=%s TOKEN=%s", 
+                    "OK" if REDIS_URL else "MISSING",
+                    "OK" if REDIS_TOKEN else "MISSING")
         return False
     try:
         import json as _json
