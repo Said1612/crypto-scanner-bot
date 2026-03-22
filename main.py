@@ -12370,7 +12370,7 @@ def run():
 
 
 
-            if int(now) % 1800 < 12:
+            if int(now) % 300 < 12:
                 save_state()
 
 
