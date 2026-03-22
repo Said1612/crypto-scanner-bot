@@ -11995,9 +11995,9 @@ def smart_market_scan():
 
 
             score = (
-                min(vol_change_pct, 500) * 0.4 +
+                min(vol_change_pct, 500) * 0.6 +
                 max(chg, 0) * 0.3 +
-                min(vol / 1_000_000, 10) * 0.3
+                min(vol / 10_000_000, 5) * 0.1
             )
 
             if score > 0:
