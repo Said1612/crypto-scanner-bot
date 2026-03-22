@@ -3104,6 +3104,13 @@ def get_flow_summary():
 
     txt = ""
 
+    # تحديث sector_flow_hot عند رصد دخول سيولة
+    now_ts = time.time()
+    for s, p, v, d in entering:
+        if p >= 8:
+            sector_flow_hot[s] = now_ts
+            log.info(" DAILY FLOW: %s +%.0f%% → sector_flow_hot updated", s, p)
+
     if entering:
         txt += "🟢 *يدخل (أموال تتدفق):*\n"
         medals = ["🥇", "🥈", "🥉"]
