@@ -2397,9 +2397,10 @@ def analyze_btc():
     _eth_ats2 = eth_tps_stats.get("ats", 0) if eth_tps_stats else 0
     _w_sell = (_btc_vd2 < 0.40 and _btc_ats2 >= 2000) or (_eth_vd2 < 0.40 and _eth_ats2 >= 2000)
     _w_buy  = (_btc_vd2 >= 0.65 and _btc_ats2 >= 2000) or (_eth_vd2 >= 0.65 and _eth_ats2 >= 2000)
-    if _crash_4h or btc_trend_1h <= -2.0 or _w_sell or _mkt_vd_raw < 0.40:
+    _vd_final = _mkt_vd_raw * 0.60 + _btc_vd2 * 0.40
+    if _crash_4h or btc_trend_1h <= -2.0 or _w_sell or _vd_final < 0.40:
         suggested = "DANGER"
-    elif _mkt_vd_raw >= 0.55 or (_mkt_vd_raw >= 0.50 and _w_buy):
+    elif _vd_final >= 0.55 or (_vd_final >= 0.50 and _w_buy):
         suggested = "SAFE"
     else:
         suggested = "CAUTION"
