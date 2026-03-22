@@ -2522,7 +2522,7 @@ def analyze_btc():
         elif market_state == "CAUTION":
             _rec = "\U0001f7e1 *انتظر* — حيتان يشترون، تحسن قريب" if _real_whales else "\U0001f7e1 *انتظر* — السوق غير مستقر"
         else:
-            _rec = "\U0001f534 *ابتعد* — ضغط بيع قوي"
+            _rec = "\u26a0\ufe0f *انتظر* — حيتان يشترون لكن BTC ينزل" if _real_whales else "\U0001f534 *ابتعد* — ضغط بيع قوي"
         send(
             "📊 *تقرير السوق*\n"
             "━━━━━━━━━━━━━━━━━━\n"
