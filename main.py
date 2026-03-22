@@ -267,7 +267,7 @@ MOMENTUM_COOLDOWN  = 14400
 
 FLOW_WINDOW        = 5
 FLOW_VOL_SURGE     = 1.3
-FLOW_CHANGE_MIN    = 0.5
+FLOW_CHANGE_MIN    = 2.0
 FLOW_EXIT_DROP     = -1.5
 FLOW_ALERT_COOL    = 600
 FLOW_HISTORY_MAX   = 20
@@ -812,6 +812,7 @@ price_snapshot_time = 0.0
 sector_vol_snapshots = {}  # type: Dict[str, List[float]]   {sector: [vol1, vol2, ...]}
 sector_change_snapshots = {}  # type: Dict[str, List[float]] {sector: [avg_ch1, avg_ch2, ...]}
 sector_flow_alerted  = {}  # type: Dict[str, float]          {sector: last_alert_time}
+sector_flow_hot      = {}  # {sector: timestamp} قطاعات تلقت سيولة مؤخراً
 sector_flow_state    = {}  # type: Dict[str, str]            {sector: "IN"/"OUT"/"NEUTRAL"}
 last_sr_alert        = 0.0
 top10_alerted        = {}  # type: Dict[str, float]          {sector: last_top10_alert_time}
@@ -2708,6 +2709,42 @@ def update_sector_flow(ticker_map):
             sector_change_snapshots[sector].pop(0)
 
 
+
+# ربط قطاعات MEXC مع بروتوكولات DefiLlama
+SECTOR_TO_LLAMA = {
+    "DeFi":    ["aave", "uniswap", "curve", "compound"],
+    "DEX":     ["uniswap", "curve", "pancakeswap"],
+    "Layer1":  None,   # لا يوجد ربط مباشر
+    "Layer2":  None,
+    "Meme":    None,
+    "AI":      None,
+    "GameFi":  None,
+    "NFT":     None,
+}
+
+_llama_tvl_cache = {}   # {protocol: tvl} يُحدَّث كل ساعة
+
+def get_llama_tvl_change(sector):
+    # type: (str) -> float
+    protocols = SECTOR_TO_LLAMA.get(sector)
+    if not protocols:
+        return 0.0
+    try:
+        data = safe_get(LLAMA_PROTOCOLS_URL)
+        if not data or not isinstance(data, list):
+            return 0.0
+        total_change = 0.0
+        count = 0
+        for proto in data:
+            if proto.get("slug", "").lower() in protocols:
+                chg = float(proto.get("change_1d", 0) or 0)
+                total_change += chg
+                count += 1
+        return (total_change / count) if count > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
 def analyze_sector_flow():
     # type: () -> None
     """
@@ -2742,9 +2779,30 @@ def analyze_sector_flow():
         avg_ch_prev = sum(changes[-FLOW_WINDOW:-1]) / (FLOW_WINDOW - 1)
 
 
+        # نسبة العملات الصاعدة في القطاع
+        _s_coins = SECTORS.get(sector, [])
+        _rising = sum(1 for _sc in _s_coins if all_tickers and
+                      any(float(t.get("priceChangePercent",0)) > 0
+                          for t in all_tickers if t.get("symbol") == _sc))
+        _rising_pct = (_rising / len(_s_coins) * 100) if _s_coins else 0
+
+        # نسبة العملات الصاعدة في القطاع
+        _s_coins = SECTORS.get(sector, [])
+        _rising2 = 0
+        if all_tickers and _s_coins:
+            _tmap2 = {t.get("symbol",""): float(t.get("priceChangePercent",0)) for t in all_tickers}
+            _rising2 = sum(1 for sc in _s_coins if _tmap2.get(sc, 0) > 0)
+        _rising_pct2 = (_rising2 / len(_s_coins) * 100) if _s_coins else 0
+
+        # تأكيد DefiLlama
+        _llama_chg2 = get_llama_tvl_change(sector)
+        _llama_ok = (_llama_chg2 == 0.0) or (_llama_chg2 >= 2.0)
+
         is_inflow = (
             vol_ratio >= FLOW_VOL_SURGE and
-            recent_ch >= FLOW_CHANGE_MIN
+            recent_ch >= FLOW_CHANGE_MIN and
+            _rising_pct2 >= 40 and
+            _llama_ok
         )
 
 
@@ -2783,6 +2841,7 @@ def analyze_sector_flow():
             continue
 
         sector_flow_alerted[sector] = now
+        sector_flow_hot[sector] = now
 
 
         coins_in_sector = SECTORS.get(sector, [])
@@ -6058,8 +6117,14 @@ def scan_whale_confirmation(price_map):
 
     _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
     if market_state == "DANGER" and _btc_vd < 0.50:
-        log.info(" JOKER BLOCKED:  DANGER +   VD=%.0f%%", _btc_vd*100)
-        return
+        # استثناء: إذا عملة في قطاع تلقى سيولة مؤخراً
+        _sym_sector = next((s for s,syms in SECTORS.items() if sym+"USDT" in syms or sym in syms), "")
+        _sector_hot_time = sector_flow_hot.get(_sym_sector, 0)
+        _in_hot_sector = _sym_sector and (time.time() - _sector_hot_time < 7200)
+        if not _in_hot_sector:
+            log.info(" JOKER BLOCKED: DANGER + VD=%.0f%%", _btc_vd*100)
+            return
+        log.info(" JOKER SECTOR EXCEPTION: %s in hot sector %s", sym, _sym_sector)
 
     for sym, data in list(whale_watchlist.items()):
 
