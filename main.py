@@ -2391,28 +2391,18 @@ def analyze_btc():
     _combined_vd = _btc_vd * 0.50 + _eth_vd * 0.30 + _mkt_vd_raw * 0.20
 
     # القرار يعتمد على VDelta + ATS/TPS
-    _btc_ats_big  = _btc_ats >= 2000
-    _btc_buying   = _btc_vd >= 0.60 and _btc_ats_big
-    _btc_selling  = _btc_vd < 0.40 and _btc_ats_big
-
-    if _crash_4h or btc_trend_1h <= -2.0:
-        # انهيار سريع = DANGER دائماً
+    _btc_vd2  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+    _btc_ats2 = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
+    _eth_vd2  = eth_tps_stats.get("vdelta", 0.5) if eth_tps_stats else 0.5
+    _eth_ats2 = eth_tps_stats.get("ats", 0) if eth_tps_stats else 0
+    _w_sell = (_btc_vd2 < 0.40 and _btc_ats2 >= 2000) or (_eth_vd2 < 0.40 and _eth_ats2 >= 2000)
+    _w_buy  = (_btc_vd2 >= 0.65 and _btc_ats2 >= 2000) or (_eth_vd2 >= 0.65 and _eth_ats2 >= 2000)
+    if _crash_4h or btc_trend_1h <= -2.0 or _w_sell or _mkt_vd_raw < 0.40:
         suggested = "DANGER"
-    elif _btc_selling:
-        # حيتان BTC يبيعون بقوة = DANGER
-        suggested = "DANGER"
-    elif _combined_vd >= 0.60:
-        # VDelta قوي = SAFE
+    elif _mkt_vd_raw >= 0.55 or (_mkt_vd_raw >= 0.50 and _w_buy):
         suggested = "SAFE"
-    elif _combined_vd >= 0.50 and _btc_buying:
-        # VDelta معقول + حيتان BTC يشترون = SAFE
-        suggested = "SAFE"
-    elif _combined_vd >= 0.45:
-        # VDelta متوسط = CAUTION
-        suggested = "CAUTION"
     else:
-        # VDelta ضعيف = DANGER
-        suggested = "DANGER"
+        suggested = "CAUTION"
     if suggested == "DANGER":
         _btc_danger_count  += 1
         _btc_caution_count  = 0
