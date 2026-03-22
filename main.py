@@ -2515,7 +2515,7 @@ def analyze_btc():
         elif market_state == "CAUTION":
             _rec = "\U0001f7e1 *انتظر* — حيتان يشترون، تحسن قريب" if _real_whales else "\U0001f7e1 *انتظر* — السوق غير مستقر"
         else:
-            _rec = "\u26a0\ufe0f *انتظر* — حيتان يشترون" if _real_whales else "\U0001f534 *ابتعد* — ضغط بيع قوي"
+            _rec = "\U0001f534 *ابتعد* — ضغط بيع قوي"
         send(
             "📊 *تقرير السوق*\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -5819,8 +5819,8 @@ lz_tps_alerted    = {}      # type: Dict[str, float]
 
 WHALE_WATCH_TTL    = 14400
 WHALE_CHECK_EVERY  = 60
-WHALE_ATS_MIN      = 500
-WHALE_VDELTA_MIN   = 0.65    # VDelta 65%+
+WHALE_ATS_MIN      = 100
+WHALE_VDELTA_MIN   = 0.58    # VDelta 65%+
 
 
 whale_watchlist    = {}   # type: Dict[str, Dict]
@@ -7949,21 +7949,21 @@ def get_coin_tier(vol_24h):
 
 TIER_SETTINGS = {
     "big": {
-        "vdelta_min":  0.67,
-        "ats_min":     500,    # ATS 500$+
+        "vdelta_min":  0.60,
+        "ats_min":     200,
         "tps_spike":   2.0,
         "vol_min":     10_000_000,
         "label":       "Big Cap 🏦",
     },
     "mid": {
-        "vdelta_min":  0.65,
-        "ats_min":     200,    # ATS 200$+
+        "vdelta_min":  0.58,
+        "ats_min":     100,    # ATS 200$+
         "tps_spike":   2.0,
         "vol_min":     1_000_000,
         "label":       "Mid Cap 📊",
     },
     "small": {
-        "vdelta_min":  0.63,
+        "vdelta_min":  0.55,
         "ats_min":     50,
         "tps_spike":   2.5,
         "vol_min":     20_000,
@@ -8075,10 +8075,10 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             _ready = _vdelta >= 0.65
         else:
             _ready = (
-                _vdelta >= 0.80
-                or _vdelta >= 0.70
-                or (_vdelta >= 0.65 and _tps >= 0.3 and _ats >= 100)
-                or (_vdelta >= 0.65 and _ats >= 500)
+                _vdelta >= 0.75
+                or _vdelta >= 0.65
+                or (_vdelta >= 0.58 and _tps >= 0.3 and _ats >= 50)
+                or (_vdelta >= 0.58 and _ats >= 200)
             )
 
         if _vdelta < 0.66:
@@ -9489,7 +9489,7 @@ _coin_first_seen    = {}   # {sym: timestamp} اول مرة يراها البو�
 NEW_COIN_MIN_DAYS   = 3    # تجاهل العملات الجديدة اقل من 3 أيام
 _vol_surge_alerted  = {}   # {sym: ts}
 VOL_SURGE_SPIKE     = 3.0
-VOL_SURGE_ATS_MIN   = 200
+VOL_SURGE_ATS_MIN   = 50
 VOL_SURGE_MIN       = 50_000
 VOL_SURGE_COOLDOWN  = 7200
 
