@@ -6091,17 +6091,16 @@ def scan_whale_confirmation(price_map):
 
 
     _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
-    if market_state == "DANGER" and _btc_vd < 0.50:
-        # استثناء: إذا عملة في قطاع تلقى سيولة مؤخراً
-        _sym_sector = next((s for s,syms in SECTORS.items() if sym+"USDT" in syms or sym in syms), "")
-        _sector_hot_time = sector_flow_hot.get(_sym_sector, 0)
-        _in_hot_sector = _sym_sector and (time.time() - _sector_hot_time < 7200)
-        if not _in_hot_sector:
-            log.info(" JOKER BLOCKED: DANGER + VD=%.0f%%", _btc_vd*100)
-            return
-        log.info(" JOKER SECTOR EXCEPTION: %s in hot sector %s", sym, _sym_sector)
+    _block_danger = market_state == "DANGER" and _btc_vd < 0.50
 
     for sym, data in list(whale_watchlist.items()):
+        # فحص استثناء Sector Flow لكل عملة
+        if _block_danger:
+            _sym_sector = next((s for s,syms in SECTORS.items() if sym+"USDT" in syms or sym in syms), "")
+            _sector_hot_time = sector_flow_hot.get(_sym_sector, 0)
+            _in_hot_sector = _sym_sector and (time.time() - _sector_hot_time < 7200)
+            if not _in_hot_sector:
+                continue
 
         if now - data["time"] > WHALE_WATCH_TTL:
             to_del.append(sym)
