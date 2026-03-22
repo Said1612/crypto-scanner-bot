@@ -267,7 +267,7 @@ MOMENTUM_COOLDOWN  = 14400
 
 FLOW_WINDOW        = 5
 FLOW_VOL_SURGE     = 1.3
-FLOW_CHANGE_MIN    = 2.0
+FLOW_CHANGE_MIN    = 0.5
 FLOW_EXIT_DROP     = -1.5
 FLOW_ALERT_COOL    = 600
 FLOW_HISTORY_MAX   = 20
@@ -2777,7 +2777,6 @@ def analyze_sector_flow():
         is_inflow = (
             vol_ratio >= FLOW_VOL_SURGE and
             recent_ch >= FLOW_CHANGE_MIN and
-            _rising_pct2 >= 40 and
             _llama_ok
         )
 
