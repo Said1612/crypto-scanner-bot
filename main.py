@@ -3117,6 +3117,18 @@ def get_flow_summary():
             sector_flow_hot[s] = now_ts
             log.info(" DAILY FLOW: %s +%.0f%% → sector_flow_hot updated", s, p)
 
+    # إرسال تنبيه فوري إذا سيولة قوية دخلت قطاع
+    hot_entering = [(s,p,d) for s,p,v,d in entering if p >= 15]
+    if hot_entering:
+        _flow_msg = "💸 *سيولة تدخل قطاع!*\n"
+        _flow_msg += "━━━━━━━━━━━━━━━━━━\n"
+        for s, p, d in hot_entering[:3]:
+            icon = "🔥" if p >= 25 else "✅"
+            _flow_msg += "  {} *{}* `+{:.0f}%` (+{:.1f}M$)\n".format(icon, s, p, abs(d))
+        _flow_msg += "━━━━━━━━━━━━━━━━━━\n"
+        _flow_msg += "👀 _راقب عملات {} — السيولة تتجمع_".format(hot_entering[0][0])
+        send(_flow_msg)
+
     if entering:
         txt += "🟢 *يدخل (أموال تتدفق):*\n"
         medals = ["🥇", "🥈", "🥉"]
@@ -6108,12 +6120,18 @@ def scan_whale_confirmation(price_map):
 
     for sym, data in list(whale_watchlist.items()):
         # فحص استثناء Sector Flow لكل عملة
-        if _block_danger:
-            _sym_sector = next((s for s,syms in SECTORS.items() if sym+"USDT" in syms or sym in syms), "")
-            _sector_hot_time = sector_flow_hot.get(_sym_sector, 0)
-            _in_hot_sector = _sym_sector and (time.time() - _sector_hot_time < 7200)
-            if not _in_hot_sector:
-                continue
+        _sym_sector = next((s for s,syms in SECTORS.items() if sym+"USDT" in syms or sym in syms), "")
+        _sector_hot_time = sector_flow_hot.get(_sym_sector, 0)
+        _in_hot_sector = _sym_sector and (time.time() - _sector_hot_time < 14400)  # 4 ساعات
+
+        if _block_danger and not _in_hot_sector:
+            continue
+
+        # تخفيف شروط VDelta للقطاعات الساخنة
+        if _in_hot_sector:
+            _j_tier = get_tier_settings(data.get("vol", 1_000_000))
+            _j_tier = dict(_j_tier)
+            _j_tier["vdelta_min"] = max(0.50, _j_tier["vdelta_min"] - 0.10)  # -10% للقطاعات الساخنة
 
         if now - data["time"] > WHALE_WATCH_TTL:
             to_del.append(sym)
@@ -9500,7 +9518,7 @@ _vol_surge_baseline = {}   # {sym: avg_vol}
 _coin_first_seen    = {}   # {sym: timestamp} اول مرة يراها البوت
 NEW_COIN_MIN_DAYS   = 3    # تجاهل العملات الجديدة اقل من 3 أيام
 _vol_surge_alerted  = {}   # {sym: ts}
-VOL_SURGE_SPIKE     = 3.0
+VOL_SURGE_SPIKE     = 2.5  # خفضنا من 3× إلى 2.5× للكشف المبكر
 VOL_SURGE_ATS_MIN   = 50
 VOL_SURGE_MIN       = 50_000
 VOL_SURGE_COOLDOWN  = 7200
