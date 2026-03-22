@@ -924,11 +924,12 @@ def send(msg, personal_only=False):
 
     if 'WATCH ALERT' in msg and 'نشاط مشبوه' in msg:
         import re as _re
-        vd_match = _re.search(r'VDelta[:\s*`]+(\d+)%', msg)
+        # نبحث عن VDelta بعد كلمة VDelta مباشرة
+        vd_match = _re.search(r'VDelta[^\d]*(\d+)%', msg)
         if vd_match:
             vd_val = int(vd_match.group(1))
 
-            vol_match = _re.search(r'حجم[:\s*`]+([\d\.]+)M', msg)
+            vol_match = _re.search(r'حجم[^\d]*([\d\.]+)M', msg)
             vol_m = float(vol_match.group(1)) if vol_match else 1.0
             vol_usdt = vol_m * 1_000_000
             _t = get_tier_settings(vol_usdt)
@@ -8055,7 +8056,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         _vd_min  = _tier["vdelta_min"]
 
 
-        if vdelta < _vd_min:
+        if vdelta <= _vd_min - 0.001:
             log.info(" VDELTA_REJECT [%s]: %s | %.0f%% < %.0f%%",
                      _tier["label"], sym, vdelta*100, _vd_min*100)
             continue
@@ -8109,7 +8110,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         if _vdelta < 0.66:
             continue
 
-        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 50:
+        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 200:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
