@@ -950,14 +950,19 @@ def send(msg, personal_only=False):
     for chat_id in targets:
         if not chat_id or "YOUR" in str(chat_id):
             continue
-        try:
-            session.post(
-                "https://api.telegram.org/bot{}/sendMessage".format(TELEGRAM_TOKEN),
-                data={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-                timeout=10,
-            )
-        except Exception as e:
-            log.error("Telegram [%s]: %s", chat_id, e)
+        for _attempt in range(3):
+            try:
+                session.post(
+                    "https://api.telegram.org/bot{}/sendMessage".format(TELEGRAM_TOKEN),
+                    data={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
+                    timeout=15,
+                )
+                break
+            except Exception as e:
+                if _attempt < 2:
+                    time.sleep(2)
+                else:
+                    log.error("Telegram [%s]: %s", chat_id, e)
 
 
 
@@ -11015,6 +11020,7 @@ def save_state():
             "version":             "V20",
             "saved_at":            time.time(),
 
+            "sector_flow_hot":      {k: v for k,v in sector_flow_hot.items()},
             "bottom_price_history": bottom_price_history,
             "bottom_vol_history":   bottom_vol_history,
             "ath_tracker":          ath_tracker,
@@ -11097,6 +11103,7 @@ def load_state():
         age_hours  = (time.time() - saved_at) / 3600
         log.info("  State - : %.1f ", age_hours)
 
+        sector_flow_hot.update(state.get("sector_flow_hot", {}))
         bottom_price_history.update(state.get("bottom_price_history", {}))
         bottom_vol_history.update(state.get("bottom_vol_history", {}))
         ath_tracker.update(state.get("ath_tracker", {}))
