@@ -2398,8 +2398,9 @@ def analyze_btc():
     _w_sell = (_btc_vd2 < 0.40 and _btc_ats2 >= 2000) or (_eth_vd2 < 0.40 and _eth_ats2 >= 2000)
     _w_buy  = (_btc_vd2 >= 0.65 and _btc_ats2 >= 2000) or (_eth_vd2 >= 0.65 and _eth_ats2 >= 2000)
     _vd_final = _mkt_vd_raw * 0.60 + _btc_vd2 * 0.40
-    _btc_vd_low = _btc_vd2 < 0.42  # BTC VDelta منخفض جداً
-    if _crash_4h or btc_trend_1h <= -2.0 or _w_sell or _vd_final < 0.40 or _btc_vd_low:
+    _btc_vd_low  = _btc_vd2 < 0.42
+    _btc_crash24 = btc_change_24h <= -2.5  # BTC نزل 2.5%+ في 24h
+    if _crash_4h or btc_trend_1h <= -2.0 or _w_sell or _vd_final < 0.40 or _btc_vd_low or _btc_crash24:
         suggested = "DANGER"
     elif _vd_final >= 0.55 or (_vd_final >= 0.50 and _w_buy):
         suggested = "SAFE"
