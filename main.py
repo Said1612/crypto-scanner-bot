@@ -12818,4 +12818,4 @@ def run():
             timeout=5
         )
         _d = _r.json()
-        if _d.get
+        if _d.get("ok") and _d.get("result"):
