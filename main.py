@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-# Build: 20260323-V32-FIXED-RATE
+# Build: 20260323-V33-FINAL
 """
 ╔══════════════════════════════════════════════════════════════╗
-║     MAFIO BOT V32 — RATE LIMITED                          ║
-║     ✅ معدل طلبات منخفض (<10 req/min)                      ║
-║     ✅ كاش ذكي                                          ║
-║     ✅ نظام WATCH → ENTRY                                 ║
+║     MAFIO BOT V33 — LIQUIDITY HUNTER FINAL                 ║
+║     ✅ 50 عملة تحت المراقبة                                ║
+║     ✅ معدل طلبات 15-25 req/min                            ║
+║     ✅ كاش ذكي                                             ║
+║     ✅ نظام WATCH → ENTRY                                   ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -32,7 +33,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("MafioBot")
 
-log.info("🚀 MAFIO-BOT V32 بدء التشغيل...")
+log.info("🚀 MAFIO-BOT V33 بدء التشغيل...")
 
 # ==================== متغيرات البيئة ====================
 
@@ -42,9 +43,9 @@ GROUP_ID = os.getenv("GROUP_ID", "")
 
 # ==================== إعدادات النظام ====================
 
-CHECK_INTERVAL = 60               # 60 ثانية بدل 30 (يقلل الطلبات للنصف)
-REPORT_4H_INTERVAL = 14400
-BTC_EVERY = 300
+CHECK_INTERVAL = 60               # 60 ثانية
+REPORT_4H_INTERVAL = 14400        # 4 ساعات
+BTC_EVERY = 300                   # 5 دقائق
 
 # إعدادات ATS حسب حجم العملة
 ATS_THRESHOLDS = {
@@ -56,34 +57,35 @@ ATS_THRESHOLDS = {
 VDELTA_THRESHOLDS = {"watch": 0.50, "entry": 0.65, "joker": 0.70}
 VOLUME_THRESHOLDS = {"watch": 1.5, "entry": 2.5, "joker": 3.0}
 
-# ==================== القطاعات (مصغرة لتقليل الفحص) ====================
+# ==================== القطاعات ====================
 
 SECTORS = {
-    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT"],
-    "AI": ["FETUSDT", "AGIXUSDT", "WLDUSDT", "ARKMUSDT"],
-    "Layer1": ["SOLUSDT", "AVAXUSDT", "ADAUSDT", "NEARUSDT"],
-    "DeFi": ["AAVEUSDT", "UNIUSDT", "LINKUSDT"],
+    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT", "BONKUSDT", "BOMEUSDT"],
+    "AI": ["FETUSDT", "AGIXUSDT", "WLDUSDT", "ARKMUSDT", "RENDERUSDT", "VIRTUSDT"],
+    "Layer1": ["SOLUSDT", "AVAXUSDT", "ADAUSDT", "NEARUSDT", "SUIUSDT", "APTUSDT"],
+    "DeFi": ["AAVEUSDT", "UNIUSDT", "LINKUSDT", "CAKEUSDT", "MKRUSDT"],
+    "DePIN": ["IOTAUSDT", "HNTUSDT", "LPTUSDT", "GRASSUSDT"],
+    "Gaming": ["GALAUSDT", "AXSUSDT", "SANDUSDT", "IMXUSDT"],
+    "RWA": ["ONDOUSDT", "CFGUSDT", "MANTRAUSDT"],
+    "Storage": ["FILUSDT", "ARUSDT", "STORJUSDT"],
 }
 
 # ==================== المتغيرات العامة ====================
 
 last_btc = 0.0
 last_4h_report = 0.0
-last_deep_scan = 0.0
 
 btc_change_24h = 0.0
 btc_trend_1h = 0.0
 market_state = "SAFE"
 all_tickers = []
 
-# كاش للـ klines و trades
 klines_cache = {}
 trades_cache = {}
 coin_vol_history = {}
 
 _tg_offset = 0
 
-# عدادات API
 api_calls_total = 0
 api_calls_minute = 0
 api_minute_reset = time.time()
@@ -119,7 +121,7 @@ class SignalTracker:
             return None
         
         watch = self.watchlist[sym]
-        if time.time() - watch["time"] < 1800:  # 30 دقيقة
+        if time.time() - watch["time"] < 1800:
             return None
         
         tier = self.get_tier(vol_24h)
@@ -190,13 +192,13 @@ def safe_get(url, params=None, retries=2):
     return None
 
 
-def get_klines_cached(symbol, interval="15m", limit=50):
+def get_klines_cached(symbol, interval="15m", limit=30):
     """جلب الكلاينز مع كاش 5 دقائق"""
     key = f"{symbol}_{interval}"
     now = time.time()
     if key in klines_cache:
         data, ts = klines_cache[key]
-        if now - ts < 300:  # 5 دقائق كاش
+        if now - ts < 300:
             return data
     raw = safe_get("https://api.mexc.com/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
     if not raw or len(raw) < 6:
@@ -219,7 +221,7 @@ def get_trades_cached(sym):
         data, ts = trades_cache[key]
         if now - ts < 30:
             return data
-    raw = safe_get("https://api.mexc.com/api/v3/trades", {"symbol": sym, "limit": 50})  # قللنا إلى 50
+    raw = safe_get("https://api.mexc.com/api/v3/trades", {"symbol": sym, "limit": 50})
     trades_cache[key] = (raw, now)
     return raw
 
@@ -263,7 +265,7 @@ def analyze_tps_ats(sym):
         tps = trade_window / 30.0
         ats = all_vol / len(raw) if len(raw) > 0 else 0
         vdelta = 0.5
-        kd = get_klines_cached(sym, "15m", 10)  # قللنا limit
+        kd = get_klines_cached(sym, "15m", 10)
         if kd and len(kd["closes"]) >= 3:
             buy = 0
             sell = 0
@@ -308,28 +310,38 @@ def analyze_btc():
     last_btc = time.time()
 
 
-# ==================== مسح العملات (محسن) ====================
+# ==================== مسح العملات (50 عملة) ====================
 
 def scan_coins():
     global all_tickers
     if not all_tickers:
         return
     
-    # نفحص فقط العملات في القطاعات + أفضل 10 بالحجم
+    # جمع جميع العملات من القطاعات
     all_coins = set()
     for coins in SECTORS.values():
         all_coins.update(coins)
     
-    # نضيف العملات ذات الحجم الكبير
-    vol_list = [(t.get("symbol", ""), float(t.get("quoteVolume", 0))) for t in all_tickers if t.get("symbol", "").endswith("USDT")]
+    # إضافة أفضل 50 عملة حسب الحجم
+    vol_list = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if sym.endswith("USDT") and not is_leverage_token(sym) and not is_stablecoin(sym):
+            try:
+                vol = float(t.get("quoteVolume", 0))
+                vol_list.append((sym, vol))
+            except:
+                pass
+    
     vol_list.sort(key=lambda x: -x[1])
-    for sym, _ in vol_list[:20]:
+    
+    # ✅ تغيير مهم: 50 عملة بدل 20
+    for sym, _ in vol_list[:50]:
         all_coins.add(sym)
     
+    log.info(f"🔍 فحص {len(all_coins)} عملة")
+    
     for sym in all_coins:
-        if is_leverage_token(sym) or is_stablecoin(sym):
-            continue
-        
         # جلب البيانات الأساسية
         t = next((x for x in all_tickers if x.get("symbol") == sym), None)
         if not t:
@@ -370,7 +382,7 @@ def scan_coins():
                         f"━━━━━━━━━━━━━━━━━━\n"
                         f"⏳ *راقب — انتظر تأكيد الدخول*"
                     )
-                    log.info(f"WATCH | {sym} | ATS={ats:.0f}$")
+                    log.info(f"👁️ WATCH | {sym} | ATS={ats:.0f}$ | vol={vol_24h/1000:.0f}K")
             
             # ENTRY
             else:
@@ -392,10 +404,10 @@ def scan_coins():
                         f"━━━━━━━━━━━━━━━━━━\n"
                         f"✅ *ادخل الآن!* 🚀"
                     )
-                    log.info(f"ENTRY | {sym} | ATS={ats:.0f}$ | score={entry['score']}")
+                    log.info(f"🔥 ENTRY | {sym} | ATS={ats:.0f}$ | score={entry['score']}")
                     
         except Exception as e:
-            log.debug(f"Error: {e}")
+            log.debug(f"Error scanning {sym}: {e}")
 
 
 # ==================== تقرير 4 ساعات ====================
@@ -414,6 +426,7 @@ def send_4h_report():
         f"{icons.get(market_state, '📊')} السوق: *{market_state}*\n"
         f"₿ BTC: `{btc_change_24h:+.2f}%`\n"
         f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 فحص {len(signal_tracker.watchlist)} عملة في المراقبة\n"
         f"💡 نظام WATCH → ENTRY يعمل"
     )
 
@@ -448,13 +461,19 @@ def poll_commands():
                 continue
             
             if text in ("/status", "/حالة"):
-                send(f"📊 *MAFIO-BOT V32*\n━━━━━━━━━━━━━━━━━━\n✅ يعمل\n📡 {api_calls_minute} req/min\n₿ BTC: `{btc_change_24h:+.2f}%`", personal_only=True)
+                send(f"📊 *MAFIO-BOT V33*\n━━━━━━━━━━━━━━━━━━\n✅ يعمل\n📡 {api_calls_minute} req/min\n👁️ {len(signal_tracker.watchlist)} تحت المراقبة\n₿ BTC: `{btc_change_24h:+.2f}%`", personal_only=True)
             elif text in ("/btc", "/بتكوين"):
-                send(f"₿ *BTC*\n━━━━━━━━━━━━━━━━━━\n24h: `{btc_change_24h:+.2f}%`\n1h: `{btc_trend_1h:+.2f}%`", personal_only=True)
+                send(f"₿ *BTC*\n━━━━━━━━━━━━━━━━━━\n24h: `{btc_change_24h:+.2f}%`\n1h: `{btc_trend_1h:+.2f}%`\nالسوق: `{market_state}`", personal_only=True)
+            elif text in ("/watch", "/مراقبة"):
+                if signal_tracker.watchlist:
+                    coins = list(signal_tracker.watchlist.keys())[:10]
+                    send(f"👁️ *قائمة المراقبة:*\n{', '.join([c.replace('USDT','') for c in coins])}", personal_only=True)
+                else:
+                    send("👁️ لا توجد عملات تحت المراقبة حالياً", personal_only=True)
             elif text in ("/help", "/مساعدة"):
-                send("🤖 *MAFIO-BOT V32*\n📊 /status\n₿ /btc", personal_only=True)
+                send("🤖 *MAFIO-BOT V33*\n━━━━━━━━━━━━━━━━━━\n📊 /status — الحالة\n₿ /btc — حالة BTC\n👁️ /watch — قائمة المراقبة\n💡 الإشارات تلقائية", personal_only=True)
             elif text in ("/start", "/تشغيل"):
-                send("✅ MAFIO-BOT V32 يعمل!", personal_only=True)
+                send("✅ MAFIO-BOT V33 يعمل!", personal_only=True)
                 
     except Exception as e:
         log.error(f"poll_commands error: {e}")
@@ -463,20 +482,20 @@ def poll_commands():
 # ==================== الحلقة الرئيسية ====================
 
 def run():
-    global all_tickers, market_state, btc_change_24h, last_btc, last_4h_report, last_deep_scan
+    global all_tickers, market_state, btc_change_24h, last_btc, last_4h_report
     
-    log.info("🚀 MAFIO-BOT V32 بدء التشغيل...")
+    log.info("🚀 MAFIO-BOT V33 بدء التشغيل...")
     
     time.sleep(5)
     analyze_btc()
     last_4h_report = time.time()
     
     send(
-        f"💀 *MAFIO-BOT V32*\n"
+        f"💀 *MAFIO-BOT V33*\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔍 نظام WATCH → ENTRY\n"
+        f"🔍 50 عملة تحت المراقبة\n"
         f"💰 ATS حسب حجم العملة\n"
-        f"📡 معدل طلبات منخفض\n"
+        f"📡 كاش ذكي | معدل طلبات منخفض\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"₿ BTC: `{btc_change_24h:+.2f}%`"
     )
