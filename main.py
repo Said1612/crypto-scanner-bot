@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
-# Build: 20260323-V30-FINAL
+# Build: 20260323-V30-FIXED
 """
 ╔══════════════════════════════════════════════════════════════╗
-║     MAFIO BOT V30 — LIQUIDITY MASTER                       ║
+║     MAFIO BOT V30 — LIQUIDITY MASTER (FIXED)               ║
 ║     نظام الكشف المبكر عن السيولة قبل ارتفاع السعر          ║
 ║     ✅ مرحلتين: WATCH → ENTRY                              ║
 ║     ✅ ATS حسب حجم العملة (Small/Mid/Big Cap)              ║
-║     ✅ فلتر Pump & Dump                                    ║
-║     ✅ Sector Flow للقطاعات الساخنة                        ║
 ║     ✅ جاهز للإنتاج                                        ║
 ╚══════════════════════════════════════════════════════════════╝
 """
@@ -90,57 +88,30 @@ VOLUME_THRESHOLDS = {
     "joker": 3.0,       # 3.0× حجم غير طبيعي
 }
 
-# إعدادات TPS
-TPS_THRESHOLDS = {
-    "min": 0.3,         # أقل TPS للقبول
-    "ideal": 0.5,       # TPS مثالي (حيتان هادئون)
-    "max": 2.0,         # أكثر من هذا = نشاط عادي
-}
-
-# إعدادات Sector Flow
-SECTOR_FLOW_THRESHOLD = 15.0      # +15% حجم القطاع = ساخن
-SECTOR_FLOW_COOLDOWN = 1800       # 30 دقيقة
-
-# إعدادات التكرار
-COOLDOWN_WATCH = 1800             # 30 دقيقة بين إشارات WATCH
-COOLDOWN_ENTRY = 3600             # ساعة بين إشارات ENTRY
-COOLDOWN_JOKER = 14400            # 4 ساعات بين إشارات JOKER
-
-# ==================== جميع القطاعات (16 قطاع) ====================
+# ==================== جميع القطاعات ====================
 
 SECTORS = {
-    "AI": ["FETUSDT", "AGIXUSDT", "OCEANUSDT", "RENDERUSDT", "GRTUSDT", "WLDUSDT", "ARKMUSDT", "VIRTUSDT", "ACTUSDT", "CGPTUSDT"],
-    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT", "BONKUSDT", "BOMEUSDT", "MEMEUSDT", "POPCATUSDT", "MOGUSDT"],
-    "Layer1": ["AVAXUSDT", "ADAUSDT", "SOLUSDT", "NEARUSDT", "SUIUSDT", "APTUSDT", "INJUSDT", "KASUSDT", "TONUSDT", "HBARUSDT"],
-    "Layer2": ["POLUSDT", "OPUSDT", "ARBUSDT", "ZKUSDT", "STRKUSDT", "LRCUSDT", "METISUSDT", "MANTAUSDT", "MNTUSDT", "ALTUSDT"],
-    "DeFi": ["AAVEUSDT", "UNIUSDT", "CAKEUSDT", "LINKUSDT", "MKRUSDT", "CRVUSDT", "LDOUSDT", "COMPUSDT", "DYDXUSDT", "GMXUSDT"],
-    "Gaming": ["GALAUSDT", "AXSUSDT", "SANDUSDT", "IMXUSDT", "BEAMUSDT", "PIXELUSDT", "NOTUSDT", "XAIUSDT", "ALICEUSDT", "PORTALUSDT"],
-    "RWA": ["ONDOUSDT", "CFGUSDT", "MANTRAUSDT", "RSRUSDT", "MPLXUSDT", "REALUSDT", "TRSTUSDT", "PROMUSDT", "LQTYUSDT", "POLYXUSDT"],
-    "Oracle": ["LINKUSDT", "PYTHUSDT", "BANDUSDT", "UMAUSDT", "DIAUSDT", "API3USDT", "FLUXUSDT", "SUPRAUSDT", "TRUFUSDT", "ORAIUSDT"],
-    "Storage": ["FILUSDT", "ARUSDT", "STORJUSDT", "BLZUSDT", "HOTUSDT", "CKBUSDT", "AIOZUSDT", "ANKRUSDT", "CRUSTUSDT", "SWARMUSDT"],
-    "DePIN": ["IOTAUSDT", "HNTUSDT", "LPTUSDT", "NTRNUSDT", "GPUUSDT", "PONDUSDT", "GRASSUSDT", "IOTXUSDT", "POKTUSDT", "DOTUSDT"],
-    "Privacy": ["XMRUSDT", "DASHUSDT", "ZECUSDT", "SCRTUSDT", "ROSEUSDT", "DUSKUSDT", "ZENUSDT", "NYMUSDT", "FIROUSDT", "PIVXUSDT"],
-    "NeoBank": ["XLMUSDT", "XRPUSDT", "PYTHUSDT", "STRKUSDT", "COTIUSDT", "REQUSDT", "PAYUSDT", "SOLOUSDT", "NEXOUSDT", "WIREXUSDT"],
-    "Robotics": ["WLDUSDT", "RENDERUSDT", "FETUSDT", "AGIXUSDT", "ARKMUSDT", "PHAUSDT", "CUDOSUSDT", "CGPTUSDT", "NEUROUSDT", "VIRTUSDT"],
-    "Quantum": ["QNTUSDT", "QTUMUSDT", "IONQUSDT", "QUAIUSDT", "KVANTUSDT", "QUIPUSDT", "QUANTUMUSDT", "QKCUSDT", "ALEPHUSDT"],
-    "POW": ["ZECUSDT", "ZILUSDT", "ALPHUSDT", "KASUSDT", "RVNUSDT", "DCRUSDT", "GRLUSDT", "ERGOUSDT", "CPHUSDT", "RIFUSDT"],
-    "Old": ["LTCUSDT", "ETCUSDT", "BCHUSDT", "EOSUSDT", "TRXUSDT", "QTUMUSDT", "XEMUSDT", "ZRXUSDT", "ICXUSDT", "STEEMUSDT"]
+    "AI": ["FETUSDT", "AGIXUSDT", "OCEANUSDT", "RENDERUSDT", "GRTUSDT", "WLDUSDT", "ARKMUSDT"],
+    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT", "BONKUSDT", "BOMEUSDT"],
+    "Layer1": ["AVAXUSDT", "ADAUSDT", "SOLUSDT", "NEARUSDT", "SUIUSDT", "APTUSDT", "INJUSDT"],
+    "Layer2": ["POLUSDT", "OPUSDT", "ARBUSDT", "ZKUSDT", "STRKUSDT", "LRCUSDT", "METISUSDT"],
+    "DeFi": ["AAVEUSDT", "UNIUSDT", "CAKEUSDT", "LINKUSDT", "MKRUSDT", "CRVUSDT", "LDOUSDT"],
+    "Gaming": ["GALAUSDT", "AXSUSDT", "SANDUSDT", "IMXUSDT", "BEAMUSDT", "PIXELUSDT", "NOTUSDT"],
+    "RWA": ["ONDOUSDT", "CFGUSDT", "MANTRAUSDT", "RSRUSDT", "MPLXUSDT", "REALUSDT", "TRSTUSDT"],
+    "Oracle": ["LINKUSDT", "PYTHUSDT", "BANDUSDT", "UMAUSDT", "DIAUSDT", "API3USDT", "FLUXUSDT"],
+    "Storage": ["FILUSDT", "ARUSDT", "STORJUSDT", "BLZUSDT", "HOTUSDT", "CKBUSDT", "AIOZUSDT"],
+    "DePIN": ["IOTAUSDT", "HNTUSDT", "LPTUSDT", "NTRNUSDT", "GPUUSDT", "PONDUSDT", "GRASSUSDT"],
+    "NeoBank": ["XLMUSDT", "XRPUSDT", "PYTHUSDT", "STRKUSDT", "COTIUSDT", "REQUSDT", "PAYUSDT"],
 }
 
 log.info(f"✅ تم تحميل {len(SECTORS)} قطاع")
 
 # ==================== المتغيرات العامة ====================
 
-# متغيرات الوقت
 last_tickers = 0.0
 last_btc = 0.0
-last_sectors = 0.0
-last_deep_scan = 0.0
-last_stale = 0.0
 last_4h_report = 0.0
-last_sector_flow_scan = 0.0
 
-# متغيرات السوق
 btc_change_24h = 0.0
 btc_trend_1h = 0.0
 btc_trend_4h = 0.0
@@ -149,11 +120,7 @@ btc_tps_stats = {}
 eth_tps_stats = {}
 market_state = "SAFE"
 
-# قوائم العملات
 hot_sectors = []
-hot_symbols = set()
-candidates = []
-changes_map = {}
 all_tickers = []
 klines_cache = {}
 coin_vol_history = {}
@@ -161,176 +128,11 @@ price_map = {}
 vol_now = {}
 change_now = {}
 
-# عدادات API
 api_calls_total = 0
 api_calls_minute = 0
 api_minute_reset = time.time()
 
-# متغيرات Telegram
 _tg_offset = 0
-_force_daily_report = False
-daily_report_sent_date = ""
-
-# ==================== نظام الإشارات ====================
-
-class SignalTracker:
-    """تتبع العملات في مرحلة المراقبة"""
-    
-    def __init__(self):
-        self.watchlist = {}  # {sym: {"time": timestamp, "price": price, "tier": tier, "data": {}}}
-        self.alerted = {}    # {sym: {"watch": timestamp, "entry": timestamp, "joker": timestamp}}
-        
-    def get_tier(self, vol_24h):
-        """تحديد حجم العملة حسب حجم 24h"""
-        if vol_24h < 1_000_000:
-            return "small"
-        elif vol_24h < 10_000_000:
-            return "mid"
-        else:
-            return "big"
-    
-    def get_ats_threshold(self, tier, signal_type):
-        """الحصول على حد ATS حسب حجم العملة ونوع الإشارة"""
-        thresholds = ATS_THRESHOLDS.get(tier, ATS_THRESHOLDS["mid"])
-        if signal_type == "watch":
-            return thresholds["watch"]
-        elif signal_type == "entry":
-            return thresholds["entry"]
-        else:
-            return thresholds["joker"]
-    
-    def should_send_watch(self, sym, ats, vol_24h, price_change):
-        """التحقق من شروط إرسال إشارة مراقبة"""
-        tier = self.get_tier(vol_24h)
-        min_ats = self.get_ats_threshold(tier, "watch")
-        max_price_change = ATS_THRESHOLDS[tier]["max_price_change"]
-        
-        # شروط المراقبة
-        if ats >= min_ats and price_change <= max_price_change:
-            return True, tier
-        return False, None
-    
-    def should_send_entry(self, sym, ats, vdelta, vol_ratio, vol_24h, price_change):
-        """التحقق من شروط إرسال إشارة دخول"""
-        tier = self.get_tier(vol_24h)
-        min_ats = self.get_ats_threshold(tier, "entry")
-        max_price_change = ATS_THRESHOLDS[tier]["max_price_change"]
-        
-        # شروط الدخول
-        if (ats >= min_ats and 
-            vdelta >= VDELTA_THRESHOLDS["entry"] and 
-            vol_ratio >= VOLUME_THRESHOLDS["entry"] and
-            price_change <= max_price_change):
-            return True, tier
-        return False, None
-    
-    def add_watch(self, sym, price, ats, vdelta, vol_ratio, tps, vol_24h, sector):
-        """إضافة عملة لقائمة المراقبة"""
-        now = time.time()
-        tier = self.get_tier(vol_24h)
-        
-        # تجنب التكرار
-        if sym in self.watchlist:
-            return False
-        
-        self.watchlist[sym] = {
-            "time": now,
-            "price": price,
-            "ats": ats,
-            "vdelta": vdelta,
-            "vol_ratio": vol_ratio,
-            "tps": tps,
-            "tier": tier,
-            "sector": sector,
-            "vol_24h": vol_24h
-        }
-        
-        # تسجيل وقت الإشعار
-        if sym not in self.alerted:
-            self.alerted[sym] = {}
-        self.alerted[sym]["watch"] = now
-        
-        return True
-    
-    def check_entry(self, sym, price, ats, vdelta, vol_ratio, tps, vol_24h, price_change, sector):
-        """التحقق من إمكانية الترقية من مراقبة إلى دخول"""
-        now = time.time()
-        
-        # التحقق من وجود العملة في قائمة المراقبة
-        if sym not in self.watchlist:
-            return None
-        
-        watch_data = self.watchlist[sym]
-        elapsed = now - watch_data["time"]
-        
-        # انتظر على الأقل 30 دقيقة (1800 ثانية)
-        if elapsed < 1800:
-            return None
-        
-        # التحقق من شروط الدخول
-        can_entry, tier = self.should_send_entry(sym, ats, vdelta, vol_ratio, vol_24h, price_change)
-        
-        if not can_entry:
-            return None
-        
-        # حساب التحسن
-        improvement = {
-            "ats": ats - watch_data["ats"],
-            "vdelta": (vdelta - watch_data["vdelta"]) * 100,
-            "vol_ratio": vol_ratio - watch_data["vol_ratio"]
-        }
-        
-        # حساب القوة
-        score = self.calculate_score(ats, vdelta, vol_ratio, tier)
-        
-        # إزالة من قائمة المراقبة
-        del self.watchlist[sym]
-        
-        # تسجيل وقت الإشعار
-        if sym not in self.alerted:
-            self.alerted[sym] = {}
-        self.alerted[sym]["entry"] = now
-        
-        return {
-            "improvement": improvement,
-            "score": score,
-            "tier": tier,
-            "entry_price": price,
-            "watch_price": watch_data["price"],
-            "elapsed_minutes": int(elapsed / 60)
-        }
-    
-    def calculate_score(self, ats, vdelta, vol_ratio, tier):
-        """حساب قوة الإشارة (0-100)"""
-        score = 0
-        
-        # ATS (حسب الحجم)
-        thresholds = ATS_THRESHOLDS[tier]
-        if ats >= thresholds["joker"]:
-            score += 35
-        elif ats >= thresholds["entry"]:
-            score += 25
-        elif ats >= thresholds["watch"]:
-            score += 15
-        
-        # VDelta
-        if vdelta >= VDELTA_THRESHOLDS["joker"]:
-            score += 30
-        elif vdelta >= VDELTA_THRESHOLDS["entry"]:
-            score += 25
-        elif vdelta >= VDELTA_THRESHOLDS["watch"]:
-            score += 15
-        
-        # حجم
-        if vol_ratio >= VOLUME_THRESHOLDS["joker"]:
-            score += 25
-        elif vol_ratio >= VOLUME_THRESHOLDS["entry"]:
-            score += 20
-        elif vol_ratio >= VOLUME_THRESHOLDS["watch"]:
-            score += 10
-        
-        return min(score, 100)
-
 
 # ==================== الدوال المساعدة ====================
 
@@ -511,6 +313,124 @@ def is_stablecoin(sym):
     return False
 
 
+# ==================== نظام الإشارات ====================
+
+class SignalTracker:
+    def __init__(self):
+        self.watchlist = {}
+        self.alerted = {}
+    
+    def get_tier(self, vol_24h):
+        if vol_24h < 1_000_000:
+            return "small"
+        elif vol_24h < 10_000_000:
+            return "mid"
+        else:
+            return "big"
+    
+    def get_ats_threshold(self, tier, signal_type):
+        thresholds = ATS_THRESHOLDS.get(tier, ATS_THRESHOLDS["mid"])
+        if signal_type == "watch":
+            return thresholds["watch"]
+        elif signal_type == "entry":
+            return thresholds["entry"]
+        else:
+            return thresholds["joker"]
+    
+    def should_send_watch(self, sym, ats, vol_24h, price_change):
+        tier = self.get_tier(vol_24h)
+        min_ats = self.get_ats_threshold(tier, "watch")
+        max_price_change = ATS_THRESHOLDS[tier]["max_price_change"]
+        
+        if ats >= min_ats and abs(price_change) <= max_price_change:
+            return True, tier
+        return False, None
+    
+    def add_watch(self, sym, price, ats, vdelta, vol_ratio, tps, vol_24h, sector):
+        now = time.time()
+        tier = self.get_tier(vol_24h)
+        
+        if sym in self.watchlist:
+            return False
+        
+        self.watchlist[sym] = {
+            "time": now,
+            "price": price,
+            "ats": ats,
+            "vdelta": vdelta,
+            "vol_ratio": vol_ratio,
+            "tps": tps,
+            "tier": tier,
+            "sector": sector,
+            "vol_24h": vol_24h
+        }
+        
+        if sym not in self.alerted:
+            self.alerted[sym] = {}
+        self.alerted[sym]["watch"] = now
+        
+        return True
+    
+    def check_entry(self, sym, price, ats, vdelta, vol_ratio, tps, vol_24h, price_change, sector):
+        now = time.time()
+        
+        if sym not in self.watchlist:
+            return None
+        
+        watch_data = self.watchlist[sym]
+        elapsed = now - watch_data["time"]
+        
+        if elapsed < 1800:
+            return None
+        
+        tier = self.get_tier(vol_24h)
+        min_ats = self.get_ats_threshold(tier, "entry")
+        max_price_change = ATS_THRESHOLDS[tier]["max_price_change"]
+        
+        if not (ats >= min_ats and vdelta >= VDELTA_THRESHOLDS["entry"] and 
+                vol_ratio >= VOLUME_THRESHOLDS["entry"] and abs(price_change) <= max_price_change):
+            return None
+        
+        improvement = {
+            "ats": ats - watch_data["ats"],
+            "vdelta": (vdelta - watch_data["vdelta"]) * 100,
+            "vol_ratio": vol_ratio - watch_data["vol_ratio"]
+        }
+        
+        score = 0
+        if ats >= ATS_THRESHOLDS[tier]["joker"]:
+            score += 35
+        elif ats >= min_ats:
+            score += 25
+        
+        if vdelta >= VDELTA_THRESHOLDS["joker"]:
+            score += 30
+        elif vdelta >= VDELTA_THRESHOLDS["entry"]:
+            score += 25
+        
+        if vol_ratio >= VOLUME_THRESHOLDS["joker"]:
+            score += 25
+        elif vol_ratio >= VOLUME_THRESHOLDS["entry"]:
+            score += 20
+        
+        score = min(score, 100)
+        
+        del self.watchlist[sym]
+        
+        if sym not in self.alerted:
+            self.alerted[sym] = {}
+        self.alerted[sym]["entry"] = now
+        
+        return {
+            "improvement": improvement,
+            "score": score,
+            "tier": tier,
+            "entry_price": price,
+            "watch_price": watch_data["price"],
+            "elapsed_minutes": int(elapsed / 60)
+        }
+
+
 # ==================== تحليل BTC ====================
 
 def analyze_btc():
@@ -535,11 +455,6 @@ def analyze_btc():
     if kd1 and len(kd1["closes"]) >= 2:
         c = kd1["closes"]
         btc_trend_1h = (c[-1] - c[-2]) / c[-2] * 100 if c[-2] > 0 else 0.0
-
-    kd4 = get_klines("BTCUSDT", "4h", 3)
-    if kd4 and len(kd4["closes"]) >= 2:
-        c4 = kd4["closes"]
-        btc_trend_4h = (c4[-1] - c4[-2]) / c4[-2] * 100 if c4[-2] > 0 else 0.0
 
     eth_data = safe_get("https://api.mexc.com/api/v3/ticker/24hr", {"symbol": "ETHUSDT"})
     if eth_data:
@@ -569,7 +484,6 @@ def analyze_btc():
 # ==================== مسح العملات ====================
 
 def scan_coins():
-    """مسح العملات والكشف عن الإشارات"""
     global all_tickers, price_map, vol_now, change_now
     
     if not all_tickers:
@@ -591,10 +505,9 @@ def scan_coins():
             vol_24h = float(t.get("quoteVolume", 0))
             price_change = float(t.get("priceChangePercent", 0))
             
-            if vol_24h < 30_000:  # حجم أقل من 30K تجاهل
+            if vol_24h < 30_000:
                 continue
             
-            # جلب TPS/ATS
             stats = analyze_tps_ats(sym)
             if not stats:
                 continue
@@ -602,26 +515,21 @@ def scan_coins():
             ats = stats.get("ats", 0)
             vdelta = stats.get("vdelta", 0)
             tps = stats.get("tps", 0)
-            
-            # نسبة حجم
             vol_ratio = get_coin_vol_ratio(sym, vol_24h)
             
-            # تحديد القطاع
             sector = "غير محدد"
             for sec, coins in SECTORS.items():
                 if sym in coins:
                     sector = sec
                     break
             
-            # ==================== المرحلة 1: WATCH ====================
+            # المرحلة 1: WATCH
             if sym not in signal_tracker.watchlist:
-                can_watch, tier = signal_tracker.should_send_watch(sym, ats, vol_24h, abs(price_change))
+                can_watch, tier = signal_tracker.should_send_watch(sym, ats, vol_24h, price_change)
                 
                 if can_watch and vol_ratio >= VOLUME_THRESHOLDS["watch"] and vdelta >= VDELTA_THRESHOLDS["watch"]:
-                    # إضافة للمراقبة
                     signal_tracker.add_watch(sym, price, ats, vdelta, vol_ratio, tps, vol_24h, sector)
                     
-                    # إرسال إشعار WATCH
                     tier_label = ATS_THRESHOLDS[tier]["label"]
                     
                     watch_msg = (
@@ -640,11 +548,11 @@ def scan_coins():
                         f"⏳ *مراقبة — انتظر تأكيد الدخول خلال 30-60 دقيقة* 🃏"
                     )
                     send(watch_msg)
-                    log.info(f"👁️ WATCH | {sym} | ATS={ats:.0f}$ | tier={tier}")
+                    log.info(f"👁️ WATCH | {sym} | ATS={ats:.0f}$")
             
-            # ==================== المرحلة 2: ENTRY ====================
+            # المرحلة 2: ENTRY
             else:
-                entry_data = signal_tracker.check_entry(sym, price, ats, vdelta, vol_ratio, tps, vol_24h, abs(price_change), sector)
+                entry_data = signal_tracker.check_entry(sym, price, ats, vdelta, vol_ratio, tps, vol_24h, price_change, sector)
                 
                 if entry_data:
                     tier = entry_data["tier"]
@@ -653,21 +561,17 @@ def scan_coins():
                     score = entry_data["score"]
                     elapsed = entry_data["elapsed_minutes"]
                     
-                    # تحديد نوع الإشارة (JOKER إذا كانت قوية جداً)
                     if ats >= ATS_THRESHOLDS[tier]["joker"] and vdelta >= VDELTA_THRESHOLDS["joker"]:
-                        signal_type = "JOKER"
                         title = "🃏💎🃏💎🃏💎🃏💎🃏\n💎 *الجوكر الذهبي — ادخل الآن!* 💎\n🃏💎🃏💎🃏💎🃏💎🃏"
                         action = "✅ *ادخل الآن — حيتان ضخمة تؤكد!* 🚀"
                     else:
-                        signal_type = "ENTRY"
                         title = "🔥 *ENTRY SIGNAL* 🔥"
                         action = "✅ *ادخل الآن — السيولة تأكدت!* 🚀"
                     
-                    # بناء رسالة الدخول
                     entry_msg = (
                         f"{title}\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
-                        f"📍 *{sym.replace('USDT','')}/USDT* — {signal_type}\n"
+                        f"📍 *{sym.replace('USDT','')}/USDT*\n"
                         f"💵 السعر: `{fmt_price(price)}`\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
                         f"📊 *تأكيد السيولة:*\n"
@@ -690,7 +594,7 @@ def scan_coins():
                         f"{action}"
                     )
                     send(entry_msg)
-                    log.info(f"🔔 {signal_type} | {sym} | ATS={ats:.0f}$ | score={score}")
+                    log.info(f"🔔 ENTRY | {sym} | ATS={ats:.0f}$ | score={score}")
 
 
 # ==================== تقرير 4 ساعات ====================
@@ -728,7 +632,7 @@ def send_4h_report():
 # ==================== أوامر Telegram ====================
 
 def poll_commands():
-    global _tg_offset, candidates, hot_sectors, market_state, btc_change_24h, btc_trend_1h
+    global _tg_offset, market_state, btc_change_24h, btc_trend_1h
     
     if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "YOUR_BOT_TOKEN":
         return
@@ -770,8 +674,7 @@ def poll_commands():
                     f"🔍 نظام WATCH → ENTRY → JOKER\n"
                     f"💰 ATS حسب حجم العملة\n"
                     f"₿ BTC: `{btc_change_24h:+.2f}%` | `{market_state}`\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
-                    f"💡 الإشارات تلقائية عند وجود سيولة"
+                    f"━━━━━━━━━━━━━━━━━━"
                 )
                 send(reply, personal_only=True)
             
@@ -799,7 +702,6 @@ def poll_commands():
                     "📈 *نظام الإشارات:*\n"
                     "   1️⃣ WATCH — بداية سيولة\n"
                     "   2️⃣ ENTRY — تأكيد دخول\n"
-                    "   3️⃣ JOKER — حيتان ضخمة\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     "💡 الإشارات تلقائية عند وجود سيولة"
                 )
@@ -837,9 +739,8 @@ def cleanup():
 # ==================== الحلقة الرئيسية ====================
 
 def run():
-    global all_tickers, candidates, market_state, btc_change_24h
-    global last_btc, last_sectors, last_deep_scan, last_stale, last_tickers
-    global last_4h_report, price_map, vol_now, change_now
+    global all_tickers, market_state, btc_change_24h
+    global last_btc, last_tickers, last_4h_report, price_map, vol_now, change_now
     
     price_map = {}
     vol_now = {}
@@ -847,8 +748,6 @@ def run():
     
     log.info("🚀 MAFIO-BOT V30 - LIQUIDITY MASTER بدء التشغيل...")
     log.info(f"📊 {len(SECTORS)} قطاع يتم مراقبتها")
-    log.info("🔍 نظام WATCH → ENTRY → JOKER مفعّل")
-    log.info("💰 ATS حسب حجم العملة (Small/Mid/Big Cap)")
 
     time.sleep(5)
 
@@ -856,7 +755,6 @@ def run():
     
     time.sleep(2)
     
-    last_deep_scan = 0
     last_tickers = time.time()
     last_4h_report = time.time()
 
@@ -864,7 +762,7 @@ def run():
         f"💀 *MAFIO-BOT V30* 💀\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 {len(SECTORS)} قطاع تحت المراقبة\n"
-        f"🔍 نظام WATCH → ENTRY → JOKER\n"
+        f"🔍 نظام WATCH → ENTRY\n"
         f"💰 ATS حسب حجم العملة\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"₿ BTC: `{btc_change_24h:+.2f}%` | `{market_state}`\n"
@@ -895,15 +793,11 @@ def run():
                     except (KeyError, ValueError):
                         pass
 
-                changes_map.update(change_now)
+                changes_map = change_now
                 update_coin_vol_history(vol_now)
                 
                 # مسح الإشارات
                 scan_coins()
-
-            # تحديث القائمة
-            if now - last_tickers >= 1800:
-                last_tickers = now
 
             # تحليل BTC
             if now - last_btc >= BTC_EVERY:
