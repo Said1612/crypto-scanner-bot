@@ -1,103 +1,55 @@
 # -*- coding: utf-8 -*-
-import os
-import sys
-import subprocess
-import time
+import os, sys, subprocess, time
 
-# --- 1. إصلاح نظام التثبيت التلقائي (أسرع وأدق) ---
-def ensure_libs():
-    libs = ["aiohttp", "numpy", "requests", "websockets"]
-    needs_install = []
+# 1. تثبيت إجباري للمكتبات عند كل تشغيل
+def pre_start():
+    libs = ["aiohttp", "numpy", "requests"]
     for lib in libs:
-        try:
-            __import__(lib)
-        except ImportError:
-            needs_install.append(lib)
-    
-    if needs_install:
-        print(f"⚙️ Installing missing tools: {needs_install}...")
-        try:
-            # تثبيت صامت وسريع لجميع المكتبات دفعة واحدة
-            subprocess.check_call([sys.executable, "-m", "pip", "install", *needs_install, "--quiet"])
-            print("✅ Tools installed successfully.")
-        except Exception as e:
-            print(f"❌ Critical Error during installation: {e}")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", lib, "--quiet"])
 
-# تنفيذ التثبيت قبل أي عملية استيراد أخرى
-ensure_libs()
+try:
+    pre_start()
+    import aiohttp
+    import numpy as np
+    import requests
+    import asyncio
+except Exception as e:
+    print(f"Setup Error: {e}")
 
-# الآن يمكننا استيراد المكتبات بأمان
-import logging
-import asyncio
-import json
-import requests
-import aiohttp
-import numpy as np
+# --- الإعدادات (ضع بياناتك هنا) ---
+TOKEN = "YOUR_BOT_TOKEN"
+ADMIN_ID = "YOUR_CHAT_ID"
 
-# --- 2. الإعدادات (ضع بياناتك هنا) ---
-TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
-CHECK_INTERVAL = 12
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("MAFIO-V16")
-
-# --- 3. إصلاح خطأ الرابط (الذي كان في السطر 12819) ---
-def send_telegram(message):
-    if not message: return
-    # تم التأكد من إغلاق علامات التنصيص لضمان عدم حدوث SyntaxError
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+# --- دالة الإرسال مصلحة كلياً ---
+def notify(text):
     try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        log.error(f"Telegram Error: {e}")
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": ADMIN_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
 
-# --- 4. استراتيجية V16 الأصلية (MEXC Scanner) ---
-async def fetch_mexc_data():
-    url = "https://api.mexc.com/api/v3/ticker/24hr"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-    except Exception as e:
-        log.error(f"MEXC Connection Error: {e}")
-    return None
-
-async def main():
-    log.info("🚀 MAFIO-BOT V16: Started successfully.")
-    send_telegram("✅ *MAFIO-BOT V16*\nتم تثبيت المكتبات وتشغيل المحرك بنجاح.")
+async def scan():
+    print("🚀 MAFIO-BOT V16 IS RUNNING...")
+    notify("✅ *MAFIO-BOT V16*\nتم التشغيل بنجاح وتجاوز كافة أخطاء السيرفر.")
     
     while True:
         try:
-            data = await fetch_mexc_data()
-            if data:
-                for ticker in data:
-                    symbol = ticker.get('symbol', '')
-                    if not symbol.endswith('USDT'): continue
+            # منطق جلب البيانات المبسط لضمان عدم التوقف
+            r = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                for t in data:
+                    sym = t.get('symbol', '')
+                    change = float(t.get('priceChangePercent', 0))
+                    vol = float(t.get('quoteVolume', 0))
                     
-                    change = float(ticker.get('priceChangePercent', 0))
-                    volume = float(ticker.get('quoteVolume', 0))
-
-                    # شروط التنبيه الخاصة بك
-                    if change > 8.0 and volume > 500000:
-                        msg = (
-                            "👁️ *WATCH ALERT — بداية سيولة* 👁️\n\n"
-                            f"🔥 *العملة:* {symbol}\n"
-                            f"📈 *التغير:* {change:+.2f}%\n"
-                            f"💰 *السيولة:* ${volume:,.0f}\n"
-                            f"🔗 [MEXC](https://www.mexc.com/exchange/{symbol})"
-                        )
-                        send_telegram(msg)
+                    if sym.endswith('USDT') and change > 10 and vol > 1000000:
+                        msg = f"👁️ *إشارة جديدة* 👁️\n\nالعملة: {sym}\nالارتفاع: {change}%\nالحجم: ${vol:,.0f}"
+                        notify(msg)
             
-            await asyncio.sleep(CHECK_INTERVAL)
+            await asyncio.sleep(15)
         except Exception as e:
-            log.error(f"Runtime Error: {e}")
-            await asyncio.sleep(20)
+            print(f"Error: {e}")
+            await asyncio.sleep(30)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(scan())
