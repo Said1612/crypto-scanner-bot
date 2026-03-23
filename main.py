@@ -2,30 +2,39 @@
 import os
 import sys
 import subprocess
+import time
 
-# --- وظيفة التثبيت التلقائي للمكتبات المفقودة ---
-def install_dependencies():
-    dependencies = ["aiohttp", "numpy", "requests", "websockets"]
-    for lib in dependencies:
+# --- 1. إصلاح نظام التثبيت التلقائي (أسرع وأدق) ---
+def ensure_libs():
+    libs = ["aiohttp", "numpy", "requests", "websockets"]
+    needs_install = []
+    for lib in libs:
         try:
             __import__(lib)
         except ImportError:
-            print(f"Installing {lib}...")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", lib])
+            needs_install.append(lib)
+    
+    if needs_install:
+        print(f"⚙️ Installing missing tools: {needs_install}...")
+        try:
+            # تثبيت صامت وسريع لجميع المكتبات دفعة واحدة
+            subprocess.check_call([sys.executable, "-m", "pip", "install", *needs_install, "--quiet"])
+            print("✅ Tools installed successfully.")
+        except Exception as e:
+            print(f"❌ Critical Error during installation: {e}")
 
-# تشغيل التثبيت قبل البدء
-install_dependencies()
+# تنفيذ التثبيت قبل أي عملية استيراد أخرى
+ensure_libs()
 
-import time
+# الآن يمكننا استيراد المكتبات بأمان
 import logging
 import asyncio
 import json
 import requests
-from datetime import datetime
 import aiohttp
 import numpy as np
 
-# --- الإعدادات (ضع بياناتك هنا) ---
+# --- 2. الإعدادات (ضع بياناتك هنا) ---
 TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
 CHECK_INTERVAL = 12
@@ -33,9 +42,10 @@ CHECK_INTERVAL = 12
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger("MAFIO-V16")
 
-# --- إصلاح خطأ الرابط (السطر 12819 سابقاً) ---
+# --- 3. إصلاح خطأ الرابط (الذي كان في السطر 12819) ---
 def send_telegram(message):
     if not message: return
+    # تم التأكد من إغلاق علامات التنصيص لضمان عدم حدوث SyntaxError
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
@@ -43,20 +53,25 @@ def send_telegram(message):
     except Exception as e:
         log.error(f"Telegram Error: {e}")
 
-# --- استراتيجية V16 الأصلية ---
-def get_mexc_data():
+# --- 4. استراتيجية V16 الأصلية (MEXC Scanner) ---
+async def fetch_mexc_data():
+    url = "https://api.mexc.com/api/v3/ticker/24hr"
     try:
-        r = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10)
-        return r.json() if r.status_code == 200 else None
-    except: return None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        log.error(f"MEXC Connection Error: {e}")
+    return None
 
 async def main():
-    log.info("🚀 MAFIO-BOT V16: المحرك يعمل الآن...")
-    send_telegram("✅ *MAFIO-BOT V16*\nتم إصلاح كافة الأخطاء وتثبيت المكتبات آلياً.")
+    log.info("🚀 MAFIO-BOT V16: Started successfully.")
+    send_telegram("✅ *MAFIO-BOT V16*\nتم تثبيت المكتبات وتشغيل المحرك بنجاح.")
     
     while True:
         try:
-            data = get_mexc_data()
+            data = await fetch_mexc_data()
             if data:
                 for ticker in data:
                     symbol = ticker.get('symbol', '')
@@ -65,7 +80,7 @@ async def main():
                     change = float(ticker.get('priceChangePercent', 0))
                     volume = float(ticker.get('quoteVolume', 0))
 
-                    # معايير الفلترة الخاصة بك
+                    # شروط التنبيه الخاصة بك
                     if change > 8.0 and volume > 500000:
                         msg = (
                             "👁️ *WATCH ALERT — بداية سيولة* 👁️\n\n"
@@ -78,8 +93,11 @@ async def main():
             
             await asyncio.sleep(CHECK_INTERVAL)
         except Exception as e:
-            log.error(f"Error: {e}")
+            log.error(f"Runtime Error: {e}")
             await asyncio.sleep(20)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
