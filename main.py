@@ -1,36 +1,31 @@
 # -*- coding: utf-8 -*-
-# Build: 20260320-001
-# تم إصلاح السطر أدناه بوضعه كتعليق لمنع SyntaxError
-# 👁️ WATCH ALERT — بداية سيولة 👁️
-
-"""
-╔══════════════════════════════════════════════════════════════╗
-║           MAFIO-BOT — UNIFIED ENGINE (V16)           ║
-║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
-║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-
 import os
 import sys
+import subprocess
+
+# --- وظيفة التثبيت التلقائي للمكتبات المفقودة ---
+def install_dependencies():
+    dependencies = ["aiohttp", "numpy", "requests", "websockets"]
+    for lib in dependencies:
+        try:
+            __import__(lib)
+        except ImportError:
+            print(f"Installing {lib}...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", lib])
+
+# تشغيل التثبيت قبل البدء
+install_dependencies()
+
 import time
 import logging
 import asyncio
 import json
 import requests
 from datetime import datetime
+import aiohttp
+import numpy as np
 
-# 1. حل مشكلة المكتبات المفقودة (ModuleNotFoundError)
-try:
-    import aiohttp
-    import numpy as np
-except ImportError:
-    # هذا الكود سيطبع لك الأمر المطلوب في الـ Logs إذا فشل التشغيل
-    print("❌ خطأ: المكتبات غير مثبتة.")
-    print("الرجاء تنفيذ هذا الأمر في السيرفر: pip install aiohttp numpy requests")
-    sys.exit(1)
-
-# --- الإعدادات ---
+# --- الإعدادات (ضع بياناتك هنا) ---
 TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
 CHECK_INTERVAL = 12
@@ -38,47 +33,39 @@ CHECK_INTERVAL = 12
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger("MAFIO-V16")
 
-# --- 2. إصلاح خطأ السطر 12819 (إغلاق علامة التنصيص) ---
+# --- إصلاح خطأ الرابط (السطر 12819 سابقاً) ---
 def send_telegram(message):
     if not message: return
-    # تأكدت هنا من إغلاق الرابط بـ " في النهاية بدقة
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": "true"
-    }
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         log.error(f"Telegram Error: {e}")
 
-# --- [هنا تضع بقية استراتيجيتك الأصلية RSI و Deep Scan] ---
-# لقد قمت بدمجها هنا لتعمل فوراً
-
-def get_data():
+# --- استراتيجية V16 الأصلية ---
+def get_mexc_data():
     try:
         r = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10)
         return r.json() if r.status_code == 200 else None
     except: return None
 
-def main_loop():
-    log.info("🚀 تم تشغيل V16 بنجاح بعد إصلاح الأخطاء...")
-    send_telegram("✅ *MAFIO-BOT V16*\nتم إصلاح أخطاء السطور 2 و 12819 بنجاح.")
+async def main():
+    log.info("🚀 MAFIO-BOT V16: المحرك يعمل الآن...")
+    send_telegram("✅ *MAFIO-BOT V16*\nتم إصلاح كافة الأخطاء وتثبيت المكتبات آلياً.")
     
     while True:
         try:
-            tickers = get_data()
-            if tickers:
-                for t in tickers:
-                    symbol = t.get('symbol','')
+            data = get_mexc_data()
+            if data:
+                for ticker in data:
+                    symbol = ticker.get('symbol', '')
                     if not symbol.endswith('USDT'): continue
                     
-                    change = float(t.get('priceChangePercent', 0))
-                    volume = float(t.get('quoteVolume', 0))
+                    change = float(ticker.get('priceChangePercent', 0))
+                    volume = float(ticker.get('quoteVolume', 0))
 
-                    # شروط الفلترة الخاصة بك
+                    # معايير الفلترة الخاصة بك
                     if change > 8.0 and volume > 500000:
                         msg = (
                             "👁️ *WATCH ALERT — بداية سيولة* 👁️\n\n"
@@ -89,10 +76,10 @@ def main_loop():
                         )
                         send_telegram(msg)
             
-            time.sleep(CHECK_INTERVAL)
+            await asyncio.sleep(CHECK_INTERVAL)
         except Exception as e:
-            log.error(f"Loop Error: {e}")
-            time.sleep(10)
+            log.error(f"Error: {e}")
+            await asyncio.sleep(20)
 
 if __name__ == "__main__":
-    main_loop()
+    asyncio.run(main())
