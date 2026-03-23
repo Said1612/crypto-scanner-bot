@@ -7,8 +7,9 @@
 ║                                                                             ║
 ║  🔥 استراتيجيات متعددة: TPS/ATS + Liquidity Zones + Pre-Explosion           ║
 ║  🧠 ذكاء: VDelta MA + CVD + Order Book + Multi-Timeframe                    ║
-║  ⚡ سرعة: Async + WebSocket + Smart Cache                                   ║
-║  🛡️ حماية: Trailing Stop + ATR + Risk Management                           ║
+║  ⚡ سرعة: Async + Smart Cache                                               ║
+║  🛡️ حماية: Trailing Stop + Risk Management                                 ║
+║  ✅ لا يحتاج مكتبات خارجية - يعمل مباشرة                                    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -19,20 +20,14 @@ import time
 import math
 import asyncio
 import logging
+import urllib.request
+import urllib.error
+import ssl
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Set, Any, Union
 from collections import deque, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-
-try:
-    import aiohttp
-    import websockets
-    import numpy as np
-except ImportError as e:
-    print(f"❌ Error: Missing dependency - {e}")
-    print("Please run: pip install aiohttp websockets numpy")
-    sys.exit(1)
 
 # ==================== إعدادات النظام ====================
 
@@ -42,7 +37,6 @@ GROUP_ID = os.getenv("GROUP_ID", "")
 
 # توقيتات
 CHECK_INTERVAL = 12
-WEBSOCKET_RECONNECT = 30
 CACHE_15M = 60
 CACHE_1H = 300
 CACHE_4H = 900
@@ -52,7 +46,6 @@ VDELTA_MIN = 0.65
 VDELTA_STRONG = 0.75
 TPS_SPIKE = 2.0
 ATS_WHALE = 2000
-ATS_MIN = 100
 
 # أحجام العملات
 TIER_SETTINGS = {
@@ -74,7 +67,6 @@ SECTORS = {
 }
 
 EXCLUDED = {"BTCUSDT", "ETHUSDT", "BNBUSDT", "USDTUSDC", "EURUSDT"}
-STABLECOINS = {"USDC", "BUSD", "FDUSD", "DAI", "TUSD", "USDD", "USDE"}
 LEVERAGE_KEYWORDS = ["3L", "3S", "5L", "5S", "BULL", "BEAR", "UP", "DOWN"]
 
 # ==================== Logging ====================
@@ -90,13 +82,76 @@ logging.basicConfig(
 )
 log = logging.getLogger("MafioBot")
 
+# ==================== HTTP Client بدون مكتبات خارجية ====================
+
+class SimpleHTTPClient:
+    """عميل HTTP بسيط بدون مكتبات خارجية"""
+    
+    def __init__(self):
+        self.ssl_context = ssl.create_default_context()
+        self.ssl_context.check_hostname = False
+        self.ssl_context.verify_mode = ssl.CERT_NONE
+        self.api_calls = 0
+        self.last_reset = time.time()
+    
+    async def get(self, url: str, params: dict = None, retries: int = 3) -> Optional[Any]:
+        """طلب GET غير متزامن"""
+        if params:
+            query = "&".join([f"{k}={v}" for k, v in params.items()])
+            url = f"{url}?{query}"
+        
+        for attempt in range(retries):
+            try:
+                # تشغيل في thread منفصل لعدم حظر async
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None, 
+                    lambda: urllib.request.urlopen(url, context=self.ssl_context, timeout=10)
+                )
+                data = json.loads(response.read().decode('utf-8'))
+                
+                self.api_calls += 1
+                now = time.time()
+                if now - self.last_reset >= 60:
+                    log.info(f"📡 API: {self.api_calls} req/min")
+                    self.api_calls = 0
+                    self.last_reset = now
+                
+                return data
+                
+            except Exception as e:
+                wait = 2 ** attempt
+                log.debug(f"API retry {attempt+1}/{retries}: {e}")
+                await asyncio.sleep(wait)
+        
+        return None
+    
+    async def post(self, url: str, json_data: dict) -> bool:
+        """طلب POST غير متزامن"""
+        try:
+            data = json.dumps(json_data).encode('utf-8')
+            headers = {'Content-Type': 'application/json'}
+            
+            req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+            
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: urllib.request.urlopen(req, context=self.ssl_context, timeout=10)
+            )
+            
+            return response.getcode() == 200
+            
+        except Exception as e:
+            log.error(f"POST error: {e}")
+            return False
+
 # ==================== هياكل البيانات ====================
 
 class SignalType(Enum):
     WATCH = "👁️ مراقبة"
     ENTRY = "✅ دخول"
     PRE_EXPLOSION = "🎯 قبل الانفجار"
-    EXPLOSION = "💥 انفجار"
     GOLDEN = "🏆 ذهبي"
 
 @dataclass
@@ -106,15 +161,11 @@ class MarketData:
     bid_volume: float = 0.0
     ask_volume: float = 0.0
     last_update: float = 0.0
-    
-    # مؤشرات حية
     tps: float = 0.0
     ats: float = 0.0
     vdelta: float = 0.5
     ob_imbalance: float = 1.0
     volume_spike: float = 1.0
-    
-    # التاريخ
     trades_buffer: deque = field(default_factory=lambda: deque(maxlen=100))
     price_history: deque = field(default_factory=lambda: deque(maxlen=50))
     volume_history: deque = field(default_factory=lambda: deque(maxlen=20))
@@ -142,37 +193,20 @@ class Position:
 
 class MafioBot:
     def __init__(self):
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.http = SimpleHTTPClient()
         self.data_cache: Dict[str, MarketData] = {}
         self.watchlist: Dict[str, WatchItem] = {}
         self.positions: Dict[str, Position] = {}
         self.klines_cache: Dict[str, Tuple[Any, float]] = {}
         
-        # حالة السوق
         self.btc_change_24h = 0.0
         self.btc_trend_1h = 0.0
         self.market_state = "SAFE"
-        self.hot_sectors: List[str] = []
         
-        # إحصائيات
         self.signals_sent = 0
-        self.api_calls = 0
-        self.last_api_reset = time.time()
-        
-        # WebSocket
-        self.ws_connected = False
         self.active_symbols: Set[str] = set()
         
-    async def init(self):
-        """تهيئة الجلسة"""
-        self.session = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(limit=100),
-            timeout=aiohttp.ClientTimeout(total=10)
-        )
-        log.info("🚀 Mafio Bot initialized")
-        
     def get_tier(self, vol: float) -> str:
-        """تحديد حجم العملة"""
         if vol >= 10_000_000:
             return "big"
         elif vol >= 1_000_000:
@@ -180,7 +214,6 @@ class MafioBot:
         return "small"
     
     def fmt_price(self, p: float) -> str:
-        """تنسيق السعر"""
         if p == 0:
             return "0"
         if p < 0.0001:
@@ -192,7 +225,6 @@ class MafioBot:
         return f"{p:,.2f}"
     
     async def send_telegram(self, msg: str, personal_only: bool = False):
-        """إرسال رسالة Telegram"""
         if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
             log.info(f"[TELEGRAM] {msg[:80]}...")
             return
@@ -204,41 +236,16 @@ class MafioBot:
         for chat_id in targets:
             if not chat_id:
                 continue
-            try:
-                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-                async with self.session.post(url, json={
-                    "chat_id": chat_id,
-                    "text": msg,
-                    "parse_mode": "Markdown"
-                }) as resp:
-                    if resp.status != 200:
-                        log.error(f"Telegram error: {await resp.text()}")
-            except Exception as e:
-                log.error(f"Send error: {e}")
-    
-    async def safe_get(self, url: str, params: dict = None, retries: int = 3) -> Optional[Any]:
-        """طلب API آمن"""
-        for attempt in range(retries):
-            try:
-                async with self.session.get(url, params=params, timeout=10) as resp:
-                    if resp.status == 200:
-                        self.api_calls += 1
-                        now = time.time()
-                        if now - self.last_api_reset >= 60:
-                            log.info(f"📡 API: {self.api_calls} req/min")
-                            self.api_calls = 0
-                            self.last_api_reset = now
-                        return await resp.json()
-            except Exception as e:
-                wait = 2 ** attempt
-                log.debug(f"API retry {attempt+1}/{retries}: {e}")
-                await asyncio.sleep(wait)
-        return None
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            await self.http.post(url, {
+                "chat_id": chat_id,
+                "text": msg,
+                "parse_mode": "Markdown"
+            })
     
     async def fetch_top_symbols(self) -> List[str]:
-        """جلب أفضل 100 عملة"""
         url = "https://api.mexc.com/api/v3/ticker/24hr"
-        data = await self.safe_get(url)
+        data = await self.http.get(url)
         if not data:
             return []
             
@@ -255,10 +262,9 @@ class MafioBot:
             try:
                 vol = float(item.get("quoteVolume", 0))
                 change = float(item.get("priceChangePercent", 0))
-                # فلترة العملات المشبوهة
                 if vol < 100_000 or vol > 100_000_000:
                     continue
-                if abs(change) > 50:  # تجنب pump & dump
+                if abs(change) > 50:
                     continue
                 symbols.append((sym, vol * (1 + abs(change)/100)))
             except:
@@ -268,7 +274,6 @@ class MafioBot:
         return [s[0] for s in symbols[:80]]
     
     async def get_klines(self, symbol: str, interval: str = "15m", limit: int = 50) -> Optional[Dict]:
-        """جلب بيانات الشموع مع كاش"""
         key = f"{symbol}_{interval}"
         now = time.time()
         
@@ -280,7 +285,7 @@ class MafioBot:
         
         url = "https://api.mexc.com/api/v3/klines"
         params = {"symbol": symbol, "interval": interval, "limit": limit}
-        raw = await self.safe_get(url, params)
+        raw = await self.http.get(url, params)
         
         if not raw or len(raw) < 6:
             return None
@@ -300,7 +305,6 @@ class MafioBot:
             return None
     
     async def calc_vdelta_ma(self, symbol: str, period: int = 10) -> float:
-        """حساب VDelta Moving Average"""
         kd = self.data_cache.get(symbol)
         if not kd:
             return 0.5
@@ -326,7 +330,6 @@ class MafioBot:
         return round(buy_val / total_val, 3) if total_val > 0 else 0.5
     
     async def calc_cvd(self, symbol: str) -> Dict:
-        """حساب Cumulative Volume Delta"""
         kd = await self.get_klines(symbol, "1h", 24)
         if not kd or len(kd["closes"]) < 10:
             return {"trend": "flat", "slope": 0, "pct_change": 0}
@@ -357,10 +360,7 @@ class MafioBot:
         second_half = sum(recent[6:]) / 6
         slope = second_half - first_half
         
-        if abs(first_half) > 0:
-            pct_change = (second_half - first_half) / abs(first_half) * 100
-        else:
-            pct_change = 0
+        pct_change = (second_half - first_half) / abs(first_half) * 100 if abs(first_half) > 0 else 0
         
         if slope > 0 and pct_change > 5:
             trend = "rising"
@@ -372,9 +372,8 @@ class MafioBot:
         return {"trend": trend, "slope": round(slope, 2), "pct_change": round(pct_change, 1)}
     
     async def analyze_tps_ats(self, symbol: str) -> Optional[Dict]:
-        """تحليل TPS/ATS/VDelta"""
         url = "https://api.mexc.com/api/v3/trades"
-        data = await self.safe_get(url, {"symbol": symbol, "limit": 100})
+        data = await self.http.get(url, {"symbol": symbol, "limit": 100})
         
         if not data or len(data) < 10:
             return None
@@ -426,9 +425,8 @@ class MafioBot:
             return None
     
     async def get_order_book(self, symbol: str) -> Optional[Dict]:
-        """جلب Order Book"""
         url = "https://api.mexc.com/api/v3/depth"
-        data = await self.safe_get(url, {"symbol": symbol, "limit": 20})
+        data = await self.http.get(url, {"symbol": symbol, "limit": 20})
         
         if not data:
             return None
@@ -452,9 +450,8 @@ class MafioBot:
             return None
     
     async def analyze_btc(self):
-        """تحليل حالة BTC"""
         url = "https://api.mexc.com/api/v3/ticker/24hr"
-        data = await self.safe_get(url, {"symbol": "BTCUSDT"})
+        data = await self.http.get(url, {"symbol": "BTCUSDT"})
         
         if not data:
             return
@@ -478,7 +475,6 @@ class MafioBot:
             self.market_state = "SAFE"
     
     async def unified_filter(self, symbol: str, vdelta: float, ats: float, vol: float, change: float, tier: str) -> Tuple[bool, str]:
-        """الفلتر الذكي الموحد"""
         settings = TIER_SETTINGS[tier]
         
         if vdelta < settings["vdelta_min"]:
@@ -503,7 +499,6 @@ class MafioBot:
         return True, "OK"
     
     async def detect_pre_explosion(self, symbol: str, data: MarketData, stats: Dict) -> Tuple[Optional[SignalType], int, List[str]]:
-        """كشف ما قبل الانفجار"""
         score = 0
         signals = []
         
@@ -556,7 +551,6 @@ class MafioBot:
         return None, 0, []
     
     async def scan_symbol(self, symbol: str, ticker_data: Dict):
-        """فحص عملة واحدة"""
         try:
             price = float(ticker_data.get("lastPrice", 0))
             vol = float(ticker_data.get("quoteVolume", 0))
@@ -636,7 +630,6 @@ class MafioBot:
             log.debug(f"Scan error {symbol}: {e}")
     
     async def send_watch_alert(self, symbol: str, price: float, stats: Dict, sector: str, tier: str, score: int, signals: List[str]):
-        """إرسال تنبيه مراقبة"""
         tier_info = TIER_SETTINGS[tier]
         
         msg = (
@@ -661,7 +654,6 @@ class MafioBot:
     
     async def send_entry_alert(self, symbol: str, price: float, stats: Dict, watch: WatchItem, score: int, 
                               signals: List[str], ats_improved: bool, vdelta_improved: bool):
-        """إرسال تنبيه دخول"""
         target_1 = price * 1.10
         target_2 = price * 1.20
         target_3 = price * 1.35
@@ -699,7 +691,6 @@ class MafioBot:
         log.info(f"ENTRY | {symbol} | score={score} | ATS={stats['ats']:.0f}$")
     
     async def check_positions(self):
-        """فحص المراكز المفتوحة (Trailing Stop)"""
         now = time.time()
         
         for symbol, pos in list(self.positions.items()):
@@ -736,64 +727,12 @@ class MafioBot:
                 del self.positions[symbol]
                 log.info(f"CLOSED | {symbol} | PnL={pnl:.2f}%")
     
-    async def websocket_listener(self, symbols: List[str]):
-        """WebSocket للبيانات اللحظية"""
-        if not symbols:
-            log.warning("No symbols for WebSocket")
-            return
-            
-        streams = "/".join([f"{s.lower()}@trade" for s in symbols[:50]])
-        uri = f"wss://wbs.mexc.com/ws?streams={streams}"
-        
-        while True:
-            try:
-                async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as ws:
-                    log.info(f"🔗 WebSocket connected: {len(symbols[:50])} symbols")
-                    self.ws_connected = True
-                    
-                    async for message in ws:
-                        try:
-                            data = json.loads(message)
-                            if "data" not in data:
-                                continue
-                            
-                            trade = data["data"]
-                            symbol = trade.get("s", "").upper()
-                            
-                            if symbol not in self.data_cache:
-                                self.data_cache[symbol] = MarketData(symbol=symbol)
-                            
-                            price = float(trade.get("p", 0))
-                            qty = float(trade.get("q", 0))
-                            is_buyer_maker = trade.get("m", False)
-                            
-                            md = self.data_cache[symbol]
-                            md.price = price
-                            md.trades_buffer.append({
-                                "price": price,
-                                "qty": qty,
-                                "is_sell": is_buyer_maker,
-                                "value": price * qty,
-                                "time": time.time()
-                            })
-                            
-                        except Exception as e:
-                            log.debug(f"WS message error: {e}")
-                            
-            except Exception as e:
-                log.error(f"WebSocket error: {e}")
-                self.ws_connected = False
-                await asyncio.sleep(WEBSOCKET_RECONNECT)
-    
     async def main_loop(self):
-        """الحلقة الرئيسية"""
-        await self.init()
+        log.info("🚀 Mafio Bot initialized (No external dependencies)")
         
         symbols = await self.fetch_top_symbols()
         self.active_symbols = set(symbols[:60])
         log.info(f"🎯 Monitoring {len(self.active_symbols)} symbols")
-        
-        ws_task = asyncio.create_task(self.websocket_listener(list(self.active_symbols)))
         
         await self.analyze_btc()
         
@@ -803,8 +742,7 @@ class MafioBot:
             f"📊 العملات: `{len(self.active_symbols)}`\n"
             f"₿ BTC: `{self.btc_change_24h:+.2f}%` | `{self.market_state}`\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ WebSocket: `Active`\n"
-            f"🎯 Mode: `Liquidity Hunter`"
+            f"⚡ Mode: `Liquidity Hunter (Pure Python)`"
         )
         
         last_btc_check = 0
@@ -822,7 +760,7 @@ class MafioBot:
                     await self.check_positions()
                     last_position_check = now
                 
-                ticker_data = await self.safe_get("https://api.mexc.com/api/v3/ticker/24hr")
+                ticker_data = await self.http.get("https://api.mexc.com/api/v3/ticker/24hr")
                 if ticker_data:
                     ticker_map = {t["symbol"]: t for t in ticker_data if t["symbol"] in self.active_symbols}
                     
@@ -836,18 +774,10 @@ class MafioBot:
                 await asyncio.sleep(10)
     
     def run(self):
-        """تشغيل البوت"""
         try:
             asyncio.run(self.main_loop())
         except KeyboardInterrupt:
             log.info("⛔ Stopped by user")
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.send_telegram("⛔ *Mafio Bot — Stopped*"))
-                loop.close()
-            except:
-                pass
         except Exception as e:
             log.error(f"Fatal error: {e}")
 
