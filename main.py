@@ -12816,4 +12816,4 @@ def run():
 
     try:
         _r = requests.get(
-            "https://api.telegram.org/bot{}/get
+            "https://api.telegram.org/bot{}/getUpdates?offset=-1&timeout=1".format(TELEGRAM_TOKEN),
