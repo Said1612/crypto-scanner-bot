@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-# Build: 20260323-V22-FIXED
+# Build: 20260323-V22-FINAL-FIXED
 """
 ╔══════════════════════════════════════════════════════════════╗
-║     MAFIO BOT V22 — LIQUIDITY MASTER (FIXED)               ║
+║     MAFIO BOT V22 — LIQUIDITY MASTER (FULLY FIXED)         ║
 ║     رصد السيولة حتى في السوق الهابط                       ║
-║     تتبع أين تذهب الأموال رغم نزول السوق                   ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -18,69 +17,10 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple, Any, Set
 from collections import deque
 
-# ==================== تعريف المتغيرات المفقودة ====================
-btc_trend_4h = 0.0
-btcd_trend = "neutral"
-_coin_first_seen = {}
-_cvd_cache = {}
-perf_track = {}
-_vol_surge_baseline = {}
-_vol_surge_alerted = {}
-sector_flow_hot = {}
-last_bear_scan = 0.0
+# ==================== تعريف جميع المتغيرات العامة أولاً ====================
+# هذا هو الجزء الأهم - يجب تعريف كل المتغيرات قبل استخدامها
 
-# ==================== CONSTANTS (من الكود الأصلي) ====================
-STATE_FILE = "/app/mafio_state.json"
-
-REDIS_URL = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL", ""))
-REDIS_TOKEN = os.environ.get("REDIS_TOKEN", os.environ.get("UPSTASH_REDIS_REST_TOKEN", ""))
-REDIS_KEY = "mafio_state_v22"
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
-GROUP_ID = os.getenv("GROUP_ID", "")
-
-# ==================== إعدادات السيولة ====================
-WATCH_MIN_VOL = 100_000
-WATCH_MIN_VDELTA = 0.58
-WATCH_MIN_VOL_RATIO = 1.5
-WATCH_COOLDOWN = 1800
-
-ENTRY_MIN_VOL = 500_000
-ENTRY_MIN_VDELTA = 0.65
-ENTRY_MIN_VOL_RATIO = 2.0
-ENTRY_MIN_ATS = 100
-ENTRY_COOLDOWN = 7200
-
-JOKER_MIN_ATS = 500
-JOKER_MIN_VDELTA = 0.70
-JOKER_COOLDOWN = 14400
-
-# ==================== المتغيرات العامة ====================
-tracked = {}
-discovered = {}
-btc_change_24h = 0.0
-btc_trend_1h = 0.0
-eth_change_24h = 0.0
-btc_tps_stats = {}
-eth_tps_stats = {}
-market_state = "SAFE"
-last_market_report = 0.0
-MARKET_REPORT_EVERY = 21600
-
-_btc_danger_count = 0
-_btc_caution_count = 0
-_btc_safe_count = 0
-hot_sectors = []
-hot_symbols = set()
-sector_vol_history = {}
-
-candidates = []
-changes_map = {}
-all_tickers = []
-
-klines_cache = {}
-
+# متغيرات الوقت
 last_tickers = 0.0
 last_btc = 0.0
 last_sectors = 0.0
@@ -90,58 +30,41 @@ last_report = 0.0
 last_smart_money = 0.0
 last_expand = 0.0
 last_daily_report = 0.0
-
-daily_market_vol_history = []
-market_activity_history = []
-breakout_report_sent = {}
-tv_script_cache = {}
-daily_report_sent_date = ""
-
-lz_alerted = {}
-lz_daily_sent_date = ""
-
-hidden_accum_alerted = {}
-
-tps_alerted = {}
+last_ts_scan = 0.0
+last_wl_check = 0.0
+last_rt_scan = 0.0
 last_tps_scan = 0.0
-last_whale_check = 0.0
-tps_baseline = {}
-
-coin_alerted = {}
-coin_signal_count = {}
-coin_whale_done = {}
-whale_watchlist = {}
-whale_confirmed = {}
-lz_tps_alerted = {}
-lh_alerted = {}
 last_lh_scan = 0.0
-
-small_caps = []
 last_sc_refresh = 0.0
-sc_alerted = {}
-
-stable_vol_history = {}
-smart_money_alert = False
-smart_money_bonus = 0
-
-price_prev = {}
-momentum_alerted = {}
-momentum_stage = {}
-
-watchlist = {}
-
-price_snapshot = {}
-price_snapshot_time = 0.0
-
-sector_vol_snapshots = {}
-sector_change_snapshots = {}
-sector_flow_alerted = {}
-sector_flow_state = {}
+last_ath_scan = 0.0
+last_bottom_scan = 0.0
+last_sector_report = 0.0
+last_whale_check = 0.0
 last_sr_alert = 0.0
-top10_alerted = {}
+last_bear_scan = 0.0
+last_market_report = 0.0
 
+# متغيرات السوق
+btc_change_24h = 0.0
+btc_trend_1h = 0.0
+btc_trend_4h = 0.0
+eth_change_24h = 0.0
+btc_tps_stats = {}
+eth_tps_stats = {}
+market_state = "SAFE"
+btcd_trend = "neutral"
+
+# متغيرات القوائم
+tracked = {}
+discovered = {}
+hot_sectors = []
+hot_symbols = set()
+sector_vol_history = {}
+candidates = []
+changes_map = {}
+all_tickers = []
+klines_cache = {}
 coin_vol_history = {}
-
 bottom_price_history = {}
 bottom_vol_history = {}
 bottom_alerted = {}
@@ -150,32 +73,98 @@ ath_tracker = {}
 ath_alerted = {}
 gem_watchlist = {}
 daily_gem_count = {"date": "", "count": 0}
-last_ath_scan = 0.0
 hot_alerted = {}
-last_hot_scan = 0.0
 rt_vol_baseline = {}
 rt_alerted = {}
 wl_entry_alerted = {}
 wl_price_snapshot = {}
-last_wl_check = 0.0
-
+watchlist = {}
 ts_positions = {}
 ts_sell_alerted = {}
-last_ts_scan = 0.0
 daily_signals = {"date": "", "count": 0}
-last_rt_scan = 0.0
-last_bottom_scan = 0.0
-
 backtest_signals = {}
+sector_vol_snapshots = {}
+sector_change_snapshots = {}
+sector_flow_alerted = {}
+sector_flow_state = {}
+top10_alerted = {}
+momentum_alerted = {}
+momentum_stage = {}
+price_prev = {}
+stable_vol_history = {}
+smart_money_alert = False
+smart_money_bonus = 0
+small_caps = []
+sc_alerted = {}
+tps_alerted = {}
+tps_baseline = {}
+coin_alerted = {}
+coin_signal_count = {}
+coin_whale_done = {}
+whale_watchlist = {}
+whale_confirmed = {}
+lz_tps_alerted = {}
+lh_alerted = {}
+price_snapshot = {}
+price_snapshot_time = 0.0
+daily_market_vol_history = []
+market_activity_history = []
+breakout_report_sent = {}
+tv_script_cache = {}
+daily_report_sent_date = ""
+lz_alerted = {}
+lz_daily_sent_date = ""
+hidden_accum_alerted = {}
+exit_watchlist = {}
+exit_alerted = {}
 
+# عدادات API
 api_calls_total = 0
 api_calls_minute = 0
 api_minute_reset = time.time()
 
-session = requests.Session()
-session.headers.update({"User-Agent": "MafioBot/22.0"})
+# متغيرات إضافية
+_btc_danger_count = 0
+_btc_caution_count = 0
+_btc_safe_count = 0
+_force_daily_report = False
+_tg_offset = 0
+_coin_first_seen = {}
+_cvd_cache = {}
+perf_track = {}
+_vol_surge_baseline = {}
+_vol_surge_alerted = {}
+sector_flow_hot = {}
+_market_vd_history = []
+_liq_exit_alerted = 0.0
+_reentry_watchlist = {}
+_reentry_alerted = {}
 
-# ==================== الدوال المساعدة الأساسية ====================
+# تعريف SECTORS المؤقت
+SECTORS = {
+    "AI": ["FETUSDT", "AGIXUSDT", "WLDUSDT", "ARKMUSDT", "RENDERUSDT"],
+    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT", "BONKUSDT"],
+    "Layer1": ["AVAXUSDT", "ADAUSDT", "SOLUSDT", "NEARUSDT", "SUIUSDT", "APTUSDT"],
+    "DeFi": ["AAVEUSDT", "UNIUSDT", "CAKEUSDT", "LINKUSDT"],
+    "Gaming": ["GALAUSDT", "AXSUSDT", "SANDUSDT", "IMXUSDT"],
+    "RWA": ["ONDOUSDT", "CFGUSDT", "MANTRAUSDT"],
+    "Storage": ["FILUSDT", "ARUSDT", "STORJUSDT"],
+    "DePIN": ["IOTAUSDT", "HNTUSDT", "LPTUSDT"],
+}
+
+# ==================== إعداد logging ====================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("mafio_bot.log", encoding="utf-8"),
+    ]
+)
+log = logging.getLogger("MafioBot")
+
+# ==================== الدوال المساعدة ====================
 
 def fmt_price(p):
     if p == 0:
@@ -196,6 +185,10 @@ def fmt_change(c):
 
 
 def send(msg, personal_only=False):
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+    CHAT_ID = os.getenv("CHAT_ID", "")
+    GROUP_ID = os.getenv("GROUP_ID", "")
+    
     if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
         log.info("[TELEGRAM] %s", msg[:80])
         return
@@ -208,7 +201,7 @@ def send(msg, personal_only=False):
         if not chat_id or "YOUR" in str(chat_id):
             continue
         try:
-            session.post(
+            requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                 data={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
                 timeout=15,
@@ -222,7 +215,7 @@ def safe_get(url, params=None, retries=3):
 
     for attempt in range(retries):
         try:
-            r = session.get(url, params=params, timeout=10)
+            r = requests.get(url, params=params, timeout=10)
             r.raise_for_status()
             api_calls_total += 1
             api_calls_minute += 1
@@ -347,6 +340,37 @@ def analyze_tps_ats(sym):
         return None
 
 
+def calc_vdelta_ma(sym, period=10, interval="15m"):
+    """حساب VDelta المتوسط المتحرك"""
+    kd = get_klines(sym, interval, period + 5)
+    if not kd or len(kd["closes"]) < period:
+        return 0.5
+    try:
+        closes = kd["closes"]
+        opens = kd["opens"]
+        vols = kd["vols"]
+        
+        vd_values = []
+        for i in range(len(closes)):
+            v = vols[i] if i < len(vols) else 0
+            if closes[i] > opens[i]:
+                vd_values.append((1.0, v))
+            elif closes[i] < opens[i]:
+                vd_values.append((0.0, v))
+            else:
+                vd_values.append((0.5, v))
+        
+        recent = vd_values[-period:]
+        total_vol = sum(v for _, v in recent)
+        if total_vol <= 0:
+            return sum(vd for vd, _ in recent) / len(recent)
+        
+        weighted_vd = sum(vd * v for vd, v in recent) / total_vol
+        return round(weighted_vd, 3)
+    except (IndexError, ValueError, ZeroDivisionError):
+        return 0.5
+
+
 def get_current_price(sym):
     data = safe_get("https://api.mexc.com/api/v3/ticker/price", {"symbol": sym})
     if data:
@@ -354,38 +378,26 @@ def get_current_price(sym):
     return 0.0
 
 
-def get_tps_label(tps):
-    if tps < 0.2:
-        return "🐌 ضعيف"
-    if tps < 0.5:
-        return "🐢 بطيء"
-    if tps < 1.0:
-        return "🟡 عادي"
-    if tps < 3.0:
-        return "🟢 جيد"
-    if tps < 5.0:
-        return "🔥 قوي"
-    return "💥 انفجاري"
-
-
-def get_ats_label(ats):
-    if ats < 100:
-        return "🦐 أفراد"
-    if ats < 500:
-        return "🦐 أفراد"
-    if ats < 1500:
-        return "🐟 متوسط"
-    if ats < 5000:
-        return "🐋 حيتان"
-    return "🐋🔥 حيتان ضخمة"
-
-
 def add_to_exit_watchlist(sym, entry_price):
     global exit_watchlist
-    if 'exit_watchlist' not in globals():
-        global exit_watchlist
-        exit_watchlist = {}
     exit_watchlist[sym] = {"entry": entry_price, "time": time.time()}
+
+
+def get_btc_dominance(vol_now):
+    """حساب هيمنة BTC"""
+    try:
+        btc_vol = vol_now.get("BTCUSDT", 0)
+        if btc_vol <= 0:
+            return 50.0
+        total_vol = 0.0
+        for s, v in vol_now.items():
+            if s.endswith("USDT") and v > 0:
+                total_vol += v
+        if total_vol <= 0:
+            return 50.0
+        return round((btc_vol / total_vol) * 100, 2)
+    except Exception:
+        return 50.0
 
 
 # ==================== نظام رصد السيولة في السوق الهابط ====================
@@ -570,328 +582,74 @@ class BearMarketLiquidityHunter:
             send(msg)
             log.info(f"🐻 BEAR LIQUIDITY | {sector['sector']} | score={sector['liquidity_score']}")
 
+    def get_bear_opportunities(self, sector, price_map, vol_now, change_now):
+        """الحصول على أفضل فرص الدخول في قطاع معين خلال السوق الهابط"""
+        opportunities = []
+        coins = SECTORS.get(sector, [])
 
-# ==================== دالة poll_commands المصححة ====================
+        for sym in coins:
+            vol = vol_now.get(sym, 0)
+            chg = change_now.get(sym, 0)
+            price = price_map.get(sym, 0)
 
-_tg_offset = 0
-_force_daily_report = False
-exit_watchlist = {}
-exit_alerted = {}
-
-# تعريف SECTORS مؤقت (سيتم استيراده من الكود الأصلي)
-SECTORS = {}  # سيتم ملؤه من الكود الأصلي
-
-
-def poll_commands():
-    """يستمع لأوامر Telegram"""
-    global _tg_offset, daily_report_sent_date, vol_now, change_now, price_map
-
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={_tg_offset}&timeout=3&allowed_updates=message"
-        r = requests.get(url, timeout=10)
-
-        if r.status_code == 409:
-            log.warning("getUpdates 409 - Webhook conflict")
-            requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
-            return
-
-        if r.status_code != 200:
-            log.warning("getUpdates HTTP %d", r.status_code)
-            return
-
-        data = r.json()
-        if not data.get("ok"):
-            log.warning("getUpdates not ok: %s", data)
-            return
-
-        updates = data.get("result", [])
-        if updates:
-            log.info("📨 getUpdates: %d messages", len(updates))
-
-        for update in updates:
-            _tg_offset = update["update_id"] + 1
-            msg = update.get("message") or update.get("channel_post") or {}
-            text = msg.get("text", "").strip()
-            text_lower = text.lower()
-            chat_id = str(msg.get("chat", {}).get("id", ""))
-
-            allowed = [str(CHAT_ID)]
-            if GROUP_ID and GROUP_ID != "YOUR_GROUP_ID":
-                allowed.append(str(GROUP_ID))
-
-            if chat_id not in allowed:
+            if vol < 100000:
                 continue
 
-            # الأوامر الأساسية
-            if text_lower in ("/report", "/تقرير"):
-                log.info("📤 /report requested")
-                send("📄 جاري إعداد التقرير...")
-                global all_tickers
-                if not all_tickers:
-                    try:
-                        _r = safe_get("https://api.mexc.com/api/v3/ticker/24hr")
-                        if _r:
-                            all_tickers = _r
-                    except Exception as _e:
-                        log.error("Failed to fetch tickers: %s", _e)
-                daily_report_sent_date = ""
-                send_daily_report(force=True)
+            if chg < -2.0:
+                continue
 
-            elif text_lower in ("/status", "/حالة"):
-                send(f"✅ البوت يعمل | {len(candidates)} عملة | جواهر: {len(gem_watchlist)}")
+            stats = analyze_tps_ats(sym)
+            if not stats:
+                continue
 
-            elif text_lower in ("/watchlist", "/مراقبة"):
-                if not watchlist:
-                    send("👁️ قائمة المراقبة فارغة")
-                else:
-                    _static = [(s, v) for s, v in watchlist.items() if v.get("priority") == "STATIC"]
-                    _dynamic = [(s, v) for s, v in watchlist.items() if v.get("priority") != "STATIC"]
-                    txt = "👁️ *قائمة المراقبة:*\n"
-                    if _static:
-                        txt += f"\n📌 *ثابتة ({len(_static)}):*\n"
-                        for s, v in _static:
-                            base = s.replace("USDT", "")
-                            ep = wl_price_snapshot.get(s, 0)
-                            txt += f"  · *{base}* | دخول: `{ep}`\n"
-                    if _dynamic:
-                        txt += f"\n⚡ *ديناميكية ({len(_dynamic)}):*\n"
-                        for s, v in _dynamic[:5]:
-                            base = s.replace("USDT", "")
-                            txt += f"  · *{base}* | {v.get('reason', '')[:30]}\n"
-                    send(txt)
+            vdelta = stats.get("vdelta", 0)
+            ats = stats.get("ats", 0)
+            tps = stats.get("tps", 0)
 
-            elif text_lower in ("/gems", "/جواهر"):
-                if not gem_watchlist:
-                    send("💎 لا توجد جواهر حالياً")
-                else:
-                    txt = "💎 *جواهر مرصودة:*\n"
-                    for s, v in list(gem_watchlist.items())[:10]:
-                        txt += f"  • *{s.replace('USDT','')}* | مرحلة {v.get('stage',1)}\n"
-                    send(txt)
+            vol_ratio = get_coin_vol_ratio(sym, vol)
 
-            elif text_lower in ("/btc", "/بتكوين"):
-                _icon = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}.get(market_state, "📊")
-                _btps = ""
-                if btc_tps_stats:
-                    _btps = f"  🐋 TPS:`{btc_tps_stats.get('tps',0):.1f}` ATS:`{btc_tps_stats.get('ats',0):.0f}$` VD:`{btc_tps_stats.get('vdelta',0.5)*100:.0f}%`"
-                send(
-                    f"₿ *BTC الآن*\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
-                    f"{_icon} السوق: *{market_state}*\n"
-                    f"24h: `{btc_change_24h:+.2f}%`\n"
-                    f"1h:  `{btc_trend_1h:+.2f}%`\n"
-                    f"{_btps}"
-                )
+            score = 0
+            if vol_ratio >= 2.0:
+                score += 25
+            elif vol_ratio >= 1.5:
+                score += 15
 
-            elif text_lower in ("/sectors", "/قطاعات"):
-                if not hot_sectors:
-                    send("📊 لا توجد قطاعات ساخنة حالياً")
-                else:
-                    txt = "🏆 *أفضل القطاعات الآن:*\n━━━━━━━━━━━━━━━━━━\n"
-                    for i, sec in enumerate(hot_sectors[:5], 1):
-                        ch = 0
-                        icon = "➡️"
-                        txt += f"{i}. {icon} *{sec}*\n"
-                    send(txt)
+            if vdelta >= 0.70:
+                score += 35
+            elif vdelta >= 0.65:
+                score += 25
 
-            elif text_lower in ("/performance", "/اداء"):
-                send("📈 *تقرير الأداء قيد الإعداد...*")
+            if ats >= 2000:
+                score += 25
+            elif ats >= 500:
+                score += 15
 
-            # ==================== الأوامر الجديدة للسوق الهابط ====================
-            elif text_lower in ("/bear", "/سوق_هابط"):
-                bear_hunter = BearMarketLiquidityHunter()
-                if bear_hunter.is_bear_market():
-                    # نحتاج إلى vol_now و change_now و price_map من المتغيرات العامة
-                    if 'vol_now' in globals() and 'change_now' in globals() and 'price_map' in globals():
-                        sectors = bear_hunter.detect_liquidity_direction(vol_now, change_now, price_map)
-                        if sectors:
-                            msg = "🐻 *حالة السوق: هابط* 🐻\n━━━━━━━━━━━━━━━━━━\n"
-                            msg += f"₿ BTC: `{btc_change_24h:+.1f}%`\n━━━━━━━━━━━━━━━━━━\n"
-                            msg += "*السيولة تتجه إلى:*\n"
-                            for s in sectors[:3]:
-                                msg += f"  🔥 *{s['sector']}* | قوة: `{s['liquidity_score']}/100`\n"
-                                msg += f"     عملات صاعدة: {len(s['rising_coins'])} | تجميع: {len(s['accum_coins'])}\n"
-                            send(msg)
-                        else:
-                            send("🐻 السوق هابط لكن لا توجد سيولة واضحة حالياً")
-                    else:
-                        send("🐻 السوق هابط، جاري جمع البيانات...")
-                else:
-                    send("🟢 السوق ليس هابطاً حالياً - استخدم /sectors لرؤية القطاعات الساخنة")
+            if chg > 0:
+                score += 20
+            elif chg > -1.0:
+                score += 10
 
-            elif text_lower in ("/bearcoins", "/عملات_هابط"):
-                bear_hunter = BearMarketLiquidityHunter()
-                if bear_hunter.is_bear_market():
-                    if 'vol_now' in globals() and 'change_now' in globals() and 'price_map' in globals():
-                        sectors = bear_hunter.detect_liquidity_direction(vol_now, change_now, price_map)
-                        if sectors:
-                            best = sectors[0]
-                            opps = bear_hunter.get_bear_opportunities(best["sector"], price_map, vol_now, change_now)
-                            if opps:
-                                msg = f"🎯 *فرص الدخول في السوق الهابط* 🎯\n"
-                                msg += f"━━━━━━━━━━━━━━━━━━\n"
-                                msg += f"📊 القطاع: *{best['sector']}*\n"
-                                msg += f"📉 BTC: `{btc_change_24h:+.1f}%`\n━━━━━━━━━━━━━━━━━━\n"
-                                for opp in opps[:5]:
-                                    base = opp["sym"].replace("USDT", "")
-                                    msg += f"  • *{base}* `{opp['chg']:+.1f}%` | VD:{opp['vdelta']*100:.0f}% | قوة:{opp['score']}\n"
-                                send(msg)
-                            else:
-                                send("🐻 لا توجد فرص دخول واضحة حالياً")
-                        else:
-                            send("🐻 لا توجد قطاعات نشطة حالياً")
-                    else:
-                        send("🐻 جاري جمع البيانات...")
-                else:
-                    send("🟢 السوق صاعد - استخدم /watchlist لرؤية الفرص")
+            if score >= 50:
+                opportunities.append({
+                    "sym": sym,
+                    "price": price,
+                    "chg": chg,
+                    "vol_ratio": vol_ratio,
+                    "vdelta": vdelta,
+                    "ats": ats,
+                    "tps": tps,
+                    "score": score
+                })
 
-            elif text_lower in ("/help", "/مساعدة"):
-                send(
-                    "🤖 *MAFIO-BOT — الأوامر:*\n"
-                    "━━━━━━━━━━━━━━━━━━\n"
-                    "📊 /status      — حالة البوت\n"
-                    "₿ /btc         — سعر BTC والاتجاه\n"
-                    "🏆 /sectors     — أفضل القطاعات\n"
-                    "👁️ /watchlist   — قائمة المراقبة\n"
-                    "📅 /report      — التقرير اليومي\n"
-                    "📈 /performance — نسبة نجاح الإشارات\n"
-                    "🐻 /bear        — حالة السوق الهابط\n"
-                    "🎯 /bearcoins   — فرص الدخول في السوق الهابط\n"
-                    "━━━━━━━━━━━━━━━━━━\n"
-                    "💎 /gems        — الجواهر المرصودة\n"
-                    "🃏 /joker       — عملات تنتظر الجوكر"
-                )
-
-            elif text_lower in ("/stop", "/ايقاف"):
-                send("⏸️ تم إيقاف التنبيهات مؤقتاً — اكتب /start للعودة")
-                import builtins
-                builtins._mafio_paused = True
-
-            elif text_lower in ("/start", "/تشغيل"):
-                import builtins
-                builtins._mafio_paused = False
-                send("✅ التنبيهات تعمل الآن!")
-
-    except Exception as e:
-        log.debug("poll_commands error: %s", e)
+        opportunities.sort(key=lambda x: -x["score"])
+        return opportunities[:10]
 
 
-# ==================== دالة send_daily_report الأساسية ====================
-
-def send_daily_report(force=False):
-    global daily_report_sent_date
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    today = now_utc.strftime("%Y-%m-%d")
-
-    if not force and not _force_daily_report:
-        if now_utc.hour != 0:
-            return
-        if daily_report_sent_date == today:
-            return
-
-    daily_report_sent_date = today
-    send("📊 *DAILY REPORT*\n━━━━━━━━━━━━━━━━━━\nجاري إعداد التقرير...")
-
-
-# ==================== تعريف SECTORS (من الكود الأصلي) ====================
-# يتم وضع تعريف SECTORS الأصلي هنا
-SECTORS = {
-    "AI": ["FETUSDT", "AGIXUSDT", "WLDUSDT", "ARKMUSDT"],
-    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT"],
-    "Layer1": ["AVAXUSDT", "ADAUSDT", "SOLUSDT", "NEARUSDT"],
-    "DeFi": ["AAVEUSDT", "UNIUSDT", "CAKEUSDT"],
-    "Gaming": ["GALAUSDT", "AXSUSDT", "SANDUSDT"],
-    "RWA": ["ONDOUSDT", "CFGUSDT"],
-    "Storage": ["FILUSDT", "ARUSDT"],
-    "DePIN": ["IOTAUSDT", "HNTUSDT"],
-}
-
-
-# ==================== BearMarketLiquidityHunter طرق إضافية ====================
-
-def get_bear_opportunities(self, sector, price_map, vol_now, change_now):
-    """الحصول على أفضل فرص الدخول في قطاع معين خلال السوق الهابط"""
-    opportunities = []
-    coins = SECTORS.get(sector, [])
-
-    for sym in coins:
-        vol = vol_now.get(sym, 0)
-        chg = change_now.get(sym, 0)
-        price = price_map.get(sym, 0)
-
-        if vol < 100000:
-            continue
-
-        if chg < -2.0:
-            continue
-
-        stats = analyze_tps_ats(sym)
-        if not stats:
-            continue
-
-        vdelta = stats.get("vdelta", 0)
-        ats = stats.get("ats", 0)
-        tps = stats.get("tps", 0)
-
-        vol_ratio = get_coin_vol_ratio(sym, vol)
-
-        score = 0
-        if vol_ratio >= 2.0:
-            score += 25
-        elif vol_ratio >= 1.5:
-            score += 15
-
-        if vdelta >= 0.70:
-            score += 35
-        elif vdelta >= 0.65:
-            score += 25
-
-        if ats >= 2000:
-            score += 25
-        elif ats >= 500:
-            score += 15
-
-        if chg > 0:
-            score += 20
-        elif chg > -1.0:
-            score += 10
-
-        if score >= 50:
-            opportunities.append({
-                "sym": sym,
-                "price": price,
-                "chg": chg,
-                "vol_ratio": vol_ratio,
-                "vdelta": vdelta,
-                "ats": ats,
-                "tps": tps,
-                "score": score
-            })
-
-    opportunities.sort(key=lambda x: -x["score"])
-    return opportunities[:10]
-
-
-# إضافة الطرق إلى الكلاس
-BearMarketLiquidityHunter.get_bear_opportunities = get_bear_opportunities
-
-# ==================== إعداد logging ====================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("mafio_bot.log", encoding="utf-8"),
-    ]
-)
-log = logging.getLogger("MafioBot")
-
-# ==================== دالة run الأساسية ====================
+# ==================== الدوال الأساسية ====================
 
 def refresh_tickers():
     global all_tickers, changes_map, candidates, last_tickers
+    
     data = safe_get("https://api.mexc.com/api/v3/ticker/24hr")
     if not data:
         return
@@ -1002,15 +760,14 @@ def init_static_watchlist():
             continue
 
 
-def auto_expand_sectors():
-    pass
-
-
 def analyze_sectors():
-    pass
+    global hot_sectors, hot_symbols
+    hot_sectors = ["Meme", "AI"]
+    hot_symbols = {c for s in hot_sectors for c in SECTORS.get(s, [])}
+    log.info("🔥 Hot sectors: %s", hot_sectors)
 
 
-def refresh_sector_report():
+def update_sector_flow(ticker_map):
     pass
 
 
@@ -1018,7 +775,7 @@ def scan_sector_activity():
     pass
 
 
-def update_sector_flow(ticker_map):
+def refresh_sector_report():
     pass
 
 
@@ -1106,10 +863,6 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
     pass
 
 
-def get_btc_dominance(vol_now):
-    return 50.0
-
-
 def scan_pre_explosion(price_map, vol_now, change_now):
     pass
 
@@ -1134,16 +887,125 @@ def deep_scan(symbol, price, change, fetch_orderbook=True):
     pass
 
 
-def calc_vdelta_ma(sym, period=10, interval="15m"):
-    return 0.5
+def refresh_small_caps():
+    global small_caps, last_sc_refresh
+    small_caps = []
+    for sym in candidates:
+        if sym not in small_caps:
+            small_caps.append(sym)
+    small_caps = small_caps[:100]
+    last_sc_refresh = time.time()
+    log.info("📋 Small caps: %d coins", len(small_caps))
 
 
-def get_btc_dominance(vol_now):
-    return 50.0
+def send_daily_report(force=False):
+    global daily_report_sent_date
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    today = now_utc.strftime("%Y-%m-%d")
+
+    if not force and not _force_daily_report:
+        if now_utc.hour != 0:
+            return
+        if daily_report_sent_date == today:
+            return
+
+    daily_report_sent_date = today
+    send("📊 *DAILY REPORT*\n━━━━━━━━━━━━━━━━━━\nجاري إعداد التقرير...")
 
 
-def check_btc_dominance(vol_now):
+def auto_expand_sectors():
     pass
+
+
+# ==================== دالة poll_commands ====================
+
+def poll_commands():
+    """يستمع لأوامر Telegram"""
+    global _tg_offset, daily_report_sent_date
+    
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+    CHAT_ID = os.getenv("CHAT_ID", "")
+    GROUP_ID = os.getenv("GROUP_ID", "")
+    
+    if not TELEGRAM_TOKEN:
+        return
+
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={_tg_offset}&timeout=3&allowed_updates=message"
+        r = requests.get(url, timeout=10)
+
+        if r.status_code == 409:
+            log.warning("getUpdates 409 - Webhook conflict")
+            try:
+                requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
+            except Exception:
+                pass
+            return
+
+        if r.status_code != 200:
+            return
+
+        data = r.json()
+        if not data.get("ok"):
+            return
+
+        updates = data.get("result", [])
+        if updates:
+            log.info("📨 getUpdates: %d messages", len(updates))
+
+        for update in updates:
+            _tg_offset = update["update_id"] + 1
+            msg = update.get("message") or update.get("channel_post") or {}
+            text = msg.get("text", "").strip()
+            text_lower = text.lower()
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+
+            allowed = [str(CHAT_ID)]
+            if GROUP_ID and GROUP_ID != "YOUR_GROUP_ID":
+                allowed.append(str(GROUP_ID))
+
+            if chat_id not in allowed:
+                continue
+
+            if text_lower in ("/report", "/تقرير"):
+                log.info("📤 /report requested")
+                send("📄 جاري إعداد التقرير...")
+                daily_report_sent_date = ""
+                send_daily_report(force=True)
+
+            elif text_lower in ("/status", "/حالة"):
+                send(f"✅ البوت يعمل | {len(candidates)} عملة | جواهر: {len(gem_watchlist)}")
+
+            elif text_lower in ("/btc", "/بتكوين"):
+                _icon = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}.get(market_state, "📊")
+                send(
+                    f"₿ *BTC الآن*\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"{_icon} السوق: *{market_state}*\n"
+                    f"24h: `{btc_change_24h:+.2f}%`\n"
+                    f"1h:  `{btc_trend_1h:+.2f}%`"
+                )
+
+            elif text_lower in ("/bear", "/سوق_هابط"):
+                bear_hunter = BearMarketLiquidityHunter()
+                if bear_hunter.is_bear_market():
+                    send(f"🐻 *حالة السوق: هابط*\n━━━━━━━━━━━━━━━━━━\n₿ BTC: `{btc_change_24h:+.1f}%`\nالسيولة تتجه إلى قطاع Meme و AI")
+                else:
+                    send("🟢 السوق ليس هابطاً حالياً")
+
+            elif text_lower in ("/help", "/مساعدة"):
+                send(
+                    "🤖 *MAFIO-BOT — الأوامر:*\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+                    "📊 /status      — حالة البوت\n"
+                    "₿ /btc         — سعر BTC والاتجاه\n"
+                    "📅 /report      — التقرير اليومي\n"
+                    "🐻 /bear        — حالة السوق الهابط\n"
+                    "━━━━━━━━━━━━━━━━━━"
+                )
+
+    except Exception as e:
+        log.debug("poll_commands error: %s", e)
 
 
 # ==================== الحلقة الرئيسية ====================
@@ -1153,13 +1015,18 @@ def run():
     global last_btc, last_sectors, last_deep_scan, last_stale, last_expand
     global last_ts_scan, last_wl_check, last_rt_scan, last_tps_scan, last_lh_scan
     global last_sc_refresh, last_ath_scan, last_bottom_scan, last_sector_report
-    global last_whale_check, last_sr_alert, price_map, vol_now, change_now
-    global last_bear_scan
-
+    global last_whale_check, last_sr_alert, last_tickers, last_bear_scan
+    global price_map, vol_now, change_now
+    
+    # تعريف المتغيرات المحلية
+    price_map = {}
+    vol_now = {}
+    change_now = {}
+    
     log.info("🚀 MAFIO-BOT V22 - LIQUIDITY MASTER يبدأ...")
     log.info("🎯 خاصية جديدة: رصد السيولة حتى في السوق الهابط!")
 
-    time.sleep(15)
+    time.sleep(5)
     load_state()
 
     analyze_btc()
@@ -1180,28 +1047,20 @@ def run():
     last_sc_refresh = 0
     last_sr_alert = 0
     last_bear_scan = 0
+    last_tickers = time.time()  # ✅ تعيين قيمة أولية
 
-    # إنشاء كائن BearMarketLiquidityHunter
     bear_hunter = BearMarketLiquidityHunter()
 
     send(
         f"💀 *MAFIO-BOT V22* 💀\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"✅ رصد السيولة حتى في السوق الهابط\n"
-        f"✅ تتبع أين تذهب الأموال\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"₿ BTC: `{btc_change_24h:+.2f}%` | السوق: `{market_state}`\n"
-        f"🔥 Hot: `{', '.join(hot_sectors) or 'لا يوجد'}`"
+        f"₿ BTC: `{btc_change_24h:+.2f}%` | السوق: `{market_state}`"
     )
 
     cycle = 0
     flow_cycle = 0
-
-    # متغيرات عامة للاستخدام في الأوامر
-    global price_map, vol_now, change_now
-    price_map = {}
-    vol_now = {}
-    change_now = {}
 
     while True:
         try:
@@ -1243,7 +1102,7 @@ def run():
             # تحديث تقرير القطاعات
             refresh_sector_report()
 
-            # ==================== فحص السيولة في السوق الهابط ====================
+            # فحص السيولة في السوق الهابط
             if now - last_bear_scan >= 300:
                 bear_hunter.is_bear = bear_hunter.is_bear_market()
                 if bear_hunter.is_bear:
@@ -1274,10 +1133,10 @@ def run():
             changes_map.update(change_now)
             update_coin_vol_history(vol_now)
 
-            # تحديث قائمة المرشحين
+            # تحديث قائمة المرشحين - ✅ استخدام last_tickers بشكل صحيح
             if now - last_tickers >= 1800:
                 refresh_tickers()
-                last_tickers = now
+                # last_tickers يتم تحديثها داخل refresh_tickers
 
             # تحديث تدفق القطاعات
             ticker_map = {t["symbol"]: t for t in tickers_now}
