@@ -11032,12 +11032,14 @@ def _send_daily_report_body(today, now_utc):
     _mkt_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}
     _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
 
-    _btc1h = btc_trend_1h
+    _btc1h = 0.0
     try:
-        _kd1h = get_klines("BTCUSDT", "1h", 6)
-        if _kd1h and len(_kd1h["closes"]) >= 2:
-            _c1h   = _kd1h["closes"]
-            _btc1h = (_c1h[-1] - _c1h[-2]) / _c1h[-2] * 100
+        # نجلب مباشرة بدون cache لضمان دقة البيانات
+        _raw1h = safe_get(MEXC_KLINES, {"symbol": "BTCUSDT", "interval": "1h", "limit": 3})
+        if _raw1h and len(_raw1h) >= 2:
+            _c1h = [float(k[4]) for k in _raw1h]
+            if _c1h[-2] > 0:
+                _btc1h = (_c1h[-1] - _c1h[-2]) / _c1h[-2] * 100
     except Exception:
         _btc1h = float(btc_trend_1h) if btc_trend_1h is not None else 0.0
     _buy_pct     = float(buy_pct)         if buy_pct         is not None else 0.0
