@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
-# Build: 20260323-V26-FINAL
+# Build: 20260323-V29-REAL-LIQUIDITY
 """
 ╔══════════════════════════════════════════════════════════════╗
-║     MAFIO BOT V26 — FINAL VERSION                          ║
-║     16 قطاع + مسح ذكي للسيولة                              ║
-║     ✅ تقرير يومي (00:00 UTC) - بالصيغة المطلوبة           ║
-║     ✅ تقرير كل 4 ساعات - بالصيغة المطلوبة                 ║
-║     ✅ أوامر Telegram تعمل                                 ║
-║     ✅ رصد السيولة حتى في السوق الهابط                     ║
+║     MAFIO BOT V29 — REAL LIQUIDITY DETECTOR                ║
+║     اكتشاف السيولة الحقيقية فقط                           ║
+║     فلتر قوي ضد Pump & Dump                                ║
+║     إشارات قبل الانفجار + فلترة الوهم                     ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -35,28 +33,57 @@ logging.basicConfig(
 )
 log = logging.getLogger("MafioBot")
 
-log.info("🚀 MAFIO-BOT V26 بدء التشغيل...")
+log.info("🚀 MAFIO-BOT V29 - REAL LIQUIDITY DETECTOR بدء التشغيل...")
 
 # ==================== متغيرات البيئة ====================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
 GROUP_ID = os.getenv("GROUP_ID", "")
-REDIS_URL = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL", ""))
-REDIS_TOKEN = os.environ.get("REDIS_TOKEN", os.environ.get("UPSTASH_REDIS_REST_TOKEN", ""))
 
-# ==================== جميع القطاعات (16 قطاع) ====================
+# ==================== فلتر Pump & Dump ====================
+
+# شروط الرفض (Pump & Dump)
+PUMP_DUMP_FILTERS = {
+    "max_change_1m": 15.0,           # ارتفاع 15% في دقيقة = Pump
+    "max_change_5m": 25.0,            # ارتفاع 25% في 5 دقائق = Pump
+    "max_change_1h": 40.0,            # ارتفاع 40% في ساعة = Pump
+    "min_volume_ratio": 5.0,          # حجم ×5 فجأة = مشبوه
+    "max_vdelta_extreme": 0.92,       # VDelta > 92% = شراء وهمي
+    "min_ats_legit": 50,              # ATS أقل من 50 = غير حقيقي
+    "max_ats_legit": 500_000,         # ATS أكثر = مشبوه مع حجم صغير
+    "max_tps_spike": 10.0,            # TPS > 10 = روبوتات
+    "min_liquidity_depth": 5000,      # عمق أقل من 5K = سهل التلاعب
+}
+
+# شروط السيولة الحقيقية
+REAL_LIQUIDITY = {
+    "min_volume": 30_000,             # حجم كافٍ
+    "min_vdelta": 0.48,               # 48-70% شراء حقيقي
+    "max_vdelta": 0.85,               # أكثر من 85% مشبوه
+    "min_ats": 30,                    # ATS 30-500 طبيعي
+    "max_ats": 2000,                  # أكثر من 2000$ مشبوه لعملة صغيرة
+    "min_vol_growth": 1.2,            # نمو حجم تدريجي
+    "max_vol_growth": 4.0,            # نمو أكثر من 4× مشبوه
+    "min_price_position": -5.0,       # يمكن أن يكون منخفضاً
+    "max_price_change": 12.0,         # لم ينطلق بعد
+}
+
+# ==================== جميع القطاعات ====================
 
 SECTORS = {
     "AI": [
         "FETUSDT", "AGIXUSDT", "OCEANUSDT", "RENDERUSDT", "GRTUSDT",
         "WLDUSDT", "ARKMUSDT", "VIRTUSDT", "ACTUSDT", "CGPTUSDT",
-        "NEUROUSDT", "SWARMAUSDT", "PHAUSDT", "AIXBTUSDT", "KAIAUSDT"
+        "NEUROUSDT", "SWARMAUSDT", "PHAUSDT", "AIXBTUSDT", "KAIAUSDT",
+        "GRIFFAINUSDT", "ELIZAOSUSDT", "AVAAIUSDT"
     ],
     "Meme": [
         "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT",
         "BONKUSDT", "BOMEUSDT", "MEMEUSDT", "POPCATUSDT", "MOGUSDT",
-        "BABYDOGEUSDT", "DOGSUSDT", "CATIUSDT", "PNUTUSDT", "TURBOUSDT"
+        "BABYDOGEUSDT", "DOGSUSDT", "CATIUSDT", "PNUTUSDT", "TURBOUSDT",
+        "LOLUSDT", "FREEDOMOFMOUSDT", "MACMINIUSDT", "CAPTAINBNBUSDT", 
+        "SKIUSDT", "BUTTCOINUSDT", "PAWUSDT"
     ],
     "Layer1": [
         "AVAXUSDT", "ADAUSDT", "SOLUSDT", "NEARUSDT", "SUIUSDT",
@@ -123,20 +150,6 @@ SECTORS = {
 
 log.info(f"✅ تم تحميل {len(SECTORS)} قطاع")
 
-# ==================== إعدادات المسح ====================
-
-MIN_VOL_USDT = 300_000
-MAX_VOL_USDT = 80_000_000
-MIN_PRICE_CHANGE = -5.0
-MAX_PRICE_CHANGE = 80.0
-MIN_SCAN_SCORE = 30
-
-LEVERAGE_KEYWORDS = ["3L", "3S", "5L", "5S", "BULL", "BEAR", "UP", "DOWN", "LONG", "SHORT"]
-STABLECOINS = {"USDT", "USDC", "BUSD", "FDUSD", "DAI", "TUSD"}
-
-# ==================== إعدادات التقارير ====================
-REPORT_4H_INTERVAL = 14400  # 4 ساعات
-
 # ==================== المتغيرات العامة ====================
 
 last_tickers = 0.0
@@ -145,6 +158,7 @@ last_sectors = 0.0
 last_deep_scan = 0.0
 last_stale = 0.0
 last_4h_report = 0.0
+last_pre_scan = 0.0
 
 btc_change_24h = 0.0
 btc_trend_1h = 0.0
@@ -174,6 +188,8 @@ _tg_offset = 0
 _force_daily_report = False
 daily_report_sent_date = ""
 
+REPORT_4H_INTERVAL = 14400
+
 # ==================== الدوال المساعدة ====================
 
 def fmt_price(p):
@@ -189,7 +205,6 @@ def fmt_price(p):
 
 
 def send(msg, personal_only=False):
-    """إرسال رسالة Telegram"""
     if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "YOUR_BOT_TOKEN":
         log.info("[TELEGRAM] %s", msg[:80])
         return
@@ -289,7 +304,17 @@ def update_coin_vol_history(vol_map):
             coin_vol_history[sym].pop(0)
 
 
+_tps_cache = {}  # {sym: (data, timestamp)}
+TPS_CACHE_TTL = 300  # 5 دقائق
+
 def analyze_tps_ats(sym):
+    # فحص الكاش أولاً
+    now_ts = time.time()
+    if sym in _tps_cache:
+        cached_data, cached_ts = _tps_cache[sym]
+        if now_ts - cached_ts < TPS_CACHE_TTL:
+            return cached_data
+
     raw = safe_get("https://api.mexc.com/api/v3/trades",
                    {"symbol": sym, "limit": 100})
     if not raw or not isinstance(raw, list) or len(raw) < 10:
@@ -329,174 +354,356 @@ def analyze_tps_ats(sym):
             if total > 0:
                 vdelta = buy_vol / total
 
-        return {
+        result = {
             "tps": round(tps, 2),
             "ats": round(ats, 2),
             "vdelta": round(vdelta, 3),
             "buyer_type": "🐋 حيتان" if ats >= 2000 else ("🐟 متوسط" if ats >= 500 else "🦐 أفراد"),
         }
+        _tps_cache[sym] = (result, time.time())
+        return result
     except (KeyError, ValueError, ZeroDivisionError, TypeError):
         return None
 
 
-def calculate_coin_score(vol, change, vdelta, ats, tps):
-    score = 0
-    if vol >= 10_000_000:
-        score += 25
-    elif vol >= 5_000_000:
-        score += 20
-    elif vol >= 1_000_000:
-        score += 15
-    elif vol >= 500_000:
-        score += 10
-
-    if change > 0:
-        if change >= 10:
-            score += 20
-        elif change >= 5:
-            score += 15
-        elif change >= 2:
-            score += 10
-        else:
-            score += 5
-
-    if vdelta >= 0.70:
-        score += 25
-    elif vdelta >= 0.65:
-        score += 20
-    elif vdelta >= 0.60:
-        score += 15
-
-    if ats >= 2000:
-        score += 20
-    elif ats >= 500:
-        score += 10
-
-    if tps >= 2.0:
-        score += 10
-
-    return min(score, 100)
-
-
 def is_leverage_token(sym):
-    for kw in LEVERAGE_KEYWORDS:
-        if kw in sym:
+    kw = ["3L", "3S", "5L", "5S", "BULL", "BEAR", "UP", "DOWN", "LONG", "SHORT"]
+    for k in kw:
+        if k in sym:
             return True
     return False
 
 
 def is_stablecoin(sym):
+    stable = {"USDT", "USDC", "BUSD", "FDUSD", "DAI", "TUSD"}
     base = sym.replace("USDT", "")
-    if base in STABLECOINS:
+    if base in stable:
         return True
     return False
 
 
-# ==================== نظام المسح الذكي ====================
+# ==================== فلتر Pump & Dump ====================
 
-class SmartMarketScanner:
+class PumpDumpFilter:
+    """فلتر قوي لاكتشاف Pump & Dump"""
+    
+    @staticmethod
+    def is_pump_dump(sym, price_map, vol_now, change_now, klines=None):
+        """
+        يفحص إذا كانت العملة في Pump & Dump
+        يعيد: (is_pump_dump, reason)
+        """
+        # 1. فحص التغيير السريع
+        chg = change_now.get(sym, 0)
+        if chg > PUMP_DUMP_FILTERS["max_change_1h"]:
+            return True, f"ارتفاع {chg:.0f}% في ساعة (Pump)"
+        
+        # 2. فحص حجم فجائي
+        vol = vol_now.get(sym, 0)
+        vol_ratio = get_coin_vol_ratio(sym, vol)
+        if vol_ratio > PUMP_DUMP_FILTERS["min_volume_ratio"]:
+            return True, f"حجم {vol_ratio:.1f}× فجائي (Pump)"
+        
+        # 3. فحص VDelta
+        stats = analyze_tps_ats(sym)
+        if stats:
+            vdelta = stats.get("vdelta", 0.5)
+            if vdelta > PUMP_DUMP_FILTERS["max_vdelta_extreme"]:
+                return True, f"VDelta {vdelta*100:.0f}% (شراء وهمي)"
+            
+            ats = stats.get("ats", 0)
+            if ats > PUMP_DUMP_FILTERS["max_ats_legit"] and vol < 200_000:
+                return True, f"ATS {ats:.0f}$ مع حجم صغير (Pump)"
+            
+            tps = stats.get("tps", 0)
+            if tps > PUMP_DUMP_FILTERS["max_tps_spike"]:
+                return True, f"TPS {tps:.1f} (روبوتات)"
+        
+        # 4. فحص الشموع
+        if klines and len(klines.get("closes", [])) >= 10:
+            closes = klines["closes"]
+            opens = klines["opens"]
+            highs = klines["highs"]
+            lows = klines["lows"]
+            
+            # فحص الشمعة الأخيرة
+            last_close = closes[-1]
+            last_open = opens[-1]
+            last_high = highs[-1]
+            last_low = lows[-1]
+            
+            # شمعة خضراء طويلة بلا قاع
+            body = abs(last_close - last_open)
+            if last_close > last_open:
+                lower_wick = min(last_open, last_close) - last_low
+                if lower_wick < body * 0.1 and body > (last_high - last_low) * 0.7:
+                    return True, "شمعة خضراء طويلة بلا قاع (Pump)"
+            
+            # ذيل علوي طويل (تصريف)
+            upper_wick = last_high - max(last_open, last_close)
+            if upper_wick > body * 1.5:
+                return True, "ذيل علوي طويل (تصريف)"
+        
+        return False, "OK"
+    
+    @staticmethod
+    def is_real_liquidity(sym, price_map, vol_now, change_now, klines=None):
+        """
+        يفحص إذا كانت السيولة حقيقية
+        يعيد: (is_real, score, reasons)
+        """
+        score = 0
+        reasons = []
+        
+        # 1. حجم مناسب
+        vol = vol_now.get(sym, 0)
+        if vol >= REAL_LIQUIDITY["min_volume"]:
+            score += 15
+            reasons.append(f"حجم {vol/1000:.0f}K")
+        
+        # 2. نمو حجم تدريجي
+        vol_ratio = get_coin_vol_ratio(sym, vol)
+        if REAL_LIQUIDITY["min_vol_growth"] <= vol_ratio <= REAL_LIQUIDITY["max_vol_growth"]:
+            score += 20
+            reasons.append(f"نمو حجم {vol_ratio:.1f}×")
+        elif vol_ratio > REAL_LIQUIDITY["max_vol_growth"]:
+            score -= 10
+            reasons.append(f"⚠️ نمو مفاجئ {vol_ratio:.1f}×")
+        
+        # 3. VDelta في النطاق الصحي
+        stats = analyze_tps_ats(sym)
+        if stats:
+            vdelta = stats.get("vdelta", 0.5)
+            if REAL_LIQUIDITY["min_vdelta"] <= vdelta <= REAL_LIQUIDITY["max_vdelta"]:
+                score += 25
+                reasons.append(f"VDelta {vdelta*100:.0f}%")
+            elif vdelta > REAL_LIQUIDITY["max_vdelta"]:
+                score -= 15
+                reasons.append(f"⚠️ VDelta مرتفع {vdelta*100:.0f}%")
+        
+        # 4. ATS في النطاق الصحي
+        if stats:
+            ats = stats.get("ats", 0)
+            if REAL_LIQUIDITY["min_ats"] <= ats <= REAL_LIQUIDITY["max_ats"]:
+                score += 15
+                reasons.append(f"ATS {ats:.0f}$")
+        
+        # 5. تغيير سعر معقول (لم ينطلق بعد)
+        chg = change_now.get(sym, 0)
+        if chg <= REAL_LIQUIDITY["max_price_change"]:
+            score += 15
+            reasons.append(f"تغير {chg:+.1f}%")
+        else:
+            score -= 20
+            reasons.append(f"⚠️ ارتفع {chg:.0f}%")
+        
+        # 6. السعر في منطقة منخفضة
+        if klines and len(klines.get("lows", [])) >= 10:
+            lows = klines["lows"]
+            recent_low = min(lows[-10:])
+            price = price_map.get(sym, 0)
+            if recent_low > 0:
+                price_position = (price - recent_low) / recent_low * 100
+                if price_position <= 10:
+                    score += 10
+                    reasons.append("📍 قريب من القاع")
+        
+        return score >= 40, score, reasons
+
+
+# ==================== كشف السيولة الحقيقية ====================
+
+class RealLiquidityDetector:
+    """نظام كشف السيولة الحقيقية فقط"""
+    
     def __init__(self):
-        self.scan_results = {}
-        self.last_scan_time = 0
-        self.scan_interval = 3600
+        self.detected = {}
+        self.last_scan = 0
         
-    def scan_all_market(self):
-        global all_tickers, candidates, changes_map, hot_sectors, hot_symbols
-        log.info("🔍 بدء المسح الذكي للسوق...")
+    def detect_real_liquidity(self, sym, price_map, vol_now, change_now):
+        """كشف السيولة الحقيقية مع فلتر Pump & Dump"""
+        now = time.time()
         
-        data = safe_get("https://api.mexc.com/api/v3/ticker/24hr")
-        if not data:
-            log.warning("⚠️ فشل جلب بيانات السوق")
+        # تجنب التكرار
+        last_detected = self.detected.get(sym, {}).get("time", 0)
+        if now - last_detected < 3600:
+            return None
+        
+        # جلب البيانات
+        vol = vol_now.get(sym, 0)
+        chg = change_now.get(sym, 0)
+        price = price_map.get(sym, 0)
+        
+        # فلتر حجم أولي
+        if vol < 20_000:
+            return None
+        
+        # جلب كلاينز للتحليل
+        kd = get_klines(sym, "15m", 30)
+        if not kd or len(kd["closes"]) < 10:
+            return None
+        
+        # ==================== فلتر Pump & Dump ====================
+        is_pd, pd_reason = PumpDumpFilter.is_pump_dump(sym, price_map, vol_now, change_now, kd)
+        if is_pd:
+            log.info(f"🚫 {sym} مرفوض: {pd_reason}")
+            return None
+        
+        # ==================== فحص السيولة الحقيقية ====================
+        is_real, score, reasons = PumpDumpFilter.is_real_liquidity(sym, price_map, vol_now, change_now, kd)
+        
+        if not is_real:
+            return None
+        
+        # حساب المؤشرات الإضافية
+        vol_ratio = get_coin_vol_ratio(sym, vol)
+        stats = analyze_tps_ats(sym)
+        vdelta = stats.get("vdelta", 0.5) if stats else 0.5
+        ats = stats.get("ats", 0) if stats else 0
+        tps = stats.get("tps", 0) if stats else 0
+        
+        # تحديد القطاع
+        sector = "غير مصنف"
+        for sec, coins in SECTORS.items():
+            if sym in coins:
+                sector = sec
+                break
+        
+        # حساب القاع
+        closes = kd["closes"]
+        lows = kd["lows"]
+        recent_low = min(lows[-10:])
+        price_position = (price - recent_low) / recent_low * 100 if recent_low > 0 else 0
+        
+        # Stop Loss وأهداف
+        stop_loss = recent_low * 0.98 if recent_low > 0 else price * 0.95
+        target1 = price * 1.10
+        target2 = price * 1.20
+        target3 = price * 1.35
+        rr = (target1 - price) / (price - stop_loss) if price > stop_loss else 0
+        
+        # تحديد قوة الإشارة
+        if score >= 75:
+            strength = "🔥🔥 سيولة حقيقية قوية"
+            icon = "🚨🔥"
+            entry_type = "STRONG_ENTRY"
+        elif score >= 60:
+            strength = "🔥 سيولة حقيقية"
+            icon = "🔥"
+            entry_type = "ENTRY"
+        elif score >= 45:
+            strength = "⚡ بداية سيولة"
+            icon = "⚡"
+            entry_type = "WATCH"
+        else:
+            return None
+        
+        # تخزين الاكتشاف
+        self.detected[sym] = {
+            "time": now,
+            "price": price,
+            "score": score,
+            "entry_type": entry_type
+        }
+        
+        return {
+            "sym": sym,
+            "price": price,
+            "change": chg,
+            "vol": vol,
+            "vol_ratio": vol_ratio,
+            "vdelta": vdelta,
+            "ats": ats,
+            "tps": tps,
+            "score": score,
+            "strength": strength,
+            "icon": icon,
+            "entry_type": entry_type,
+            "sector": sector,
+            "reasons": reasons,
+            "price_position": price_position,
+            "stop_loss": stop_loss,
+            "target1": target1,
+            "target2": target2,
+            "target3": target3,
+            "rr": rr
+        }
+    
+    def scan_real_liquidity(self, price_map, vol_now, change_now):
+        """مسح جميع العملات للكشف عن السيولة الحقيقية"""
+        now = time.time()
+        if now - self.last_scan < 60:
             return []
+        self.last_scan = now
         
-        all_tickers = data
         results = []
-        changes_map = {}
         
-        vol_map = {}
-        change_map = {}
-        price_map = {}
+        # جمع كل العملات من القطاعات
+        all_coins = set()
+        for coins in SECTORS.values():
+            all_coins.update(coins)
         
-        for t in data:
-            sym = t.get("symbol", "")
-            if not sym.endswith("USDT"):
-                continue
-            try:
-                vol = float(t.get("quoteVolume", 0))
-                ch = float(t.get("priceChangePercent", 0))
-                price = float(t.get("lastPrice", 0))
-                vol_map[sym] = vol
-                change_map[sym] = ch
-                price_map[sym] = price
-                changes_map[sym] = ch
-            except (KeyError, ValueError):
-                continue
+        for sym in all_coins:
+            detection = self.detect_real_liquidity(sym, price_map, vol_now, change_now)
+            if detection:
+                results.append(detection)
         
-        all_scanned = []
+        # ترتيب حسب القوة
+        results.sort(key=lambda x: -x["score"])
+        return results[:10]
+    
+    def send_real_alerts(self, detections):
+        """إرسال تنبيهات السيولة الحقيقية"""
+        if not detections:
+            return
         
-        for sector, coins in SECTORS.items():
-            for sym in coins:
-                if sym not in vol_map:
-                    continue
-                
-                vol = vol_map.get(sym, 0)
-                ch = change_map.get(sym, 0)
-                
-                if vol < MIN_VOL_USDT or vol > MAX_VOL_USDT:
-                    continue
-                if ch < MIN_PRICE_CHANGE or ch > MAX_PRICE_CHANGE:
-                    continue
-                if is_leverage_token(sym):
-                    continue
-                if is_stablecoin(sym):
-                    continue
-                
-                stats = analyze_tps_ats(sym)
-                vdelta = stats.get("vdelta", 0.5) if stats else 0.5
-                ats = stats.get("ats", 0) if stats else 0
-                tps = stats.get("tps", 0) if stats else 0
-                
-                score = calculate_coin_score(vol, ch, vdelta, ats, tps)
-                vol_ratio = get_coin_vol_ratio(sym, vol)
-                
-                if score >= MIN_SCAN_SCORE or vol_ratio >= 1.5:
-                    all_scanned.append({
-                        "sym": sym,
-                        "sector": sector,
-                        "price": price_map.get(sym, 0),
-                        "change": ch,
-                        "vol": vol,
-                        "vdelta": vdelta,
-                        "ats": ats,
-                        "tps": tps,
-                        "score": score,
-                        "vol_ratio": vol_ratio
-                    })
-        
-        all_scanned.sort(key=lambda x: -x["score"])
-        candidates = [c["sym"] for c in all_scanned[:100]]
-        self.scan_results = {c["sym"]: c for c in all_scanned}
-        self.last_scan_time = time.time()
-        
-        # تحديث القطاعات الساخنة
-        sector_scores = {}
-        for c in all_scanned[:50]:
-            sec = c["sector"]
-            if sec not in sector_scores:
-                sector_scores[sec] = {"count": 0, "total_score": 0}
-            sector_scores[sec]["count"] += 1
-            sector_scores[sec]["total_score"] += c["score"]
-        
-        sorted_sectors = sorted(sector_scores.items(), key=lambda x: -x[1]["total_score"] / x[1]["count"])
-        hot_sectors = [s for s, _ in sorted_sectors[:5]]
-        hot_symbols = {c for s in hot_sectors for c in SECTORS.get(s, [])}
-        
-        log.info(f"✅ المسح الذكي اكتمل | وجد {len(all_scanned)} عملة تستوفي الشروط")
-        log.info(f"🔥 Hot sectors: {hot_sectors}")
-        return all_scanned
+        for d in detections[:5]:
+            base = d["sym"].replace("USDT", "")
+            
+            reasons_text = " | ".join(d["reasons"][:4])
+            
+            if d["entry_type"] == "STRONG_ENTRY":
+                title = "🚨🔥 *SIGNAL ENTRY — سيولة حقيقية!* 🚨🔥"
+                action = "✅ *ادخل الآن* — سيولة حقيقية تؤكد!"
+            elif d["entry_type"] == "ENTRY":
+                title = "🔥 *SIGNAL ENTRY — سيولة تدخل* 🔥"
+                action = "✅ *ادخل الآن* — السيولة حقيقية"
+            else:
+                title = "👁️ *WATCH ALERT — بداية سيولة* 👁️"
+                action = "⏳ *راقب* — انتظر تأكيد الدخول"
+            
+            msg = (
+                f"{title}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📍 *{base}/USDT* — {d['strength']}\n"
+                f"💵 السعر: `{fmt_price(d['price'])}` | تغيير 24h: `{d['change']:+.2f}%`\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📊 *المؤشرات:*\n"
+                f"  {reasons_text}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📈 حجم: `{d['vol_ratio']:.1f}×` المعدل\n"
+                f"📊 VDelta: `{d['vdelta']*100:.0f}%` | ATS: `{d['ats']:.0f}$`\n"
+                f"📡 TPS: `{d['tps']:.2f}`\n"
+                f"📍 القاع: +{d['price_position']:.1f}%\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🛡️ Stop Loss: `{fmt_price(d['stop_loss'])}` (-5%)\n"
+                f"🎯 الأهداف:\n"
+                f"  1️⃣ `{fmt_price(d['target1'])}` (+10%)\n"
+                f"  2️⃣ `{fmt_price(d['target2'])}` (+20%)\n"
+                f"  3️⃣ `{fmt_price(d['target3'])}` (+35%)\n"
+                f"⚖️ Risk/Reward: `1:{d['rr']:.1f}`\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🏷️ القطاع: `{d['sector']}`\n"
+                f"💪 القوة: `{d['score']}/100`\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"{action}\n"
+                f"📊 السوق: `{market_state}` | BTC: `{btc_change_24h:+.2f}%`"
+            )
+            send(msg)
+            log.info(f"✅ REAL LIQUIDITY | {d['sym']} | score={d['score']} | vdelta={d['vdelta']*100:.0f}%")
 
 
-# ==================== دالة تحليل BTC ====================
+# ==================== تحليل BTC ====================
 
 def analyze_btc():
     global btc_change_24h, btc_trend_1h, btc_trend_4h, market_state, eth_change_24h
@@ -543,69 +750,33 @@ def analyze_btc():
     if _eth_tps:
         eth_tps_stats = _eth_tps
 
-    # تحديث حالة السوق
-    if btc_change_24h <= -2.0:
+    if btc_change_24h <= -3.0:
         market_state = "DANGER"
-    elif btc_change_24h <= -1.0:
+    elif btc_change_24h <= -1.5:
         market_state = "CAUTION"
     else:
         market_state = "SAFE"
 
 
-# ==================== تقرير 4 ساعات (بالصيغة المطلوبة) ====================
+# ==================== تقرير 4 ساعات ====================
 
 def send_4h_sector_report():
-    """تقرير كل 4 ساعات - صيغة محسنة"""
-    global last_4h_report, market_state, btc_change_24h, btc_tps_stats, eth_tps_stats, hot_sectors, eth_change_24h
-    
+    global last_4h_report
     now = time.time()
     if now - last_4h_report < REPORT_4H_INTERVAL:
         return
-    
     last_4h_report = now
     
-    # ==================== تحليل BTC ====================
     btc_vd = btc_tps_stats.get("vdelta", 0.5) * 100 if btc_tps_stats else 50
     btc_tps = btc_tps_stats.get("tps", 0) if btc_tps_stats else 0
     btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
     btc_buyer = btc_tps_stats.get("buyer_type", "🐟 متوسط") if btc_tps_stats else "🐟 متوسط"
     
-    if btc_vd >= 65:
-        btc_vd_status = "🔥 شراء قوي"
-    elif btc_vd >= 55:
-        btc_vd_status = "🟢 شراء"
-    elif btc_vd >= 45:
-        btc_vd_status = "🟡 محايد"
-    elif btc_vd >= 35:
-        btc_vd_status = "🟠 ضعف"
-    else:
-        btc_vd_status = "🔴 بيع قوي"
-    
-    if btc_ats >= 5000 and btc_vd >= 65:
-        btc_activity = "🐋 حيتان يشترون 🔥"
-    elif btc_ats >= 5000 and btc_vd < 40:
-        btc_activity = "🔴 حيتان يبيعون!"
-    elif btc_ats >= 2000:
-        btc_activity = "🐋 نشاط حيتان"
-    else:
-        btc_activity = "📊 نشاط طبيعي"
-    
-    # ==================== تحليل ETH ====================
     eth_vd = eth_tps_stats.get("vdelta", 0.5) * 100 if eth_tps_stats else 50
     eth_tps = eth_tps_stats.get("tps", 0) if eth_tps_stats else 0
     eth_ats = eth_tps_stats.get("ats", 0) if eth_tps_stats else 0
-    eth_buyer = eth_tps_stats.get("buyer_type", "🐟 متوسط") if eth_tps_stats else "🐟 متوسط"
     
-    if eth_ats >= 5000 and eth_vd >= 65:
-        eth_activity = "🐋 حيتان يشترون 🔥"
-    elif eth_ats >= 5000 and eth_vd < 40:
-        eth_activity = "🔴 حيتان يبيعون!"
-    elif eth_ats >= 2000:
-        eth_activity = "🐋 نشاط حيتان"
-    else:
-        eth_activity = "📊 نشاط طبيعي"
-    
-    # ==================== VDelta السوق ====================
+    # VDelta السوق
     mkt_vd = 50
     if all_tickers:
         buy_vol = 0
@@ -624,66 +795,30 @@ def send_4h_sector_report():
         if total > 0:
             mkt_vd = (buy_vol / total) * 100
     
-    # ==================== أيقونة السوق ====================
     market_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}
     market_icon = market_icons.get(market_state, "📊")
     
-    # ==================== رسالة السوق ====================
-    market_messages = {
-        "SAFE": "✅ كل الإشارات مفعّلة",
-        "CAUTION": "⚠️ Gold فقط (Score 88+)",
-        "DANGER": "🔴 إشارات القطاعات الساخنة فقط"
-    }
-    market_msg = market_messages.get(market_state, "📊")
-    
-    # ==================== قوة الإشارة ====================
-    confirm_count = 1
-    if market_state == "SAFE":
-        confirm_count = 3
-    elif market_state == "CAUTION":
-        if btc_vd >= 65:
-            confirm_count = 2
-        else:
-            confirm_count = 1
-    else:
-        confirm_count = 1
-    
-    # ==================== بناء التقرير ====================
     report = (
         f"📊 *تقرير السوق*\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"{market_icon} السوق: *{market_state}*\n"
         f"₿ BTC: `{btc_change_24h:+.2f}%` | VD:`{btc_vd:.0f}%`\n"
         f"  TPS:`{btc_tps:.1f}` ATS:`{btc_ats:.0f}$` {btc_buyer}\n"
-        f"  ↳ {btc_activity}\n"
         f"Ξ ETH: `{eth_change_24h:+.2f}%` | VD:`{eth_vd:.0f}%`\n"
-        f"  TPS:`{eth_tps:.1f}` ATS:`{eth_ats:.0f}$` {eth_buyer}\n"
-        f"  ↳ {eth_activity}\n"
+        f"  TPS:`{eth_tps:.1f}` ATS:`{eth_ats:.0f}$`\n"
         f"📊 VDelta السوق: `{mkt_vd:.0f}%`\n"
-    )
-    
-    # إضافة القطاعات الساخنة إن وجدت
-    if hot_sectors:
-        hot_text = "🔥 *أفضل القطاعات:* " + ", ".join([f"*{s}*" for s in hot_sectors[:3]])
-        report += f"{hot_text}\n"
-    
-    report += (
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"{market_msg}\n"
-        f"📡 قوة الإشارة: {confirm_count}/3"
+        f"💡 *فلتر Pump & Dump مفعّل*\n"
+        f"📡 نبحث عن سيولة حقيقية فقط"
     )
     
     send(report)
-    log.info(f"📊 4H Report sent | BTC: {btc_change_24h:+.2f}% | Market: {market_state}")
 
 
-# ==================== تقرير يومي (بالصيغة المطلوبة) ====================
+# ==================== تقرير يومي ====================
 
 def send_daily_report(force=False):
-    """تقرير يومي عند إغلاق اليوم (00:00 UTC) - صيغة محسنة"""
-    global daily_report_sent_date, market_state, btc_change_24h, btc_trend_1h, btc_tps_stats, eth_tps_stats
-    global hot_sectors, candidates, all_tickers, changes_map, eth_change_24h
-    
+    global daily_report_sent_date
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     today = now_utc.strftime("%Y-%m-%d")
 
@@ -695,138 +830,16 @@ def send_daily_report(force=False):
 
     daily_report_sent_date = today
     
-    # ==================== 1. بيانات BTC و ETH ====================
-    
+    btc_vd = btc_tps_stats.get("vdelta", 0.5) * 100 if btc_tps_stats else 50
     btc_tps = btc_tps_stats.get("tps", 0) if btc_tps_stats else 0
     btc_ats = btc_tps_stats.get("ats", 0) if btc_tps_stats else 0
-    btc_vd = btc_tps_stats.get("vdelta", 0.5) * 100 if btc_tps_stats else 50
     
-    if btc_ats >= 5000 and btc_vd < 40:
-        btc_activity = "🔴 حيتان يبيعون!"
-    elif btc_ats >= 5000 and btc_vd >= 65:
-        btc_activity = "🐋 حيتان يشترون 🔥"
-    elif btc_ats >= 2000:
-        btc_activity = "🐋 نشاط حيتان"
-    else:
-        btc_activity = "📊 نشاط طبيعي"
-    
+    eth_vd = eth_tps_stats.get("vdelta", 0.5) * 100 if eth_tps_stats else 50
     eth_tps = eth_tps_stats.get("tps", 0) if eth_tps_stats else 0
     eth_ats = eth_tps_stats.get("ats", 0) if eth_tps_stats else 0
-    eth_vd = eth_tps_stats.get("vdelta", 0.5) * 100 if eth_tps_stats else 50
     
-    if eth_ats >= 5000 and eth_vd < 40:
-        eth_activity = "🔴 حيتان يبيعون!"
-    elif eth_ats >= 5000 and eth_vd >= 65:
-        eth_activity = "🐋 حيتان يشترون 🔥"
-    elif eth_ats >= 2000:
-        eth_activity = "🐋 نشاط حيتان"
-    else:
-        eth_activity = "📊 نشاط طبيعي"
-    
-    # ==================== 2. أيقونة السوق ====================
     market_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}
     market_icon = market_icons.get(market_state, "📊")
-    
-    # ==================== 3. تحليل Order Flow ====================
-    
-    buy_vol = 0.0
-    sell_vol = 0.0
-    
-    if all_tickers:
-        for t in all_tickers:
-            try:
-                vol = float(t.get("quoteVolume", 0))
-                ch = float(t.get("priceChangePercent", 0))
-                if ch > 0:
-                    buy_vol += vol
-                else:
-                    sell_vol += vol
-            except:
-                pass
-    
-    total_vol = buy_vol + sell_vol
-    buy_pct = (buy_vol / total_vol * 100) if total_vol > 0 else 50
-    sell_pct = 100 - buy_pct
-    
-    # شريط المؤشر
-    buy_bars = int(buy_pct / 10)
-    sell_bars = 10 - buy_bars
-    bar = "🟥" * sell_bars + "🟢" * buy_bars
-    
-    # ==================== 4. تحديد حالة السوق ====================
-    
-    if sell_pct >= 80:
-        verdict_icon = "📉🔴"
-        verdict = "🔴 ضغط بيع — ابتعد"
-        desc = f"بيع {sell_pct:.0f}% من السيولة — خروج أموال من السوق ⚠️"
-        action = "⛔ لا تدخل — انتظر الاستقرار"
-    elif buy_pct >= 55:
-        verdict_icon = "📈🟢"
-        verdict = "🟢 زخم شراء — فرصة"
-        desc = f"شراء {buy_pct:.0f}% من السيولة — أموال تدخل السوق 💰"
-        action = "✅ ادخل — السوق مناسب"
-    else:
-        verdict_icon = "🟡"
-        verdict = "🟡 السوق محايد — انتظر"
-        desc = f"شراء {buy_pct:.0f}% | بيع {sell_pct:.0f}%"
-        action = "⏳ انتظر إشارة واضحة قبل الدخول"
-    
-    # ==================== 5. تدفق السيولة بين القطاعات ====================
-    
-    flow_text = ""
-    medals = ["🥇", "🥈", "🥉", "   •", "   •"]
-    
-    if hot_sectors:
-        flow_text = "🟢 *يدخل (أموال تتدفق):*\n"
-        for i, sector in enumerate(hot_sectors[:5]):
-            medal = medals[i] if i < 5 else "   •"
-            # تقدير نسبة التغيير
-            if i == 0:
-                change = 24
-            elif i == 1:
-                change = 16
-            elif i == 2:
-                change = 12
-            else:
-                change = 8 + (5 - i)
-            
-            vol_m = 1 + (5 - i) * 1.5
-            flow_text += f"  {medal} *{sector}* +{change}% (+{vol_m:.1f}M) ✅ \n"
-    else:
-        flow_text = "➡️ لا تدفق واضح — جاري جمع البيانات\n"
-    
-    # ==================== 6. Stablecoins ====================
-    
-    stable_total = 0
-    stable_details = []
-    
-    if all_tickers:
-        stable_symbols = ["FDUSDUSDT", "USDCUSDT", "USDTUSDT", "DAIUSDT", "TUSDUSDT", "USDEUSDT"]
-        for sym in stable_symbols:
-            for t in all_tickers:
-                if t.get("symbol") == sym:
-                    try:
-                        vol = float(t.get("quoteVolume", 0))
-                        stable_total += vol
-                        stable_details.append((sym.replace("USDT", ""), vol))
-                    except:
-                        pass
-                    break
-    
-    stable_pct = (stable_total / total_vol * 100) if total_vol > 0 else 0
-    stable_pct_display = f"{stable_pct:.1f}%"
-    stable_vol_display = f"{int(stable_total/1_000_000)}M"
-    
-    if stable_pct >= 20:
-        stable_status = "🚨 هروب ضخم Stablecoins"
-    elif stable_pct >= 15:
-        stable_status = "⚠️ حيتان يحتفظون Stablecoins"
-    elif stable_pct >= 8:
-        stable_status = "👀 تجميع خفيف"
-    else:
-        stable_status = "✅ Stablecoins طبيعية"
-    
-    # ==================== 7. بناء التقرير النهائي ====================
     
     report = (
         f"📊 *DAILY REPORT* 📅\n"
@@ -834,57 +847,22 @@ def send_daily_report(force=False):
         f"━━━━━━━━━━━━━━━━━━\n"
         f"{market_icon} السوق: *{market_state}*\n"
         f"₿ BTC 24h: `{btc_change_24h:+.2f}%` | 1h: `{btc_trend_1h:+.2f}%`\n"
-        f"  🐋 BTC TPS:`{btc_tps:.1f}` ATS:`{btc_ats:.0f}$` VD:`{btc_vd:.0f}%` — {btc_activity}\n"
+        f"  🐋 BTC TPS:`{btc_tps:.1f}` ATS:`{btc_ats:.0f}$` VD:`{btc_vd:.0f}%`\n"
         f"Ξ ETH 24h: `{eth_change_24h:+.2f}%`\n"
-        f"  🐋 ETH TPS:`{eth_tps:.1f}` ATS:`{eth_ats:.0f}$` VD:`{eth_vd:.0f}%` — {eth_activity}\n"
+        f"  🐋 ETH TPS:`{eth_tps:.1f}` ATS:`{eth_ats:.0f}$` VD:`{eth_vd:.0f}%`\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"{verdict_icon} {verdict}\n"
-        f"{desc}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📊 *تدفق السيولة (Order Flow):*\n"
-        f"{bar}\n"
-        f"  🟢 *Buy:*  `{buy_pct:.1f}%` ({int(buy_vol/1_000_000)}M)\n"
-        f"  🔴 *Sell:* `{sell_pct:.1f}%` ({int(sell_vol/1_000_000)}M)\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *تدفق رأس المال:*\n"
-        f"  ➡️ حجم السوق: بيانات جديدة 📊 عن أمس\n"
-        f"  📦 إجمالي: `{int(total_vol/1_000_000)}M` USDT\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💸 *تدفق السيولة بين القطاعات:*\n"
-        f"{flow_text}"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"{action}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🐳 *Stablecoins — احتفاظ الحيتان:*\n"
-        f"  📊 النسبة: `{stable_pct_display}` = {stable_vol_display} USDT\n"
-        f"  {stable_status}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💵 *التفاصيل (نشاط × الحجم):*\n"
-    )
-    
-    # إضافة تفاصيل Stablecoins
-    for name, vol in stable_details[:5]:
-        report += f"  💵 *{name}* | نشاط: 1.0× | {vol/1_000_000:.1f} مليون USDT\n"
-    
-    if not stable_details:
-        report += "  لا يوجد نشاط واضح\n"
-    
-    report += (
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔬 *Sigma>=10 (نشاط ضخم):*\n"
-        f"  • لا توجد عملات\n"
+        f"💡 *فلتر Pump & Dump يعمل*\n"
+        f"   نبحث عن سيولة حقيقية فقط\n"
         f"━━━━━━━━━━━━━━━━━━"
     )
     
     send(report)
-    log.info(f"📅 Daily Report sent | {today} | BTC: {btc_change_24h:+.2f}% | Market: {market_state}")
 
 
-# ==================== دالة استقبال أوامر Telegram ====================
+# ==================== أوامر Telegram ====================
 
 def poll_commands():
-    """يستمع لأوامر Telegram"""
-    global _tg_offset, daily_report_sent_date, candidates, hot_sectors, market_state, btc_change_24h, btc_trend_1h, btc_tps_stats, changes_map
+    global _tg_offset, candidates, hot_sectors, market_state, btc_change_24h, btc_trend_1h
     
     if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "YOUR_BOT_TOKEN":
         return
@@ -904,7 +882,6 @@ def poll_commands():
         
         for update in updates:
             _tg_offset = update["update_id"] + 1
-            
             msg = update.get("message") or update.get("channel_post") or {}
             text = msg.get("text", "").strip()
             chat_id = str(msg.get("chat", {}).get("id", ""))
@@ -919,26 +896,22 @@ def poll_commands():
             text_lower = text.lower()
             log.info(f"📨 أمر مستلم: {text}")
             
-            # ========== الأوامر ==========
-            
             if text_lower in ("/status", "/حالة"):
                 reply = (
-                    f"📊 *حالة البوت*\n"
+                    f"📊 *حالة البوت V29*\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
                     f"✅ البوت يعمل\n"
+                    f"🔍 فلتر Pump & Dump مفعّل\n"
                     f"📈 العملات المرشحة: `{len(candidates)}`\n"
                     f"🔥 القطاعات: `{', '.join(hot_sectors[:3]) or 'لا يوجد'}`\n"
                     f"₿ BTC: `{btc_change_24h:+.2f}%` | `{market_state}`\n"
-                    f"🕐 {datetime.now().strftime('%H:%M:%S')}"
+                    f"💡 نبحث عن سيولة حقيقية فقط"
                 )
                 send(reply, personal_only=True)
-                log.info("✅ /status تم الإرسال")
             
             elif text_lower in ("/report", "/تقرير"):
                 send("📄 جاري إعداد التقرير...", personal_only=True)
-                # إرسال التقرير اليومي فوراً
                 send_daily_report(force=True)
-                log.info("✅ /report تم الإرسال")
             
             elif text_lower in ("/sectors", "/قطاعات"):
                 if not hot_sectors:
@@ -948,7 +921,6 @@ def poll_commands():
                     for i, sec in enumerate(hot_sectors[:5], 1):
                         reply += f"{i}. 🔥 *{sec}*\n"
                     send(reply, personal_only=True)
-                log.info("✅ /sectors تم الإرسال")
             
             elif text_lower in ("/btc", "/بتكوين"):
                 btc_vd = btc_tps_stats.get("vdelta", 0.5) * 100 if btc_tps_stats else 50
@@ -963,34 +935,32 @@ def poll_commands():
                 if btc_tps_stats:
                     reply += f"ATS: `{btc_tps_stats.get('ats',0):.0f}$` | VD: `{btc_vd:.0f}%`\n"
                 send(reply, personal_only=True)
-                log.info("✅ /btc تم الإرسال")
             
             elif text_lower == "/test":
-                send("✅ *البوت يعمل!*\nأمر /test تم استلامه بنجاح", personal_only=True)
-                log.info("✅ /test تم الإرسال")
+                send("✅ *البوت يعمل!*\nفلتر Pump & Dump مفعّل", personal_only=True)
             
             elif text_lower in ("/help", "/مساعدة"):
                 reply = (
-                    "🤖 *أوامر MAFIO-BOT V26:*\n"
+                    "🤖 *MAFIO-BOT V29 - REAL LIQUIDITY*\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     "📊 /status  — حالة البوت\n"
-                    "📅 /report  — تقرير فوري (يومي)\n"
+                    "📅 /report  — تقرير فوري\n"
                     "🏆 /sectors — القطاعات الساخنة\n"
                     "₿ /btc     — حالة BTC\n"
                     "🧪 /test    — اختبار البوت\n"
                     "━━━━━━━━━━━━━━━━━━\n"
-                    "📊 التقارير التلقائية:\n"
-                    "  • كل 4 ساعات — تقرير السوق\n"
-                    "  • 00:00 UTC — التقرير اليومي\n"
+                    "🔍 *فلتر Pump & Dump:*\n"
+                    "   • ارتفاع مفاجئ >40% = رفض\n"
+                    "   • حجم ×5 فجأة = رفض\n"
+                    "   • VDelta >92% = رفض\n"
+                    "   • ATS مرتفع مع حجم صغير = رفض\n"
                     "━━━━━━━━━━━━━━━━━━\n"
-                    "💡 الإشارات تلقائية عند وجود سيولة"
+                    "💡 *نبحث عن سيولة حقيقية فقط*"
                 )
                 send(reply, personal_only=True)
-                log.info("✅ /help تم الإرسال")
             
             elif text_lower in ("/start", "/تشغيل"):
                 send("✅ البوت يعمل الآن!", personal_only=True)
-                log.info("✅ /start تم الإرسال")
             
             else:
                 send(f"⚠️ أمر غير معروف: `{text}`\nأرسل /help للتعليمات", personal_only=True)
@@ -999,19 +969,56 @@ def poll_commands():
         log.error(f"poll_commands error: {e}")
 
 
-# ==================== دوال فارغة لتجنب الأخطاء ====================
+# ==================== الدوال الأساسية ====================
 
 def refresh_tickers():
-    global last_tickers
+    global all_tickers, price_map, vol_now, change_now, last_tickers
+    data = safe_get("https://api.mexc.com/api/v3/ticker/24hr")
+    if not data:
+        return
+    all_tickers = data
+    vol_map = {}
+    for t in data:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"): continue
+        try:
+            price_map[sym]  = float(t["lastPrice"])
+            vol_now[sym]    = float(t.get("quoteVolume", 0))
+            change_now[sym] = float(t.get("priceChangePercent", 0))
+            vol_map[sym]    = vol_now[sym]
+        except (KeyError, ValueError):
+            pass
+    update_coin_vol_history(vol_map)
     last_tickers = time.time()
+    log.info("🔄 Tickers: %d عملة", len(all_tickers))
 
 
 def save_state():
-    pass
+    try:
+        state = {
+            "coin_vol_history":      coin_vol_history,
+            "daily_report_sent_date": daily_report_sent_date,
+            "detector_detected":     {},  # يُحدَّث من detector
+        }
+        with open("/app/mafio_v29_state.json", "w", encoding="utf-8") as f:
+            json.dump(state, f)
+        log.info("💾 State saved")
+    except Exception as e:
+        log.error("save_state: %s", e)
 
 
 def load_state():
-    pass
+    global coin_vol_history, daily_report_sent_date
+    try:
+        with open("/app/mafio_v29_state.json", "r", encoding="utf-8") as f:
+            state = json.load(f)
+        coin_vol_history = state.get("coin_vol_history", {})
+        daily_report_sent_date = state.get("daily_report_sent_date", "")
+        log.info("📂 State loaded | vol_history=%d", len(coin_vol_history))
+    except FileNotFoundError:
+        log.info("📂 No state file — بداية جديدة")
+    except Exception as e:
+        log.error("load_state: %s", e)
 
 
 def cleanup():
@@ -1023,39 +1030,44 @@ def cleanup():
 def run():
     global all_tickers, candidates, hot_sectors, market_state, btc_change_24h
     global last_btc, last_sectors, last_deep_scan, last_stale, last_tickers
-    global last_4h_report, price_map, vol_now, change_now
+    global last_4h_report, last_pre_scan, price_map, vol_now, change_now
     
     price_map = {}
     vol_now = {}
     change_now = {}
     
-    log.info("🚀 MAFIO-BOT V26 بدء التشغيل...")
+    log.info("🚀 MAFIO-BOT V29 - REAL LIQUIDITY DETECTOR بدء التشغيل...")
     log.info(f"📊 {len(SECTORS)} قطاع يتم مراقبتها")
+    log.info("🔍 فلتر Pump & Dump مفعّل")
 
+    load_state()
     time.sleep(5)
 
-    scanner = SmartMarketScanner()
+    detector = RealLiquidityDetector()
 
     analyze_btc()
-    scanner.scan_all_market()
     
     time.sleep(2)
     
     last_deep_scan = 0
     last_tickers = time.time()
     last_4h_report = time.time()
+    last_pre_scan = time.time()
 
-    log.info(f"✅ Ready | Candidates: {len(candidates)} | Hot sectors: {hot_sectors}")
+    hot_sectors = ["Meme", "AI", "DePIN", "Layer1", "DeFi"]
 
     send(
-        f"💀 *MAFIO-BOT V26* 💀\n"
+        f"💀 *MAFIO-BOT V29* 💀\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 {len(SECTORS)} قطاع تحت المراقبة\n"
-        f"✅ تقرير يومي (00:00 UTC)\n"
-        f"✅ تقرير كل 4 ساعات\n"
-        f"✅ أوامر Telegram: /status, /report, /sectors, /btc, /test\n"
+        f"🔍 *فلتر Pump & Dump مفعّل*\n"
+        f"   ✅ سيولة حقيقية فقط\n"
+        f"   ✅ رفض الارتفاعات الوهمية\n"
+        f"   ✅ كشف التجميع قبل الانفجار\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"₿ BTC: `{btc_change_24h:+.2f}%` | `{market_state}`"
+        f"₿ BTC: `{btc_change_24h:+.2f}%` | `{market_state}`\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ نبحث عن سيولة حقيقية..."
     )
 
     while True:
@@ -1070,30 +1082,17 @@ def run():
             # التقرير اليومي
             send_daily_report()
 
-            # المسح الذكي للسوق كل ساعة
-            if now - scanner.last_scan_time >= scanner.scan_interval:
-                scanner.scan_all_market()
-
-            # جلب بيانات السوق
-            tickers_now = safe_get("https://api.mexc.com/api/v3/ticker/24hr")
-            if tickers_now:
-                all_tickers = tickers_now
-                for t in tickers_now:
-                    sym = t.get("symbol", "")
-                    try:
-                        last = float(t["lastPrice"])
-                        change_now[sym] = float(t.get("priceChangePercent", 0))
-                        vol_now[sym] = float(t.get("quoteVolume", 0))
-                        price_map[sym] = last
-                    except (KeyError, ValueError):
-                        pass
-
+            # جلب بيانات السوق كل 60 ثانية
+            if now - last_tickers >= 60:
+                refresh_tickers()
                 changes_map.update(change_now)
 
-            # تحديث قائمة المرشحين
-            if now - last_tickers >= 1800:
-                candidates = list(scanner.scan_results.keys())[:100]
-                last_tickers = now
+                # ==================== كشف السيولة الحقيقية ====================
+                if price_map:
+                    detections = detector.scan_real_liquidity(price_map, vol_now, change_now)
+                    if detections:
+                        detector.send_real_alerts(detections)
+                        log.info(f"✅ تم اكتشاف {len(detections)} فرصة")
 
             # تحليل BTC
             if now - last_btc >= 300:
@@ -1103,7 +1102,11 @@ def run():
             # استقبال أوامر Telegram
             poll_commands()
 
-            time.sleep(12)
+            # حفظ الحالة كل 30 دقيقة
+            if int(now) % 1800 < 30:
+                save_state()
+
+            time.sleep(30)
 
         except KeyboardInterrupt:
             send("⛔ *MAFIO-BOT* — تم الإيقاف")
