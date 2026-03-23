@@ -25,9 +25,14 @@ from collections import deque, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 
-import aiohttp
-import websockets
-import numpy as np
+try:
+    import aiohttp
+    import websockets
+    import numpy as np
+except ImportError as e:
+    print(f"❌ Error: Missing dependency - {e}")
+    print("Please run: pip install aiohttp websockets numpy")
+    sys.exit(1)
 
 # ==================== إعدادات النظام ====================
 
@@ -295,12 +300,11 @@ class MafioBot:
             return None
     
     async def calc_vdelta_ma(self, symbol: str, period: int = 10) -> float:
-        """حساب VDelta Moving Average - إصدار async"""
+        """حساب VDelta Moving Average"""
         kd = self.data_cache.get(symbol)
         if not kd:
             return 0.5
             
-        # استخدام Klines إذا متاح
         klines = await self.get_klines(symbol, "15m", period + 5)
         if klines and len(klines["closes"]) >= period:
             closes = klines["closes"]
@@ -313,7 +317,6 @@ class MafioBot:
             if total_vol > 0:
                 return round(buy_vol / total_vol, 3)
         
-        # Fallback: استخدام trades buffer
         if not kd.trades_buffer:
             return 0.5
             
@@ -323,7 +326,7 @@ class MafioBot:
         return round(buy_val / total_val, 3) if total_val > 0 else 0.5
     
     async def calc_cvd(self, symbol: str) -> Dict:
-        """حساب Cumulative Volume Delta - إصدار async"""
+        """حساب Cumulative Volume Delta"""
         kd = await self.get_klines(symbol, "1h", 24)
         if not kd or len(kd["closes"]) < 10:
             return {"trend": "flat", "slope": 0, "pct_change": 0}
@@ -378,11 +381,10 @@ class MafioBot:
         
         try:
             now_ms = int(time.time() * 1000)
-            window_ms = 30000  # 30 ثانية
+            window_ms = 30000
             
             all_vol = 0.0
             trade_window = 0
-            sizes = []
             
             for t in data:
                 price = float(t.get("price", 0))
@@ -391,7 +393,6 @@ class MafioBot:
                 val = price * qty
                 
                 all_vol += val
-                sizes.append(val)
                 
                 if now_ms - ts <= window_ms:
                     trade_window += 1
@@ -402,10 +403,8 @@ class MafioBot:
             tps = trade_window / 30.0
             ats = all_vol / len(data)
             
-            # حساب VDelta
             vdelta = await self.calc_vdelta_ma(symbol)
             
-            # تحديد نوع المشتري
             if ats >= ATS_WHALE:
                 buyer_type = "🐋 حيتان ضخمة"
             elif ats >= 1000:
@@ -441,7 +440,6 @@ class MafioBot:
             bid_vol = sum(float(b[0]) * float(b[1]) for b in bids[:10])
             ask_vol = sum(float(a[0]) * float(a[1]) for a in asks[:10])
             
-            total = bid_vol + ask_vol
             imbalance = bid_vol / ask_vol if ask_vol > 0 else 99
             
             return {
@@ -468,12 +466,10 @@ class MafioBot:
         except:
             pass
         
-        # تحليل 1h
         kd = await self.get_klines("BTCUSDT", "1h", 3)
         if kd and len(kd["closes"]) >= 2:
             self.btc_trend_1h = (kd["closes"][-1] - kd["closes"][-2]) / kd["closes"][-2] * 100
         
-        # تحديد حالة السوق
         if self.btc_change_24h <= -3:
             self.market_state = "DANGER"
         elif self.btc_change_24h <= -1.5:
@@ -482,30 +478,24 @@ class MafioBot:
             self.market_state = "SAFE"
     
     async def unified_filter(self, symbol: str, vdelta: float, ats: float, vol: float, change: float, tier: str) -> Tuple[bool, str]:
-        """الفلتر الذكي الموحد - إصدار async"""
+        """الفلتر الذكي الموحد"""
         settings = TIER_SETTINGS[tier]
         
-        # 1. VDelta check
-        min_vd = settings["vdelta_min"]
-        if vdelta < min_vd:
-            return False, f"VDelta {vdelta*100:.0f}% < {min_vd*100:.0f}%"
+        if vdelta < settings["vdelta_min"]:
+            return False, f"VDelta {vdelta*100:.0f}% < {settings['vdelta_min']*100:.0f}%"
         
-        # 2. Market state check
         if self.market_state == "DANGER" and vdelta < 0.70:
             return False, "السوق DANGER + VDelta ضعيف"
         
-        # 3. Trend check
         if change < -8:
             return False, f"ترند هابط قوي {change:.1f}%"
         
         if change > 20:
             return False, f"Pump مكتمل {change:.1f}%"
         
-        # 4. Volume check
         if vol < settings["vol_min"]:
             return False, f"حجم ناقص {vol/1000:.0f}K"
         
-        # 5. CVD check
         cvd = await self.calc_cvd(symbol)
         if cvd["trend"] == "falling" and cvd["pct_change"] < -10:
             return False, f"CVD هابط {cvd['pct_change']:.0f}%"
@@ -513,11 +503,10 @@ class MafioBot:
         return True, "OK"
     
     async def detect_pre_explosion(self, symbol: str, data: MarketData, stats: Dict) -> Tuple[Optional[SignalType], int, List[str]]:
-        """كشف ما قبل الانفجار - إصدار async"""
+        """كشف ما قبل الانفجار"""
         score = 0
         signals = []
         
-        # 1. Volume spike
         vol_ratio = data.volume_spike
         if vol_ratio >= 3.0:
             score += 30
@@ -529,7 +518,6 @@ class MafioBot:
             score += 10
             signals.append(f"📈 حجم {vol_ratio:.1f}x")
         
-        # 2. VDelta strength
         vdelta = stats["vdelta"]
         if vdelta >= 0.80:
             score += 25
@@ -538,7 +526,6 @@ class MafioBot:
             score += 15
             signals.append(f"✅ VDelta {vdelta*100:.0f}%")
         
-        # 3. TPS acceleration
         tps = stats["tps"]
         if tps >= 5.0:
             score += 20
@@ -547,7 +534,6 @@ class MafioBot:
             score += 10
             signals.append(f"🚀 TPS {tps:.1f}")
         
-        # 4. Order Book Imbalance
         if data.ob_imbalance >= 2.0:
             score += 15
             signals.append(f"📊 OB {data.ob_imbalance:.1f}:1")
@@ -555,13 +541,11 @@ class MafioBot:
             score += 8
             signals.append(f"📊 OB {data.ob_imbalance:.1f}:1")
         
-        # 5. CVD rising
         cvd = await self.calc_cvd(symbol)
         if cvd["trend"] == "rising":
             score += 10
             signals.append(f"📈 CVD +{cvd['pct_change']:.0f}%")
         
-        # تحديد نوع الإشارة
         if score >= 80:
             return SignalType.GOLDEN, score, signals
         elif score >= 65:
@@ -584,12 +568,10 @@ class MafioBot:
             tier = self.get_tier(vol)
             sector = next((s for s, coins in SECTORS.items() if symbol in coins), "غير محدد")
             
-            # تحليل TPS/ATS
             stats = await self.analyze_tps_ats(symbol)
             if not stats:
                 return
             
-            # تحديث الكاش
             if symbol not in self.data_cache:
                 self.data_cache[symbol] = MarketData(symbol=symbol)
             
@@ -599,34 +581,28 @@ class MafioBot:
             data.ats = stats["ats"]
             data.vdelta = stats["vdelta"]
             
-            # حساب volume spike
             if data.volume_history:
                 avg_vol = sum(data.volume_history) / len(data.volume_history)
                 data.volume_spike = vol / avg_vol if avg_vol > 0 else 1.0
             data.volume_history.append(vol)
             
-            # Order Book
             ob = await self.get_order_book(symbol)
             if ob:
                 data.ob_imbalance = ob["imbalance"]
             
-            # الفلتر الموحد
             passed, reason = await self.unified_filter(symbol, stats["vdelta"], stats["ats"], vol, change, tier)
             if not passed:
                 log.debug(f"FILTER: {symbol} | {reason}")
                 return
             
-            # كشف Pre-Explosion
             signal_type, score, signals = await self.detect_pre_explosion(symbol, data, stats)
             
             if not signal_type:
                 return
             
-            # منطق WATCH → ENTRY
             now = time.time()
             
             if signal_type == SignalType.WATCH and symbol not in self.watchlist:
-                # إضافة للمراقبة
                 self.watchlist[symbol] = WatchItem(
                     symbol=symbol,
                     entry_time=now,
@@ -639,18 +615,15 @@ class MafioBot:
                 await self.send_watch_alert(symbol, price, stats, sector, tier, score, signals)
                 
             elif symbol in self.watchlist and signal_type in [SignalType.PRE_EXPLOSION, SignalType.GOLDEN]:
-                # تأكيد الدخول
                 watch = self.watchlist[symbol]
                 elapsed_min = (now - watch.entry_time) / 60
                 
-                # تحسن في المؤشرات؟
                 ats_improved = stats["ats"] > watch.initial_ats * 1.5
                 vdelta_improved = stats["vdelta"] > watch.initial_vdelta + 0.05
                 
                 if elapsed_min >= 3 and (ats_improved or vdelta_improved or score >= 70):
                     await self.send_entry_alert(symbol, price, stats, watch, score, signals, ats_improved, vdelta_improved)
                     del self.watchlist[symbol]
-                    # فتح مركز
                     self.positions[symbol] = Position(
                         symbol=symbol,
                         entry_price=price,
@@ -689,7 +662,6 @@ class MafioBot:
     async def send_entry_alert(self, symbol: str, price: float, stats: Dict, watch: WatchItem, score: int, 
                               signals: List[str], ats_improved: bool, vdelta_improved: bool):
         """إرسال تنبيه دخول"""
-        # حساب الأهداف والوقف
         target_1 = price * 1.10
         target_2 = price * 1.20
         target_3 = price * 1.35
@@ -737,18 +709,14 @@ class MafioBot:
             
             current_price = data.price
             
-            # تحديث القمة
             if current_price > pos.peak_price:
                 pos.peak_price = current_price
-                # رفع الستوب
-                new_stop = pos.peak_price * 0.90  # 10% trailing
+                new_stop = pos.peak_price * 0.90
                 if new_stop > pos.stop_loss:
                     pos.stop_loss = new_stop
                     pos.trailing_active = True
             
-            # فحص الستوب
             if current_price <= pos.stop_loss:
-                # إغلاق المركز
                 pnl = (current_price - pos.entry_price) / pos.entry_price * 100
                 emoji = "✅" if pnl > 0 else "❌"
                 
@@ -795,7 +763,6 @@ class MafioBot:
                             if symbol not in self.data_cache:
                                 self.data_cache[symbol] = MarketData(symbol=symbol)
                             
-                            # تحديث بيانات التريد
                             price = float(trade.get("p", 0))
                             qty = float(trade.get("q", 0))
                             is_buyer_maker = trade.get("m", False)
@@ -822,18 +789,14 @@ class MafioBot:
         """الحلقة الرئيسية"""
         await self.init()
         
-        # جلب العملات الأولية
         symbols = await self.fetch_top_symbols()
         self.active_symbols = set(symbols[:60])
         log.info(f"🎯 Monitoring {len(self.active_symbols)} symbols")
         
-        # تشغيل WebSocket
         ws_task = asyncio.create_task(self.websocket_listener(list(self.active_symbols)))
         
-        # تحليل BTC أولي
         await self.analyze_btc()
         
-        # إرسال رسالة بدء
         await self.send_telegram(
             f"🚀 *Mafio Bot — Started*\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -851,22 +814,18 @@ class MafioBot:
             try:
                 now = time.time()
                 
-                # تحديث BTC كل 5 دقائق
                 if now - last_btc_check >= 300:
                     await self.analyze_btc()
                     last_btc_check = now
                 
-                # فحص المراكز كل دقيقة
                 if now - last_position_check >= 60:
                     await self.check_positions()
                     last_position_check = now
                 
-                # جلب بيانات 24h
                 ticker_data = await self.safe_get("https://api.mexc.com/api/v3/ticker/24hr")
                 if ticker_data:
                     ticker_map = {t["symbol"]: t for t in ticker_data if t["symbol"] in self.active_symbols}
                     
-                    # فحص كل عملة
                     tasks = [self.scan_symbol(sym, ticker_map[sym]) for sym in ticker_map if sym in self.active_symbols]
                     await asyncio.gather(*tasks, return_exceptions=True)
                 
@@ -882,7 +841,6 @@ class MafioBot:
             asyncio.run(self.main_loop())
         except KeyboardInterrupt:
             log.info("⛔ Stopped by user")
-            # إرسال إشعار التوقف
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
