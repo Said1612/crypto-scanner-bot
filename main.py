@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-# Build: 20260320-001
+# Build: 20260323-V20
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO-BOT — UNIFIED ENGINE            ║
+║           MAFIO BOT V20 — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
 ║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -38,14 +38,9 @@ from typing import Optional, Dict, List, Tuple, Any, Set
 STATE_FILE = "/app/mafio_state.json"
 
 
-REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
-REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
-REDIS_KEY   = "mafio_bot_state_v16"
-
-
-
-REDIS_URL  = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL", ""))
-REDIS_KEY  = "mafio_state_v16"
+REDIS_URL   = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL", ""))
+REDIS_TOKEN = os.environ.get("REDIS_TOKEN", os.environ.get("UPSTASH_REDIS_REST_TOKEN", ""))
+REDIS_KEY   = "mafio_state_v20"
 
 
 
@@ -124,7 +119,7 @@ EXTRA_COINS = [
 ]
 
 TPS_SPIKE      = 2.0
-TPS_MAX_CHANGE = 10.0
+TPS_MAX_CHANGE = 6.0     # 🚫 تجاهل إذا ارتفعت +6% في 24h
 ATS_WHALE      = 5000
 ATS_RETAIL     = 500
 VDELTA_STRONG  = 0.70
@@ -714,6 +709,20 @@ logging.basicConfig(
 )
 log = logging.getLogger("MafioBot")
 
+def check_env_vars():
+    """تحقق من متغيرات البيئة الضرورية"""
+    missing = []
+    if not os.environ.get("TELEGRAM_TOKEN"): missing.append("TELEGRAM_TOKEN")
+    if not os.environ.get("CHAT_ID"):        missing.append("CHAT_ID")
+    if not os.environ.get("REDIS_URL") and not os.environ.get("UPSTASH_REDIS_REST_URL"):
+        missing.append("REDIS_URL")
+    if not os.environ.get("REDIS_TOKEN") and not os.environ.get("UPSTASH_REDIS_REST_TOKEN"):
+        missing.append("REDIS_TOKEN")
+    if missing:
+        log.warning("⚠️ متغيرات مفقودة في Railway: %s", ", ".join(missing))
+    else:
+        log.info("✅ جميع متغيرات البيئة مضبوطة")
+
 
 #                   STATE
 
@@ -922,22 +931,7 @@ def send(msg, personal_only=False):
     """
 
 
-    if 'WATCH ALERT' in msg and 'نشاط مشبوه' in msg:
-        import re as _re
-        # نبحث عن VDelta بعد كلمة VDelta مباشرة
-        vd_match = _re.search(r'VDelta[^\d]*(\d+)%', msg)
-        if vd_match:
-            vd_val = int(vd_match.group(1))
-
-            vol_match = _re.search(r'حجم[^\d]*([\d\.]+)M', msg)
-            vol_m = float(vol_match.group(1)) if vol_match else 1.0
-            vol_usdt = vol_m * 1_000_000
-            _t = get_tier_settings(vol_usdt)
-            min_vd = int(_t["vdelta_min"] * 100)
-            if vd_val < min_vd:
-                log.info(" send() BLOCKED [%s]: VDelta=%d%% < %d%% | %s",
-                         _t["label"], vd_val, min_vd, msg[:50])
-                return
+    # ✅ VDelta filter moved to scan_tps_ats — no regex needed here
 
     if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
         log.info("[TELEGRAM] %s", msg[:80])
@@ -11009,6 +11003,7 @@ def redis_load():
     # type: () -> dict
     """تحميل البيانات من Upstash Redis"""
     if not REDIS_URL or not REDIS_TOKEN:
+        log.warning("⚠️ Redis: REDIS_URL أو REDIS_TOKEN غير مضبوط")
         return {}
     try:
         import json as _json
