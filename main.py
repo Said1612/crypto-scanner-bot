@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-# Build: 20260320-001
+# Build: 20260323-V20
 """
 ╔══════════════════════════════════════════════════════════════╗
-║           MAFIO-BOT — UNIFIED ENGINE            ║
+║           MAFIO BOT V20 — UNIFIED ENGINE            ║
 ║   Anti-Rate-Limit + Smart Cache + Trailing Stop            ║
 ║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -38,14 +38,9 @@ from typing import Optional, Dict, List, Tuple, Any, Set
 STATE_FILE = "/app/mafio_state.json"
 
 
-REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
-REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
-REDIS_KEY   = "mafio_bot_state_v16"
-
-
-
-REDIS_URL  = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL", ""))
-REDIS_KEY  = "mafio_state_v16"
+REDIS_URL   = os.environ.get("REDIS_URL", os.environ.get("UPSTASH_REDIS_REST_URL", ""))
+REDIS_TOKEN = os.environ.get("REDIS_TOKEN", os.environ.get("UPSTASH_REDIS_REST_TOKEN", ""))
+REDIS_KEY   = "mafio_state_v20"
 
 
 
@@ -124,7 +119,7 @@ EXTRA_COINS = [
 ]
 
 TPS_SPIKE      = 2.0
-TPS_MAX_CHANGE = 10.0
+TPS_MAX_CHANGE = 6.0     # 🚫 تجاهل إذا ارتفعت +6% في 24h
 ATS_WHALE      = 5000
 ATS_RETAIL     = 500
 VDELTA_STRONG  = 0.70
@@ -714,6 +709,20 @@ logging.basicConfig(
 )
 log = logging.getLogger("MafioBot")
 
+def check_env_vars():
+    """تحقق من متغيرات البيئة الضرورية"""
+    missing = []
+    if not os.environ.get("TELEGRAM_TOKEN"): missing.append("TELEGRAM_TOKEN")
+    if not os.environ.get("CHAT_ID"):        missing.append("CHAT_ID")
+    if not os.environ.get("REDIS_URL") and not os.environ.get("UPSTASH_REDIS_REST_URL"):
+        missing.append("REDIS_URL")
+    if not os.environ.get("REDIS_TOKEN") and not os.environ.get("UPSTASH_REDIS_REST_TOKEN"):
+        missing.append("REDIS_TOKEN")
+    if missing:
+        log.warning("⚠️ متغيرات مفقودة في Railway: %s", ", ".join(missing))
+    else:
+        log.info("✅ جميع متغيرات البيئة مضبوطة")
+
 
 #                   STATE
 
@@ -922,22 +931,7 @@ def send(msg, personal_only=False):
     """
 
 
-    if 'WATCH ALERT' in msg and 'نشاط مشبوه' in msg:
-        import re as _re
-        # نبحث عن VDelta بعد كلمة VDelta مباشرة
-        vd_match = _re.search(r"\U0001f4ca VDelta: `?(\d+)%", msg) or _re.search(r"VDelta[^\n]*?(\d+)%[^\n]*", msg)
-        if vd_match:
-            vd_val = int(vd_match.group(1))
-
-            vol_match = _re.search(r'حجم[^\d]*([\d\.]+)M', msg)
-            vol_m = float(vol_match.group(1)) if vol_match else 1.0
-            vol_usdt = vol_m * 1_000_000
-            _t = get_tier_settings(vol_usdt)
-            min_vd = int(_t["vdelta_min"] * 100)
-            if vd_val < min_vd:
-                log.info(" send() BLOCKED [%s]: VDelta=%d%% < %d%% | %s",
-                         _t["label"], vd_val, min_vd, msg[:50])
-                return
+    # ✅ VDelta filter moved to scan_tps_ats — no regex needed here
 
     if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
         log.info("[TELEGRAM] %s", msg[:80])
@@ -4092,7 +4086,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
 
 
 def scan_realtime_liquidity(price_map=None, vol_now=None):
-    # type: (Optional[Dict], Optional[Dict]) -> None
+    # type: () -> None
     """
     الأهم والأسرع — يعمل كل 5 دقائق
     يرصد السيولة غير العادية فوراً:
@@ -4101,13 +4095,14 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
     2. سعر يتحرك 3%+ معه
     3. على كل السوق مباشرة
     = لا يحتاج تاريخ — يعمل من الدقيقة الأولى 🎯
-
-    FIX: يستخدم price_map/vol_now اللحظيين إذا مُرِّرا،
-         وإلا يرجع لـ all_tickers الاحتياطي.
     """
     global rt_vol_baseline, rt_alerted
 
+    if not all_tickers:
+        return
+
     now = time.time()
+
 
     all_sector_coins = set()
     for sc in SECTORS.values():
@@ -4115,107 +4110,71 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
 
     alerts = []
 
-    # ── مسار أول: البيانات اللحظية (الأسرع والأدق) ──────────────────────────
-    if price_map and vol_now:
-        for sym in all_sector_coins:
-            if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if sym not in all_sector_coins: continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
 
-            price  = price_map.get(sym)
-            vol    = vol_now.get(sym)
-            if price is None or vol is None: continue
-
-            change = changes_map.get(sym, 0)
-
-            if vol < RT_MIN_VOL: continue
-
-            if sym not in rt_vol_baseline:
-                rt_vol_baseline[sym] = vol
-                continue
-
-            baseline = rt_vol_baseline[sym]
-            rt_vol_baseline[sym] = baseline * 0.85 + vol * 0.15
-
-            if baseline <= 0: continue
-
-            vol_spike = vol / baseline
-            if vol_spike < RT_VOL_SPIKE: continue
-            if abs(change) < RT_PRICE_MOVE: continue
-            if now - rt_alerted.get(sym, 0) < RT_COOLDOWN: continue
-
-            sector = next((s for s, c in SECTORS.items() if sym in c), "Unknown")
-            strength = 0
-            if vol_spike >= 5:    strength += 4
-            elif vol_spike >= 3:  strength += 3
-            else:                 strength += 2
-            if abs(change) >= 15: strength += 3
-            elif abs(change) >= 8: strength += 2
-            else:                  strength += 1
-            if vol >= 10_000_000: strength += 2
-            elif vol >= 3_000_000: strength += 1
-
-            direction = "🟢 شراء" if change > 0 else "🔴 بيع"
-            alerts.append({
-                "sym": sym, "price": price, "vol": vol,
-                "vol_spike": vol_spike, "change": change,
-                "sector": sector, "strength": strength, "direction": direction,
-            })
-
-    # ── مسار احتياطي: all_tickers (لو استُدعيت بدون بيانات) ─────────────────
-    elif all_tickers:
-        for t in all_tickers:
-            sym = t.get("symbol", "")
-            if sym not in all_sector_coins: continue
-            if any(k in sym for k in LEVERAGE_KEYWORDS): continue
-
-            try:
-                price  = float(t["lastPrice"])
-                vol    = float(t["quoteVolume"])
-                change = float(t["priceChangePercent"])
-            except (KeyError, ValueError):
-                continue
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
 
         if vol < RT_MIN_VOL: continue
+
 
         if sym not in rt_vol_baseline:
             rt_vol_baseline[sym] = vol
             continue
 
         baseline = rt_vol_baseline[sym]
+
+
         rt_vol_baseline[sym] = baseline * 0.85 + vol * 0.15
 
         if baseline <= 0: continue
 
         vol_spike = vol / baseline
 
+
         if vol_spike < RT_VOL_SPIKE: continue
+
 
         if abs(change) < RT_PRICE_MOVE: continue
 
+
         if now - rt_alerted.get(sym, 0) < RT_COOLDOWN: continue
 
-        sector = next((s for s, c in SECTORS.items() if sym in c), "Unknown")
+
+        sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
+
 
         strength = 0
         if vol_spike >= 5:    strength += 4
         elif vol_spike >= 3:  strength += 3
         else:                 strength += 2
+
         if abs(change) >= 15: strength += 3
         elif abs(change) >= 8: strength += 2
         else:                  strength += 1
+
         if vol >= 10_000_000: strength += 2
         elif vol >= 3_000_000: strength += 1
 
         direction = "🟢 شراء" if change > 0 else "🔴 بيع"
-        alerts.append({
-            "sym": sym, "price": price, "vol": vol,
-            "vol_spike": vol_spike, "change": change,
-            "sector": sector, "strength": strength, "direction": direction,
-        })
 
-    else:
-        # لا يوجد أي بيانات متاحة — خروج آمن
-        log.warning("scan_realtime_liquidity: لا توجد بيانات (price_map أو all_tickers)")
-        return
+        alerts.append({
+            "sym":       sym,
+            "price":     price,
+            "vol":       vol,
+            "vol_spike": vol_spike,
+            "change":    change,
+            "sector":    sector,
+            "strength":  strength,
+            "direction": direction,
+        })
 
     if not alerts:
         return
@@ -5877,7 +5836,7 @@ lz_tps_alerted    = {}      # type: Dict[str, float]
 
 
 
-WHALE_WATCH_TTL    = 14400
+WHALE_WATCH_TTL    = 21600  # 6 ساعات
 WHALE_CHECK_EVERY  = 60
 WHALE_ATS_MIN      = 100
 WHALE_VDELTA_MIN   = 0.58    # VDelta 65%+
@@ -6177,7 +6136,7 @@ def scan_whale_confirmation(price_map):
             to_del.append(sym)
             continue
 
-        # تجاهل العملات الجديدة اقل من 3 أيام
+        # تجاهل العملات الجديدة اقل من 3 أيام — أمان ضد pump & dump
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now
             continue
@@ -7874,6 +7833,515 @@ def update_bull_mode(vol_now=None, change_now=None):
         log.info(" BULL MODE | reason=%s", bull_reason)
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   🔍 LIQUIDITY RADAR — نظام تتبع السيولة الشامل
+#   يتبع السيولة أينما ذهبت حتى لو السوق نازل
+#   DefiLlama + CoinGlass (مجاني) + MEXC Order Flow
+# ═══════════════════════════════════════════════════════════════════
+
+# ── متغيرات النظام ──
+liq_radar_history    = {}   # {sector: [vol1, vol2, ...]}
+liq_radar_alerted    = {}   # {sector: last_alert}
+liq_radar_last_run   = 0.0
+liq_radar_hot_sector = ""   # القطاع الأكثر سيولة الآن
+adaptive_mode        = "normal"  # normal / meme_hunt / small_cap / defensive
+
+RADAR_EVERY          = 300   # كل 5 دقائق
+RADAR_HOT_THRESHOLD  = 2.0   # حجم 2× = ساخن
+RADAR_COOLDOWN       = 1800  # 30 دقيقة بين تنبيهات نفس القطاع
+
+# ── DefiLlama API (مجاني) ──
+DEFILLAMA_TVL_URL    = "https://api.llama.fi/v2/chains"
+DEFILLAMA_FLOWS_URL  = "https://defillama.com/api/inflows"
+
+# ── CoinGlass API (مجاني) ──
+COINGLASS_OI_URL     = "https://open-api.coinglass.com/public/v2/open_interest"
+
+
+def fetch_defillama_flows():
+    # type: () -> dict
+    """
+    يجلب TVL flows من DefiLlama (مجاني)
+    = أين تذهب الأموال في DeFi
+    """
+    try:
+        resp = safe_get("https://api.llama.fi/v2/chains")
+        if not resp or not isinstance(resp, list):
+            return {}
+
+        flows = {}
+        for chain in resp[:20]:
+            name   = chain.get("name", "")
+            tvl    = chain.get("tvl", 0)
+            change = chain.get("change_1d", 0) or 0
+            if tvl > 1_000_000:  # أكبر من 1M فقط
+                flows[name] = {
+                    "tvl":    tvl,
+                    "change": change,
+                }
+        return flows
+    except Exception as e:
+        log.debug("DefiLlama error: %s", e)
+        return {}
+
+
+def fetch_coinglass_oi():
+    # type: () -> dict
+    """
+    يجلب Open Interest من CoinGlass (مجاني)
+    = أين يراهن المتداولون
+    """
+    try:
+        resp = safe_get(
+            "https://open-api.coinglass.com/public/v2/open_interest",
+            {"symbol": "BTC"}
+        )
+        if not resp:
+            return {}
+        return resp.get("data", {})
+    except Exception as e:
+        log.debug("CoinGlass error: %s", e)
+        return {}
+
+
+def update_adaptive_mode(vol_now, change_now):
+    # type: (dict, dict) -> str
+    """
+    يغير وضع البوت تلقائياً حسب حالة السوق:
+    normal      = سوق متوازن
+    meme_hunt   = السيولة في Meme
+    small_cap   = السيولة في Small Caps
+    defensive   = سوق خطر
+    rotation    = سيولة تنتقل بين قطاعات
+    """
+    global adaptive_mode
+
+    # نحسب أداء كل قطاع
+    sector_perf = {}
+    for sector, coins in SECTORS.items():
+        rises = []
+        for sym in coins:
+            ch  = change_now.get(sym, 0)
+            vol = vol_now.get(sym, 0)
+            if vol > 100_000:
+                rises.append(ch)
+        if rises:
+            sector_perf[sector] = sum(rises) / len(rises)
+
+    if not sector_perf:
+        return adaptive_mode
+
+    best_sector = max(sector_perf, key=sector_perf.get)
+    best_change = sector_perf[best_sector]
+    market_avg  = sum(sector_perf.values()) / len(sector_perf)
+
+    old_mode = adaptive_mode
+
+    if market_avg <= -3.0:
+        adaptive_mode = "defensive"
+    elif best_sector == "Meme" and best_change >= 5.0:
+        adaptive_mode = "meme_hunt"
+    elif best_sector in ("Storage", "DePIN", "Privacy") and best_change >= 3.0:
+        adaptive_mode = "small_cap"
+    elif best_change >= 5.0 and market_avg <= 0:
+        adaptive_mode = "rotation"
+    else:
+        adaptive_mode = "normal"
+
+    if old_mode != adaptive_mode:
+        icons = {
+            "normal":    "⚪",
+            "meme_hunt": "🎭",
+            "small_cap": "🎯",
+            "defensive": "🛡️",
+            "rotation":  "🔄",
+        }
+        labels = {
+            "normal":    "وضع عادي",
+            "meme_hunt": "صيد Meme 🎭",
+            "small_cap": "Small Cap 🎯",
+            "defensive": "وضع دفاعي 🛡️",
+            "rotation":  "Rotation 🔄",
+        }
+        msg = (
+            "{} *وضع البوت تغيّر!*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 الوضع الجديد: *{}*\n"
+            "🏆 القطاع الأفضل: `{}` `{:+.1f}%`\n"
+            "📈 متوسط السوق: `{:+.1f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚙️ _الفلاتر تكيّفت تلقائياً_ 🤖"
+        ).format(
+            icons.get(adaptive_mode, "⚪"),
+            labels.get(adaptive_mode, adaptive_mode),
+            best_sector, best_change,
+            market_avg
+        )
+        send(msg)
+        log.info("⚙️ ADAPTIVE MODE: %s → %s | best=%s %.1f%%",
+                 old_mode, adaptive_mode, best_sector, best_change)
+
+    return adaptive_mode
+
+
+def get_adaptive_filters():
+    # type: () -> dict
+    """
+    يعيد الفلاتر المناسبة حسب الوضع الحالي
+    """
+    base = {
+        "vdelta_min":    0.65,
+        "tps_min":       0.3,
+        "ats_min":       100,
+        "vol_min":       300_000,
+        "max_change_24h": 6.0,
+        "focus_sectors": list(SECTORS.keys()),
+    }
+
+    if adaptive_mode == "meme_hunt":
+        return {**base,
+            "vdelta_min":    0.60,
+            "tps_min":       0.2,
+            "vol_min":       50_000,
+            "max_change_24h": 15.0,
+            "focus_sectors": ["Meme"],
+        }
+    elif adaptive_mode == "small_cap":
+        return {**base,
+            "vdelta_min":    0.65,
+            "tps_min":       0.3,
+            "vol_min":       50_000,
+            "max_change_24h": 10.0,
+            "focus_sectors": ["Storage", "DePIN", "Privacy", "Gaming"],
+        }
+    elif adaptive_mode == "defensive":
+        return {**base,
+            "vdelta_min":    0.75,
+            "tps_min":       0.5,
+            "ats_min":       500,
+            "vol_min":       1_000_000,
+            "max_change_24h": 4.0,
+            "focus_sectors": ["Layer1", "Layer2", "DeFi"],
+        }
+    elif adaptive_mode == "rotation":
+        return {**base,
+            "vdelta_min":    0.62,
+            "tps_min":       0.25,
+            "vol_min":       100_000,
+            "max_change_24h": 8.0,
+        }
+    return base
+
+
+def scan_liquidity_radar(vol_now, change_now, price_map):
+    # type: (dict, dict, dict) -> None
+    """
+    🔍 LIQUIDITY RADAR
+    يتبع السيولة أينما ذهبت:
+    1. يفحص كل القطاعات
+    2. يجد أين تدخل السيولة
+    3. يرسل تنبيه بالقطاع الساخن
+    4. يحلل أفضل عملات للدخول
+    """
+    global liq_radar_last_run, liq_radar_hot_sector
+    now = time.time()
+
+    if now - liq_radar_last_run < RADAR_EVERY:
+        return
+    liq_radar_last_run = now
+
+    # ── 1. حساب السيولة لكل قطاع ──
+    sector_data = {}
+    for sector, coins in SECTORS.items():
+        total_vol    = 0.0
+        total_buy    = 0.0
+        rising_coins = []
+        accum_coins  = []  # عملات فيها تجميع
+
+        for sym in coins:
+            vol = vol_now.get(sym, 0)
+            chg = change_now.get(sym, 0)
+            if vol < 50_000: continue
+
+            total_vol += vol
+
+            # Order Flow
+            taker_buy = vol * 0.7 if chg > 0 else vol * 0.35
+            total_buy += taker_buy
+
+            if chg >= 1.0 and vol > 200_000:
+                rising_coins.append((sym, chg, vol))
+
+            # كشف التجميع الهادئ
+            if abs(chg) < 3.0 and vol > 100_000:
+                hist = coin_vol_history.get(sym, [])
+                if len(hist) >= 3:
+                    avg = sum(hist) / len(hist)
+                    if avg > 0 and vol / avg >= 1.5:
+                        accum_coins.append((sym, vol/avg, chg))
+
+        if total_vol > 0:
+            buy_pct = total_buy / total_vol * 100
+            sector_data[sector] = {
+                "vol":        total_vol,
+                "buy_pct":    buy_pct,
+                "rising":     sorted(rising_coins, key=lambda x: -x[1]),
+                "accum":      sorted(accum_coins, key=lambda x: -x[1]),
+            }
+
+    if not sector_data:
+        return
+
+    # ── 2. تحديث التاريخ ──
+    for sector, data in sector_data.items():
+        if sector not in liq_radar_history:
+            liq_radar_history[sector] = []
+        liq_radar_history[sector].append(data["vol"])
+        if len(liq_radar_history[sector]) > 12:
+            liq_radar_history[sector].pop(0)
+
+    # ── 3. إيجاد القطاعات الساخنة ──
+    hot_sectors_radar = []
+    for sector, data in sector_data.items():
+        hist = liq_radar_history.get(sector, [])
+        if len(hist) < 3: continue
+
+        avg_vol = sum(hist[:-1]) / len(hist[:-1])
+        vol_ratio = data["vol"] / avg_vol if avg_vol > 0 else 1.0
+
+        if vol_ratio >= RADAR_HOT_THRESHOLD and data["buy_pct"] >= 55:
+            hot_sectors_radar.append((
+                sector,
+                vol_ratio,
+                data["buy_pct"],
+                data["rising"],
+                data["accum"],
+                data["vol"],
+            ))
+
+    if not hot_sectors_radar:
+        return
+
+    hot_sectors_radar.sort(key=lambda x: -x[1])
+    top = hot_sectors_radar[0]
+    sector, vol_ratio, buy_pct, rising, accum, total_vol = top
+
+    # cooldown
+    if now - liq_radar_alerted.get(sector, 0) < RADAR_COOLDOWN:
+        return
+    liq_radar_alerted[sector] = now
+    liq_radar_hot_sector = sector
+
+    # ── 4. أفضل عملات للدخول ──
+    # عملات صاعدة
+    rising_txt = ""
+    for sym, chg, vol in rising[:4]:
+        base = sym.replace("USDT", "")
+        price = price_map.get(sym, 0)
+        rising_txt += "  📈 *{}* `{:+.1f}%` | `{}` | `{:.1f}M`\n".format(
+            base, chg, fmt_price(price), vol/1_000_000)
+
+    # عملات تجميع (الأهم!)
+    accum_txt = ""
+    for sym, ratio, chg in accum[:4]:
+        base = sym.replace("USDT", "")
+        price = price_map.get(sym, 0)
+        # نجلب TPS/ATS
+        try:
+            _st = get_tps_ats(sym)
+            _tps = _st.get("tps", 0) if _st else 0
+            _ats = _st.get("ats", 0) if _st else 0
+            _tps_str = " TPS:`{:.1f}` ATS:`{:.0f}$`".format(_tps, _ats)
+        except Exception:
+            _tps_str = ""
+        accum_txt += "  👁️ *{}* `{:.1f}×`{} | `{}` | `{:+.1f}%`\n".format(
+            base, ratio, _tps_str, fmt_price(price), chg)
+
+    mode_label = {
+        "meme_hunt": "🎭 صيد Meme",
+        "small_cap": "🎯 Small Cap",
+        "defensive": "🛡️ دفاعي",
+        "rotation":  "🔄 Rotation",
+    }.get(adaptive_mode, "⚪ عادي")
+
+    msg = (
+        "🔍 *LIQUIDITY RADAR*\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💰 سيولة تدخل قطاع *{}*!\n"
+        "📊 الحجم: `{:.1f}×` المعدل | شراء: `{:.0f}%`\n"
+        "💵 إجمالي: `{:.1f}M` USDT\n"
+        "⚙️ الوضع: {}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "{}\n"
+        "🐢 *تجميع هادئ (ادخل الآن):*\n"
+        "{}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⏳ _راقب هذا القطاع — الجوكر قادم_ 🃏"
+    ).format(
+        sector,
+        vol_ratio, buy_pct,
+        total_vol/1_000_000,
+        mode_label,
+        ("📈 *صاعدة:*\n" + rising_txt) if rising_txt else "",
+        accum_txt if accum_txt else "  _لا يوجد تجميع واضح بعد_\n",
+    )
+
+    send(msg)
+    log.info("🔍 RADAR | %s | vol=%.1fx | buy=%.0f%%",
+             sector, vol_ratio, buy_pct)
+
+
+def scan_pre_explosion(price_map, vol_now, change_now):
+    # type: (dict, dict, dict) -> None
+    """
+    💥 PRE-EXPLOSION SCANNER
+    يجمع كل المؤشرات ويكتشف العملات على وشك الانفجار:
+    - CVD تراكمي صاعد
+    - VDelta MA مرتفع
+    - OB Imbalance = بيد محمية
+    - حجم يرتفع بدون حركة سعر
+    = إشارة قبل الانفجار بـ 15-60 دقيقة
+    """
+    global explosion_alerted
+    now = time.time()
+
+    filters = get_adaptive_filters()
+    focus   = filters["focus_sectors"]
+
+    # نفحص العملات حسب الوضع
+    if adaptive_mode == "meme_hunt":
+        syms_to_check = [s for s in (list(candidates) + EXTRA_COINS)
+                        if s.replace("USDT","") not in STABLECOINS]
+    else:
+        syms_to_check = list(set(list(candidates) + EXTRA_COINS))
+
+    for sym in syms_to_check:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS: continue
+        if now - explosion_alerted.get(sym, 0) < 7200: continue
+        if now - coin_alerted.get(sym, 0) < 1800: continue
+
+        # فحص القطاع في وضع Rotation
+        if adaptive_mode not in ("meme_hunt", "normal"):
+            sector = next((s for s, c in SECTORS.items() if sym in c), None)
+            if sector and sector not in focus: continue
+
+        vol   = vol_now.get(sym, 0)
+        chg   = change_now.get(sym, 0)
+        price = price_map.get(sym, 0)
+
+        if vol < filters["vol_min"]: continue
+        if abs(chg) > filters["max_change_24h"]: continue
+
+        # ── تاريخ الحجم ──
+        hist = coin_vol_history.get(sym, [])
+        if len(hist) < 3: continue
+        avg_vol   = sum(hist) / len(hist)
+        vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+        if vol_ratio < 1.8: continue  # حجم يجب أن يرتفع
+
+        # ── TPS/VDelta ──
+        try:
+            stats = get_tps_ats(sym)
+        except Exception:
+            continue
+        if not stats: continue
+
+        tps    = stats.get("tps", 0)
+        vdelta = stats.get("vdelta", 0)
+        ats    = stats.get("ats", 0)
+
+        if tps    < filters["tps_min"]:    continue
+        if vdelta < filters["vdelta_min"]: continue
+
+        # ── CVD ──
+        cvd = calc_cvd(sym, "1h", 12)
+        if cvd.get("trend") == "falling" and cvd.get("pct_change", 0) < -15:
+            continue
+
+        # ── VDelta MA ──
+        vdelta_ma = calc_vdelta_ma(sym, 10, "15m")
+
+        # ── نقاط الإشارة ──
+        score = 0
+        signals = []
+
+        if vol_ratio >= 3.0:
+            score += 30; signals.append("💥 حجم {}×".format(round(vol_ratio,1)))
+        elif vol_ratio >= 2.0:
+            score += 20; signals.append("🔥 حجم {}×".format(round(vol_ratio,1)))
+        else:
+            score += 10; signals.append("📈 حجم {}×".format(round(vol_ratio,1)))
+
+        if vdelta >= 0.80:
+            score += 25; signals.append("💪 VDelta {:.0f}%".format(vdelta*100))
+        elif vdelta >= 0.70:
+            score += 15; signals.append("✅ VDelta {:.0f}%".format(vdelta*100))
+        else:
+            score += 8
+
+        if vdelta_ma >= 0.70:
+            score += 20; signals.append("📊 VD-MA {:.0f}%".format(vdelta_ma*100))
+        elif vdelta_ma >= 0.60:
+            score += 10
+
+        if cvd.get("trend") == "rising":
+            score += 15; signals.append("📈 CVD صاعد")
+
+        if tps >= 2.0:
+            score += 10; signals.append("⚡ TPS {:.1f}".format(tps))
+
+        if score < 50: continue
+
+        # ── نوع الإشارة ──
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+
+        if score >= 80:
+            alert_type = "💥 *انفجار وشيك جداً!*"
+            alert_icon = "🔴"
+        elif score >= 65:
+            alert_type = "🔥 *قريب من الانفجار*"
+            alert_icon = "🟠"
+        else:
+            alert_type = "⚡ *بوادر انفجار*"
+            alert_icon = "🟡"
+
+        signals_txt = " | ".join(signals[:4])
+        tps_lbl = get_tps_label(tps) if 'get_tps_label' in dir() else ""
+        ats_lbl = get_ats_label(ats) if 'get_ats_label' in dir() else ""
+
+        msg = (
+            "💥 *PRE-EXPLOSION* {} {}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🎯 *{}* | 💵 `{}`\n"
+            "📉 24h: `{:+.1f}%` (لم ينفجر بعد ✅)\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📡 TPS: `{:.2f}` {} | ATS: `{:.0f}$` {}\n"
+            "📊 VDelta: `{:.0f}%` | VD-MA: `{:.0f}%`\n"
+            "{}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🏷️ القطاع: `{}` | ⚙️ وضع: `{}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⏳ _السعر لم يتحرك بعد — فرصة الدخول_ 🎯"
+        ).format(
+            alert_icon, alert_type,
+            base, fmt_price(price),
+            chg,
+            tps, tps_lbl, ats, ats_lbl,
+            vdelta*100, vdelta_ma*100,
+            signals_txt,
+            sector, adaptive_mode,
+        )
+
+        send(msg)
+        explosion_alerted[sym] = now
+        coin_alerted[sym] = now
+        whale_watch_add(sym, ats, vdelta, price)
+        log.info("💥 PRE-EXPLOSION | %s | score=%d | vol=%.1fx | vdelta=%.0f%%",
+                 sym, score, vol_ratio, vdelta*100)
+
+
 def check_btc_dominance(vol_now):
     # type: (Dict) -> None
     """
@@ -8062,7 +8530,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
     )[:50]
 
     results = []
-    for idx, (sym, vol) in enumerate(ranked):
+    for sym, vol in ranked:
         if sym.replace("USDT","") in STABLECOINS: continue
         _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
         if vol < _min_vol:
@@ -8081,10 +8549,6 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         chg24 = changes_map.get(sym, 0)
         if chg24 >= TPS_MAX_CHANGE:
             continue
-
-        # تأخير بسيط بين كل طلب API لتجنب Rate Limit
-        if idx > 0 and idx % 10 == 0:
-            time.sleep(0.5)
 
         stats = analyze_tps_ats(sym)
         if not stats:
@@ -8141,17 +8605,16 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
 
         if BULL_MODE_ACTIVE:
-            _ready = _vdelta >= 0.60
+            _ready = _vdelta >= 0.65
         else:
             _ready = (
-                _vdelta >= 0.70
-                or _vdelta >= 0.60
-                or (_vdelta >= 0.55 and _tps >= 0.3 and _ats >= 50)
-                or (_vdelta >= 0.55 and _ats >= 200)
+                _vdelta >= 0.75
+                or _vdelta >= 0.65
+                or (_vdelta >= 0.58 and _tps >= 0.3 and _ats >= 50)
+                or (_vdelta >= 0.58 and _ats >= 200)
             )
 
-        # فلتر حد أدنى مرن يعتمد على tier بدل قيمة ثابتة
-        if _vdelta < (_vd_min - 0.05):
+        if _vdelta < 0.66:
             continue
 
         if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 200:
@@ -10569,12 +11032,14 @@ def _send_daily_report_body(today, now_utc):
     _mkt_icons = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🚨"}
     _eth         = float(eth_change_24h)  if eth_change_24h  is not None else 0.0
 
-    _btc1h = btc_trend_1h
+    _btc1h = 0.0
     try:
-        _kd1h = get_klines("BTCUSDT", "1h", 6)
-        if _kd1h and len(_kd1h["closes"]) >= 2:
-            _c1h   = _kd1h["closes"]
-            _btc1h = (_c1h[-1] - _c1h[-2]) / _c1h[-2] * 100
+        # نجلب مباشرة بدون cache لضمان دقة البيانات
+        _raw1h = safe_get(MEXC_KLINES, {"symbol": "BTCUSDT", "interval": "1h", "limit": 3})
+        if _raw1h and len(_raw1h) >= 2:
+            _c1h = [float(k[4]) for k in _raw1h]
+            if _c1h[-2] > 0:
+                _btc1h = (_c1h[-1] - _c1h[-2]) / _c1h[-2] * 100
     except Exception:
         _btc1h = float(btc_trend_1h) if btc_trend_1h is not None else 0.0
     _buy_pct     = float(buy_pct)         if buy_pct         is not None else 0.0
@@ -11049,6 +11514,7 @@ def redis_load():
     # type: () -> dict
     """تحميل البيانات من Upstash Redis"""
     if not REDIS_URL or not REDIS_TOKEN:
+        log.warning("⚠️ Redis: REDIS_URL أو REDIS_TOKEN غير مضبوط")
         return {}
     try:
         import json as _json
@@ -12350,305 +12816,4 @@ def run():
 
     try:
         _r = requests.get(
-            "https://api.telegram.org/bot{}/getUpdates?offset=-1&timeout=1".format(TELEGRAM_TOKEN),
-            timeout=5
-        )
-        _d = _r.json()
-        if _d.get("ok") and _d.get("result"):
-            global _tg_offset
-            _tg_offset = _d["result"][-1]["update_id"] + 1
-            log.info(" Telegram offset initialized: %d", _tg_offset)
-    except Exception as _e:
-        log.warning("offset init error: %s", _e)
-    refresh_tickers()
-    init_static_watchlist()
-
-    log.info("  Auto Expand Sectors...")
-    auto_expand_sectors()
-    last_expand = time.time()
-
-    analyze_sectors()
-
-    last_sector_report = time.time()
-    log.info("  | Candidates: %d | Hot: %s",
-             len(candidates), ", ".join(hot_sectors) or "لا يوجد")
-
-    last_deep_scan = 0
-
-
-    global last_lh_scan, last_sc_refresh, last_sr_alert
-    last_lh_scan    = 0.0
-    last_sc_refresh = 0.0
-    last_sr_alert   = 0.0
-
-    send(
-        "💀 *MAFIO-BOT* 💀\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "✅ Anti Rate-Limit (~8 req/min)\n"
-        "✅ Smart Cache (15m/1h/4h)\n"
-        "✅ Trailing Stop (`{trail}%` من القمة)\n"
-        "✅ Sector Rotation (12 قطاع)\n"
-        "✅ Anti P&D | Supertrend | Dynamic SL\n"
-        "✅ Sector Flow Tracker\n"
-        "✅ Buffer System (منع التذبذب)\n"
-        "✅ Daily Market Report (00:00 UTC)\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🆕 V16: 🌊 Liquidity Zones يومية\n"
-        "🆕 V16: Sigma تلقائي من التاريخ\n"
-        "🆕 V16: إشارة عند الإغلاق فوق Zone\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "⚡ إشارات سريعة: 15m/1h (مستمر)\n"
-        "📅 إشارات يومية: 1D (00:00 UTC)\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "₿ BTC: `{btc:+.2f}%` | السوق: `{mst}`\n"
-        "🔥 Hot: `{hot}`".format(
-            trail=TRAIL_DROP_TRIGGER,
-            btc=btc_change_24h,
-            mst=market_state,
-            hot=", ".join(hot_sectors) or "لا يوجد",
-        )
-    )
-
-    cycle = 0
-    flow_cycle = 0
-
-    while True:
-
-        price_map  = {}
-        change_now = {}
-        vol_now    = {}
-        high_map   = {}
-        low_map    = {}
-        try:
-            now = time.time()
-
-
-
-
-
-
-
-            if int(now) % 300 < 12:
-                save_state()
-
-
-            if now - last_ts_scan >= TS_SCAN_EVERY:
-                check_trailing_stops()
-                last_ts_scan = now
-
-
-            if now - last_wl_check >= WL_CHECK_EVERY:
-                check_watchlist_entries()
-                last_wl_check = now
-            if now - last_rt_scan >= RT_SCAN_EVERY:
-                scan_instant_movers()
-                scan_realtime_liquidity(price_map, vol_now)
-                last_rt_scan = now
-            poll_commands()
-
-
-            if now - last_btc         >= BTC_EVERY:
-                analyze_btc()
-                update_bull_mode(vol_now, change_now)
-            if now - last_sectors     >= SECTORS_EVERY:
-                analyze_sectors()
-                detect_sector_rotation()
-                track_global_liquidity()
-
-            refresh_sector_report()
-
-            if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
-
-                if now - last_hot_scan >= HOT_SCAN_EVERY:
-                    scan_hot_market()
-                    last_hot_scan = now
-                check_btc_dominance(vol_now)
-                scan_bottom_accumulation()
-
-                if now - last_ath_scan >= ATH_SCAN_EVERY:
-                    scan_ath_distance()
-                    last_ath_scan = now
-
-                last_bottom_scan = now
-
-
-            send_daily_report()
-
-            if now - last_expand      >= EXPAND_EVERY:
-
-                log.info("   - Auto Expand Sectors")
-                auto_expand_sectors()
-                last_expand = now
-            if now - last_stale       >= STALE_EVERY:
-                cleanup()
-                last_stale = now
-
-
-            tickers_now = safe_get(MEXC_24H)
-            if not tickers_now:
-                time.sleep(CHECK_INTERVAL)
-                continue
-
-
-            all_tickers = tickers_now
-
-
-            price_map  = {}
-            change_now = {}
-            vol_now    = {}
-            high_map   = {}
-            low_map    = {}
-            ticker_map = {}
-
-            for t in tickers_now:
-                sym = t.get("symbol","")
-                ticker_map[sym] = t
-                try:
-                    last  = float(t["lastPrice"])
-                    open_ = float(t.get("openPrice", last))
-                    real_change = (last - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
-                    price_map[sym]  = last
-                    change_now[sym] = real_change
-                    vol_now[sym]    = float(t["quoteVolume"])
-                    high_map[sym]   = float(t["highPrice"])
-                    low_map[sym]    = float(t["lowPrice"])
-                except (KeyError, ValueError):
-                    pass
-
-            changes_map.update(change_now)
-
-
-            update_coin_vol_history(vol_now)
-
-
-            check_backtest(price_map)
-
-            if now - last_tickers >= TICKERS_EVERY:
-                refresh_tickers()
-                analyze_sectors()
-
-            # Trailing Stop + Signal Progression
-            for sym in list(tracked.keys()):
-                if sym in price_map:
-                    if not check_trailing(sym, price_map[sym]):
-                        pass
-
-
-            update_sector_flow(ticker_map)
-            flow_cycle += 1
-
-
-            if flow_cycle >= FLOW_WINDOW:
-                analyze_sector_flow()
-                flow_cycle = 0
-
-
-            # detect_momentum(price_map, change_now, vol_now, high_map, low_map)
-
-
-            if now - last_ts_scan >= TS_SCAN_EVERY:
-                perf_check(price_map)
-
-
-            if now - last_lh_scan >= 600:
-                scan_hidden_accumulation(price_map, vol_now, changes_map)
-
-            smart_market_scan()
-            scan_defi_llama()
-            scan_funding_rates()
-            scan_volume_surge(price_map, vol_now, changes_map)
-            scan_bottom_fisher(price_map, vol_now, changes_map)
-
-
-            flush_signal_queue(max_send=5)
-
-
-            update_pump_dump_history(price_map, vol_now)
-            scan_pump_dump(price_map, vol_now, change_now)
-
-
-            # scan_market_pulse(price_map, vol_now, change_now)
-
-
-            track_liquidity_flow(vol_now, change_now)
-
-
-
-            if now - last_tps_scan >= TPS_SCAN_EVERY:
-                check_liquidity_exit(vol_now, price_map)
-                scan_tps_ats(price_map, vol_now, change_now)
-                scan_lz_tps_fusion(price_map, vol_now, change_now)
-                last_tps_scan = now
-
-
-            if now - last_whale_check >= WHALE_CHECK_EVERY:
-                scan_whale_confirmation(price_map)
-                last_whale_check = now
-
-            if now - last_lh_scan >= LH_SCAN_EVERY:
-                liquidity_hunter(price_map, vol_now, changes_map)
-                last_lh_scan = now
-
-
-            if now - last_sc_refresh >= SC_REFRESH_EVERY:
-                refresh_small_caps()
-
-
-            if now - last_lh_scan < 10 and small_caps:
-                liquidity_hunter_small_caps(price_map, vol_now, changes_map)
-
-            # Deep Scan
-            if now - last_deep_scan >= DEEP_SCAN_EVERY:
-                # V15: pre-score coins before deep scan
-                # sort by: high volume + positive change first
-                pre_scored = []
-                for sym in candidates:
-                    if sym in tracked: continue
-                    price  = price_map.get(sym, 0)
-                    change = changes_map.get(sym, 0)
-                    vol    = vol_now.get(sym, 0)
-                    if price <= 0: continue
-
-                    in_hot       = sym in hot_symbols
-                    in_watchlist = sym in watchlist
-                    wl_priority  = watchlist.get(sym, {}).get("priority","") == "🔥 HIGH"
-
-                    pre_score = (
-                        (vol / 1_000_000) * 0.5 +
-                        max(change, 0) * 0.3 +
-                        (2  if in_hot       else 0) +
-                        (5  if in_watchlist else 0) +
-                        (10 if wl_priority  else 0)
-                    )
-                    pre_scored.append((sym, price, change, pre_score))
-
-
-                pre_scored.sort(key=lambda x: -x[3])
-
-
-                scanned = 0
-                for rank, (sym, price, change, _) in enumerate(pre_scored):
-
-                    fetch_ob = (rank < 20)
-                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
-                    scanned += 1
-                    if scanned % 10 == 0:
-                        time.sleep(0.5)
-
-                last_deep_scan = now
-                log.info(" Deep Scan  | %d ", scanned)
-
-            cycle += 1
-
-            time.sleep(CHECK_INTERVAL)
-
-        except KeyboardInterrupt:
-            send("⛔ *MAFIO-BOT* — تم الإيقاف")
-            break
-        except Exception as e:
-            log.error(": %s", e, exc_info=True)
-            time.sleep(10)
-
-
-if __name__ == "__main__":
-    run()
+            "https://api.telegram.org/bot{}/get
