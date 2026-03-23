@@ -18,14 +18,15 @@ import json
 import time
 import math
 import asyncio
-import aiohttp
-import websockets
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, Set, Any
+from typing import Dict, List, Optional, Tuple, Set, Any, Union
 from collections import deque, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
+
+import aiohttp
+import websockets
 import numpy as np
 
 # ==================== إعدادات النظام ====================
@@ -57,7 +58,7 @@ TIER_SETTINGS = {
 
 # القطاعات
 SECTORS = {
-    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT", "BONKUSDT", "BOMEUSDT", "WIFUSDT"],
+    "Meme": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "WIFUSDT", "BONKUSDT", "BOMEUSDT"],
     "AI": ["FETUSDT", "AGIXUSDT", "WLDUSDT", "ARKMUSDT", "RENDERUSDT", "VIRTUSDT", "NEUROUSDT"],
     "Layer1": ["SOLUSDT", "AVAXUSDT", "ADAUSDT", "NEARUSDT", "SUIUSDT", "APTUSDT", "INJUSDT"],
     "DeFi": ["AAVEUSDT", "UNIUSDT", "LINKUSDT", "CAKEUSDT", "MKRUSDT", "LDOUSDT"],
@@ -188,7 +189,7 @@ class MafioBot:
     async def send_telegram(self, msg: str, personal_only: bool = False):
         """إرسال رسالة Telegram"""
         if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
-            log.info(f"[TELEGRAM] {msg[:80]}")
+            log.info(f"[TELEGRAM] {msg[:80]}...")
             return
             
         targets = [CHAT_ID]
@@ -293,14 +294,14 @@ class MafioBot:
         except:
             return None
     
-    def calc_vdelta_ma(self, symbol: str, period: int = 10) -> float:
-        """حساب VDelta Moving Average"""
+    async def calc_vdelta_ma(self, symbol: str, period: int = 10) -> float:
+        """حساب VDelta Moving Average - إصدار async"""
         kd = self.data_cache.get(symbol)
         if not kd:
             return 0.5
             
         # استخدام Klines إذا متاح
-        klines = asyncio.run(self.get_klines(symbol, "15m", period + 5))
+        klines = await self.get_klines(symbol, "15m", period + 5)
         if klines and len(klines["closes"]) >= period:
             closes = klines["closes"]
             opens = klines["opens"]
@@ -321,9 +322,9 @@ class MafioBot:
         
         return round(buy_val / total_val, 3) if total_val > 0 else 0.5
     
-    def calc_cvd(self, symbol: str) -> Dict:
-        """حساب Cumulative Volume Delta"""
-        kd = asyncio.run(self.get_klines(symbol, "1h", 24))
+    async def calc_cvd(self, symbol: str) -> Dict:
+        """حساب Cumulative Volume Delta - إصدار async"""
+        kd = await self.get_klines(symbol, "1h", 24)
         if not kd or len(kd["closes"]) < 10:
             return {"trend": "flat", "slope": 0, "pct_change": 0}
         
@@ -402,7 +403,7 @@ class MafioBot:
             ats = all_vol / len(data)
             
             # حساب VDelta
-            vdelta = self.calc_vdelta_ma(symbol)
+            vdelta = await self.calc_vdelta_ma(symbol)
             
             # تحديد نوع المشتري
             if ats >= ATS_WHALE:
@@ -480,8 +481,8 @@ class MafioBot:
         else:
             self.market_state = "SAFE"
     
-    def unified_filter(self, symbol: str, vdelta: float, ats: float, vol: float, change: float, tier: str) -> Tuple[bool, str]:
-        """الفلتر الذكي الموحد"""
+    async def unified_filter(self, symbol: str, vdelta: float, ats: float, vol: float, change: float, tier: str) -> Tuple[bool, str]:
+        """الفلتر الذكي الموحد - إصدار async"""
         settings = TIER_SETTINGS[tier]
         
         # 1. VDelta check
@@ -505,14 +506,14 @@ class MafioBot:
             return False, f"حجم ناقص {vol/1000:.0f}K"
         
         # 5. CVD check
-        cvd = self.calc_cvd(symbol)
+        cvd = await self.calc_cvd(symbol)
         if cvd["trend"] == "falling" and cvd["pct_change"] < -10:
             return False, f"CVD هابط {cvd['pct_change']:.0f}%"
         
         return True, "OK"
     
-    def detect_pre_explosion(self, symbol: str, data: MarketData, stats: Dict) -> Optional[SignalType]:
-        """كشف ما قبل الانفجار"""
+    async def detect_pre_explosion(self, symbol: str, data: MarketData, stats: Dict) -> Tuple[Optional[SignalType], int, List[str]]:
+        """كشف ما قبل الانفجار - إصدار async"""
         score = 0
         signals = []
         
@@ -555,7 +556,7 @@ class MafioBot:
             signals.append(f"📊 OB {data.ob_imbalance:.1f}:1")
         
         # 5. CVD rising
-        cvd = self.calc_cvd(symbol)
+        cvd = await self.calc_cvd(symbol)
         if cvd["trend"] == "rising":
             score += 10
             signals.append(f"📈 CVD +{cvd['pct_change']:.0f}%")
@@ -610,13 +611,13 @@ class MafioBot:
                 data.ob_imbalance = ob["imbalance"]
             
             # الفلتر الموحد
-            passed, reason = self.unified_filter(symbol, stats["vdelta"], stats["ats"], vol, change, tier)
+            passed, reason = await self.unified_filter(symbol, stats["vdelta"], stats["ats"], vol, change, tier)
             if not passed:
                 log.debug(f"FILTER: {symbol} | {reason}")
                 return
             
             # كشف Pre-Explosion
-            signal_type, score, signals = self.detect_pre_explosion(symbol, data, stats)
+            signal_type, score, signals = await self.detect_pre_explosion(symbol, data, stats)
             
             if not signal_type:
                 return
@@ -769,6 +770,10 @@ class MafioBot:
     
     async def websocket_listener(self, symbols: List[str]):
         """WebSocket للبيانات اللحظية"""
+        if not symbols:
+            log.warning("No symbols for WebSocket")
+            return
+            
         streams = "/".join([f"{s.lower()}@trade" for s in symbols[:50]])
         uri = f"wss://wbs.mexc.com/ws?streams={streams}"
         
@@ -795,9 +800,9 @@ class MafioBot:
                             qty = float(trade.get("q", 0))
                             is_buyer_maker = trade.get("m", False)
                             
-                            data = self.data_cache[symbol]
-                            data.price = price
-                            data.trades_buffer.append({
+                            md = self.data_cache[symbol]
+                            md.price = price
+                            md.trades_buffer.append({
                                 "price": price,
                                 "qty": qty,
                                 "is_sell": is_buyer_maker,
@@ -877,7 +882,14 @@ class MafioBot:
             asyncio.run(self.main_loop())
         except KeyboardInterrupt:
             log.info("⛔ Stopped by user")
-            asyncio.run(self.send_telegram("⛔ *Mafio Bot — Stopped*"))
+            # إرسال إشعار التوقف
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.send_telegram("⛔ *Mafio Bot — Stopped*"))
+                loop.close()
+            except:
+                pass
         except Exception as e:
             log.error(f"Fatal error: {e}")
 
