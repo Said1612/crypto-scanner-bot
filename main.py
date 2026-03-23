@@ -4092,7 +4092,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
 
 
 def scan_realtime_liquidity(price_map=None, vol_now=None):
-    # type: () -> None
+    # type: (Optional[Dict], Optional[Dict]) -> None
     """
     الأهم والأسرع — يعمل كل 5 دقائق
     يرصد السيولة غير العادية فوراً:
@@ -4101,14 +4101,13 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
     2. سعر يتحرك 3%+ معه
     3. على كل السوق مباشرة
     = لا يحتاج تاريخ — يعمل من الدقيقة الأولى 🎯
+
+    FIX: يستخدم price_map/vol_now اللحظيين إذا مُرِّرا،
+         وإلا يرجع لـ all_tickers الاحتياطي.
     """
     global rt_vol_baseline, rt_alerted
 
-    if not all_tickers:
-        return
-
     now = time.time()
-
 
     all_sector_coins = set()
     for sc in SECTORS.values():
@@ -4116,71 +4115,107 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
 
     alerts = []
 
-    for t in all_tickers:
-        sym = t.get("symbol", "")
-        if sym not in all_sector_coins: continue
-        if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+    # ── مسار أول: البيانات اللحظية (الأسرع والأدق) ──────────────────────────
+    if price_map and vol_now:
+        for sym in all_sector_coins:
+            if any(k in sym for k in LEVERAGE_KEYWORDS): continue
 
-        try:
-            price  = float(t["lastPrice"])
-            vol    = float(t["quoteVolume"])
-            change = float(t["priceChangePercent"])
-        except (KeyError, ValueError):
-            continue
+            price  = price_map.get(sym)
+            vol    = vol_now.get(sym)
+            if price is None or vol is None: continue
+
+            change = changes_map.get(sym, 0)
+
+            if vol < RT_MIN_VOL: continue
+
+            if sym not in rt_vol_baseline:
+                rt_vol_baseline[sym] = vol
+                continue
+
+            baseline = rt_vol_baseline[sym]
+            rt_vol_baseline[sym] = baseline * 0.85 + vol * 0.15
+
+            if baseline <= 0: continue
+
+            vol_spike = vol / baseline
+            if vol_spike < RT_VOL_SPIKE: continue
+            if abs(change) < RT_PRICE_MOVE: continue
+            if now - rt_alerted.get(sym, 0) < RT_COOLDOWN: continue
+
+            sector = next((s for s, c in SECTORS.items() if sym in c), "Unknown")
+            strength = 0
+            if vol_spike >= 5:    strength += 4
+            elif vol_spike >= 3:  strength += 3
+            else:                 strength += 2
+            if abs(change) >= 15: strength += 3
+            elif abs(change) >= 8: strength += 2
+            else:                  strength += 1
+            if vol >= 10_000_000: strength += 2
+            elif vol >= 3_000_000: strength += 1
+
+            direction = "🟢 شراء" if change > 0 else "🔴 بيع"
+            alerts.append({
+                "sym": sym, "price": price, "vol": vol,
+                "vol_spike": vol_spike, "change": change,
+                "sector": sector, "strength": strength, "direction": direction,
+            })
+
+    # ── مسار احتياطي: all_tickers (لو استُدعيت بدون بيانات) ─────────────────
+    elif all_tickers:
+        for t in all_tickers:
+            sym = t.get("symbol", "")
+            if sym not in all_sector_coins: continue
+            if any(k in sym for k in LEVERAGE_KEYWORDS): continue
+
+            try:
+                price  = float(t["lastPrice"])
+                vol    = float(t["quoteVolume"])
+                change = float(t["priceChangePercent"])
+            except (KeyError, ValueError):
+                continue
 
         if vol < RT_MIN_VOL: continue
-
 
         if sym not in rt_vol_baseline:
             rt_vol_baseline[sym] = vol
             continue
 
         baseline = rt_vol_baseline[sym]
-
-
         rt_vol_baseline[sym] = baseline * 0.85 + vol * 0.15
 
         if baseline <= 0: continue
 
         vol_spike = vol / baseline
 
-
         if vol_spike < RT_VOL_SPIKE: continue
-
 
         if abs(change) < RT_PRICE_MOVE: continue
 
-
         if now - rt_alerted.get(sym, 0) < RT_COOLDOWN: continue
 
-
-        sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
-
+        sector = next((s for s, c in SECTORS.items() if sym in c), "Unknown")
 
         strength = 0
         if vol_spike >= 5:    strength += 4
         elif vol_spike >= 3:  strength += 3
         else:                 strength += 2
-
         if abs(change) >= 15: strength += 3
         elif abs(change) >= 8: strength += 2
         else:                  strength += 1
-
         if vol >= 10_000_000: strength += 2
         elif vol >= 3_000_000: strength += 1
 
         direction = "🟢 شراء" if change > 0 else "🔴 بيع"
-
         alerts.append({
-            "sym":       sym,
-            "price":     price,
-            "vol":       vol,
-            "vol_spike": vol_spike,
-            "change":    change,
-            "sector":    sector,
-            "strength":  strength,
-            "direction": direction,
+            "sym": sym, "price": price, "vol": vol,
+            "vol_spike": vol_spike, "change": change,
+            "sector": sector, "strength": strength, "direction": direction,
         })
+
+    else:
+        # لا يوجد أي بيانات متاحة — خروج آمن
+        log.warning("scan_realtime_liquidity: لا توجد بيانات (price_map أو all_tickers)")
+        return
 
     if not alerts:
         return
@@ -8027,7 +8062,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
     )[:50]
 
     results = []
-    for sym, vol in ranked:
+    for idx, (sym, vol) in enumerate(ranked):
         if sym.replace("USDT","") in STABLECOINS: continue
         _min_vol = 100_000 if sym in EXTRA_COINS else 1_000_000
         if vol < _min_vol:
@@ -8046,6 +8081,10 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         chg24 = changes_map.get(sym, 0)
         if chg24 >= TPS_MAX_CHANGE:
             continue
+
+        # تأخير بسيط بين كل طلب API لتجنب Rate Limit
+        if idx > 0 and idx % 10 == 0:
+            time.sleep(0.5)
 
         stats = analyze_tps_ats(sym)
         if not stats:
@@ -8102,16 +8141,17 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
 
         if BULL_MODE_ACTIVE:
-            _ready = _vdelta >= 0.65
+            _ready = _vdelta >= 0.60
         else:
             _ready = (
-                _vdelta >= 0.75
-                or _vdelta >= 0.65
-                or (_vdelta >= 0.58 and _tps >= 0.3 and _ats >= 50)
-                or (_vdelta >= 0.58 and _ats >= 200)
+                _vdelta >= 0.70
+                or _vdelta >= 0.60
+                or (_vdelta >= 0.55 and _tps >= 0.3 and _ats >= 50)
+                or (_vdelta >= 0.55 and _ats >= 200)
             )
 
-        if _vdelta < 0.66:
+        # فلتر حد أدنى مرن يعتمد على tier بدل قيمة ثابتة
+        if _vdelta < (_vd_min - 0.05):
             continue
 
         if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 200:
@@ -12402,8 +12442,7 @@ def run():
                 last_wl_check = now
             if now - last_rt_scan >= RT_SCAN_EVERY:
                 scan_instant_movers()
-            if now - last_rt_scan >= RT_SCAN_EVERY:
-                scan_realtime_liquidity()
+                scan_realtime_liquidity(price_map, vol_now)
                 last_rt_scan = now
             poll_commands()
 
