@@ -12818,4 +12818,312 @@ def run():
             timeout=5
         )
         _d = _r.json()
-        if _d.get
+        if _d.get("ok") and _d.get("result"):
+            global _tg_offset
+            _tg_offset = _d["result"][-1]["update_id"] + 1
+            log.info(" Telegram offset initialized: %d", _tg_offset)
+    except Exception as _e:
+        log.warning("offset init error: %s", _e)
+    refresh_tickers()
+    init_static_watchlist()
+
+    log.info("  Auto Expand Sectors...")
+    auto_expand_sectors()
+    last_expand = time.time()
+
+    analyze_sectors()
+
+    last_sector_report = time.time()
+    log.info("  | Candidates: %d | Hot: %s",
+             len(candidates), ", ".join(hot_sectors) or "لا يوجد")
+
+    last_deep_scan = 0
+
+
+    global last_lh_scan, last_sc_refresh, last_sr_alert
+    last_lh_scan    = 0.0
+    last_sc_refresh = 0.0
+    last_sr_alert   = 0.0
+
+    send(
+        "💀 *MAFIO-BOT* 💀\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "✅ Anti Rate-Limit (~8 req/min)\n"
+        "✅ Smart Cache (15m/1h/4h)\n"
+        "✅ Trailing Stop (`{trail}%` من القمة)\n"
+        "✅ Sector Rotation (12 قطاع)\n"
+        "✅ Anti P&D | Supertrend | Dynamic SL\n"
+        "✅ Sector Flow Tracker\n"
+        "✅ Buffer System (منع التذبذب)\n"
+        "✅ Daily Market Report (00:00 UTC)\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🆕 V16: 🌊 Liquidity Zones يومية\n"
+        "🆕 V16: Sigma تلقائي من التاريخ\n"
+        "🆕 V16: إشارة عند الإغلاق فوق Zone\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚡ إشارات سريعة: 15m/1h (مستمر)\n"
+        "📅 إشارات يومية: 1D (00:00 UTC)\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "₿ BTC: `{btc:+.2f}%` | السوق: `{mst}`\n"
+        "🔥 Hot: `{hot}`".format(
+            trail=TRAIL_DROP_TRIGGER,
+            btc=btc_change_24h,
+            mst=market_state,
+            hot=", ".join(hot_sectors) or "لا يوجد",
+        )
+    )
+
+    cycle = 0
+    flow_cycle = 0
+
+    while True:
+
+        price_map  = {}
+        change_now = {}
+        vol_now    = {}
+        high_map   = {}
+        low_map    = {}
+        try:
+            now = time.time()
+
+
+
+
+
+
+
+            if int(now) % 300 < 12:
+                save_state()
+
+
+            if now - last_ts_scan >= TS_SCAN_EVERY:
+                check_trailing_stops()
+                last_ts_scan = now
+
+
+            if now - last_wl_check >= WL_CHECK_EVERY:
+                check_watchlist_entries()
+                last_wl_check = now
+            if now - last_rt_scan >= RT_SCAN_EVERY:
+                scan_instant_movers()
+            if now - last_rt_scan >= RT_SCAN_EVERY:
+                scan_realtime_liquidity()
+                last_rt_scan = now
+            poll_commands()
+
+
+            if now - last_btc         >= BTC_EVERY:
+                analyze_btc()
+                update_bull_mode(vol_now, change_now)
+            if now - last_sectors     >= SECTORS_EVERY:
+                analyze_sectors()
+                detect_sector_rotation()
+                track_global_liquidity()
+
+            refresh_sector_report()
+
+            if now - last_bottom_scan >= BOTTOM_SCAN_EVERY:
+
+                if now - last_hot_scan >= HOT_SCAN_EVERY:
+                    scan_hot_market()
+                    last_hot_scan = now
+                check_btc_dominance(vol_now)
+                scan_bottom_accumulation()
+
+                if now - last_ath_scan >= ATH_SCAN_EVERY:
+                    scan_ath_distance()
+                    last_ath_scan = now
+
+                last_bottom_scan = now
+
+
+            send_daily_report()
+
+            if now - last_expand      >= EXPAND_EVERY:
+
+                log.info("   - Auto Expand Sectors")
+                auto_expand_sectors()
+                last_expand = now
+            if now - last_stale       >= STALE_EVERY:
+                cleanup()
+                last_stale = now
+
+
+            tickers_now = safe_get(MEXC_24H)
+            if not tickers_now:
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+
+            all_tickers = tickers_now
+
+
+            price_map  = {}
+            change_now = {}
+            vol_now    = {}
+            high_map   = {}
+            low_map    = {}
+            ticker_map = {}
+
+            for t in tickers_now:
+                sym = t.get("symbol","")
+                ticker_map[sym] = t
+                try:
+                    last  = float(t["lastPrice"])
+                    open_ = float(t.get("openPrice", last))
+                    real_change = (last - open_) / open_ * 100 if open_ > 0 else float(t["priceChangePercent"])
+                    price_map[sym]  = last
+                    change_now[sym] = real_change
+                    vol_now[sym]    = float(t["quoteVolume"])
+                    high_map[sym]   = float(t["highPrice"])
+                    low_map[sym]    = float(t["lowPrice"])
+                except (KeyError, ValueError):
+                    pass
+
+            changes_map.update(change_now)
+
+
+            update_coin_vol_history(vol_now)
+
+
+            check_backtest(price_map)
+
+            if now - last_tickers >= TICKERS_EVERY:
+                refresh_tickers()
+                analyze_sectors()
+
+            # Trailing Stop + Signal Progression
+            for sym in list(tracked.keys()):
+                if sym in price_map:
+                    if not check_trailing(sym, price_map[sym]):
+                        pass
+
+
+            update_sector_flow(ticker_map)
+            flow_cycle += 1
+
+
+            if flow_cycle >= FLOW_WINDOW:
+                analyze_sector_flow()
+                flow_cycle = 0
+
+
+            # detect_momentum(price_map, change_now, vol_now, high_map, low_map)
+
+
+            if now - last_ts_scan >= TS_SCAN_EVERY:
+                perf_check(price_map)
+
+
+            if now - last_lh_scan >= 600:
+                scan_hidden_accumulation(price_map, vol_now, changes_map)
+
+            smart_market_scan()
+            scan_defi_llama()
+            scan_funding_rates()
+            scan_volume_surge(price_map, vol_now, changes_map)
+            scan_bottom_fisher(price_map, vol_now, changes_map)
+
+
+            flush_signal_queue(max_send=5)
+
+
+            update_pump_dump_history(price_map, vol_now)
+            scan_pump_dump(price_map, vol_now, change_now)
+
+
+            # scan_market_pulse(price_map, vol_now, change_now)
+
+
+            track_liquidity_flow(vol_now, change_now)
+
+
+
+            if now - last_tps_scan >= TPS_SCAN_EVERY:
+                # ⚙️ تحديث الوضع التكيفي
+                update_adaptive_mode(vol_now, change_now)
+
+                # 🔍 LIQUIDITY RADAR — تتبع السيولة
+                scan_liquidity_radar(vol_now, change_now, price_map)
+
+                # 💥 PRE-EXPLOSION — على وشك الانفجار
+                scan_pre_explosion(price_map, vol_now, change_now)
+
+                # نظام WATCH الأساسي
+                check_liquidity_exit(vol_now, price_map)
+                scan_tps_ats(price_map, vol_now, change_now)
+                scan_lz_tps_fusion(price_map, vol_now, change_now)
+                last_tps_scan = now
+
+
+            if now - last_whale_check >= WHALE_CHECK_EVERY:
+                scan_whale_confirmation(price_map)
+                last_whale_check = now
+
+            if now - last_lh_scan >= LH_SCAN_EVERY:
+                liquidity_hunter(price_map, vol_now, changes_map)
+                last_lh_scan = now
+
+
+            if now - last_sc_refresh >= SC_REFRESH_EVERY:
+                refresh_small_caps()
+
+
+            if now - last_lh_scan < 10 and small_caps:
+                liquidity_hunter_small_caps(price_map, vol_now, changes_map)
+
+            # Deep Scan
+            if now - last_deep_scan >= DEEP_SCAN_EVERY:
+                # V15: pre-score coins before deep scan
+                # sort by: high volume + positive change first
+                pre_scored = []
+                for sym in candidates:
+                    if sym in tracked: continue
+                    price  = price_map.get(sym, 0)
+                    change = changes_map.get(sym, 0)
+                    vol    = vol_now.get(sym, 0)
+                    if price <= 0: continue
+
+                    in_hot       = sym in hot_symbols
+                    in_watchlist = sym in watchlist
+                    wl_priority  = watchlist.get(sym, {}).get("priority","") == "🔥 HIGH"
+
+                    pre_score = (
+                        (vol / 1_000_000) * 0.5 +
+                        max(change, 0) * 0.3 +
+                        (2  if in_hot       else 0) +
+                        (5  if in_watchlist else 0) +
+                        (10 if wl_priority  else 0)
+                    )
+                    pre_scored.append((sym, price, change, pre_score))
+
+
+                pre_scored.sort(key=lambda x: -x[3])
+
+
+                scanned = 0
+                for rank, (sym, price, change, _) in enumerate(pre_scored):
+
+                    fetch_ob = (rank < 20)
+                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
+                    scanned += 1
+                    if scanned % 10 == 0:
+                        time.sleep(0.5)
+
+                last_deep_scan = now
+                log.info(" Deep Scan  | %d ", scanned)
+
+            cycle += 1
+
+            time.sleep(CHECK_INTERVAL)
+
+        except KeyboardInterrupt:
+            send("⛔ *MAFIO-BOT* — تم الإيقاف")
+            break
+        except Exception as e:
+            log.error(": %s", e, exc_info=True)
+            time.sleep(10)
+
+
+if __name__ == "__main__":
+    run()
