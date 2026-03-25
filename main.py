@@ -1,19 +1,27 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - STABLE VERSION (NO CRASH)
+# SNIPER BOT - CLEAN & STABLE VERSION
 
 import time
 import random
+import logging
+from datetime import datetime
 
-print("🚀 SNIPER BOT STARTED SUCCESSFULLY")
+# === LOGGING SETUP ===
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+logging.info("🚀 SNIPER BOT STARTED SUCCESSFULLY")
 
 # === CONFIG ===
 TPS_MIN = 1.08
 VDELTA_MIN = 0.52
 VOL_RATIO_MIN = 1.4
-
 MAX_SIGNALS_PER_DAY = 10
 
 signals_sent = 0
+current_day = datetime.utcnow().date()
 
 # === MOCK DATA (replace with real market data later) ===
 def get_market_data():
@@ -27,27 +35,33 @@ def get_market_data():
 
 # === SNIPER LOGIC ===
 def sniper_entry(data):
-    if (
+    return (
         data["tps"] >= TPS_MIN and
         data["vdelta"] >= VDELTA_MIN and
         data["vol_ratio"] >= VOL_RATIO_MIN and
         data["ats_now"] > data["ats_prev"]
-    ):
-        return True
-    return False
+    )
 
-# === MAIN LOOP (IMPORTANT FIX) ===
+# === MAIN LOOP ===
 while True:
     try:
+        # Reset daily counter
+        if datetime.utcnow().date() != current_day:
+            signals_sent = 0
+            current_day = datetime.utcnow().date()
+            logging.info("🔄 Daily reset of signals counter")
+
         data = get_market_data()
 
         if sniper_entry(data):
             if signals_sent < MAX_SIGNALS_PER_DAY:
                 signals_sent += 1
-                print(f"🔥 SIGNAL #{signals_sent} | DATA: {data}")
+                logging.info(f"🔥 SIGNAL #{signals_sent} | DATA: {data}")
+            else:
+                logging.warning("⚠️ Max signals reached for today")
 
         time.sleep(5)
 
     except Exception as e:
-        print("ERROR:", e)
+        logging.error(f"❌ ERROR: {e}")
         time.sleep(10)
