@@ -2577,6 +2577,22 @@ def analyze_sectors():
         rising    = []
 
         for sym in coins:
+
+# === SNIPER JOKER LOGIC FINAL ===
+try:
+    ats_then = whale_watchlist[sym]["ats_then"]
+
+    early_entry = False
+    if tps >= 1.1 and vdelta >= 65:
+        early_entry = True
+
+    if not (
+        (tps >= 1.2 and vdelta >= 55 and ats >= ats_then * 1.05)
+        or early_entry
+    ):
+        continue
+except Exception:
+    pass
             if sym not in ticker_map:
                 continue
             try:
@@ -4605,7 +4621,7 @@ def scan_bottom_accumulation(price_map=None, vol_now=None):
 
 
 
-        days_in_bottom = sum(1 for p in ph if p <= price_low * 1.20)
+        days_in_bottom = sum(1 for p in ph if p <= price_low * 1.050)
         if days_in_bottom < BOTTOM_MIN_DAYS: continue
 
 
@@ -4785,7 +4801,7 @@ def scan_volume_explosion():
         elif prev_position <= 0.20: power += 2
         else: power += 1
 
-        days_in_bottom = sum(1 for p in ph[:-1] if p <= price_low * 1.20)
+        days_in_bottom = sum(1 for p in ph[:-1] if p <= price_low * 1.050)
         if days_in_bottom >= 14: power += 2
         elif days_in_bottom >= 7: power += 1
 
@@ -8758,7 +8774,7 @@ def detect_hidden_accumulation(kd, ob=None):
     recent_low  = min(lows[-8:])
     price_range = (recent_high - recent_low) / recent_low * 100 if recent_low > 0 else 999
 
-    if price_range < 8.0 and vol_avg3 > avg_vol * 1.2:
+    if price_range < 8.0 and vol_avg3 > avg_vol * 1.05:
         compression_score = max(0, int((8.0 - price_range) * 3))
         score += compression_score
         signals.append("🔒 Compression {:.1f}%".format(price_range))
