@@ -923,8 +923,8 @@ def send(msg, personal_only=False):
 
 
     # FIX: فلتر VDelta محسّن — يعمل فقط على WATCH ALERT (ليس الجوكر أو DIRECT ENTRY)
-    # الجوكر يحتوي "الجوكر يلعب" أو "الجوكر الذهبي" — لا يُحجب أبداً
-    _is_joker_msg = (u'\U0001f0cf' in msg or 'GOLDEN' in msg or 'الجوكر يلعب' in msg)
+    # الجوكر يحتوي "🃏" أو "الجوكر الذهبي" — لا يُحجب أبداً
+    _is_joker_msg = (u'\U0001f0cf' in msg or u'\U0001f48e' in msg or 'الجوكر' in msg)
     _is_direct_msg = 'DIRECT ENTRY' in msg
     if ('WATCH ALERT' in msg and 'نشاط مشبوه' in msg
             and not _is_joker_msg and not _is_direct_msg):
@@ -5863,17 +5863,21 @@ def whale_watch_add(sym, ats, vdelta, price):
     global whale_watchlist
 
     if vdelta < 0.60:
-        log.debug(" whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
+        log.debug(" whale_watch_add rejected: %s | VDelta=%.0f%% < 60%%", sym, vdelta*100)
         return
     if sym not in whale_watchlist:
+        # FIX: أضفنا vol من all_tickers لضبط tier settings صح في الجوكر
+        _ww_vol = float(next((t.get("quoteVolume", 0) for t in all_tickers
+                               if t.get("symbol") == sym), 0)) if all_tickers else 0
         whale_watchlist[sym] = {
             "time":        time.time(),
             "ats_then":    ats,
             "vdelta_then": vdelta,
             "price_then":  price,
+            "vol":         _ww_vol,
         }
-        log.info(" Whale Watch: %s | ATS=%.0f$ | VD=%.0f%%", sym, ats, vdelta*100)
-
+        log.info(" Whale Watch: %s | ATS=%.0f$ | VD=%.0f%% | Vol=%.0fK",
+                 sym, ats, vdelta*100, _ww_vol/1000)
 
 
 
@@ -6144,7 +6148,7 @@ def scan_whale_confirmation(price_map):
 
 
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
-            to_del.append(sym)
+            # FIX: skip only — لا تحذف من القائمة، فقط تجاهل هذه الدورة
             continue
 
         # تجاهل العملات الجديدة اقل من 3 أيام
