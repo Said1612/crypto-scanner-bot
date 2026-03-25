@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - CLEAN & STABLE VERSION
+# SNIPER BOT - FIXED LOG ISSUE (RAILWAY CLEAN)
 
 import time
 import random
 import logging
+import sys
 from datetime import datetime
 
-# === LOGGING SETUP ===
+# === LOGGING FIX (IMPORTANT) ===
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]  # <-- FIX HERE
 )
 
 logging.info("🚀 SNIPER BOT STARTED SUCCESSFULLY")
@@ -23,7 +25,7 @@ MAX_SIGNALS_PER_DAY = 10
 signals_sent = 0
 current_day = datetime.utcnow().date()
 
-# === MOCK DATA (replace with real market data later) ===
+# === MOCK DATA ===
 def get_market_data():
     return {
         "tps": random.uniform(0.9, 1.3),
@@ -33,7 +35,7 @@ def get_market_data():
         "ats_prev": random.uniform(90, 190)
     }
 
-# === SNIPER LOGIC ===
+# === LOGIC ===
 def sniper_entry(data):
     return (
         data["tps"] >= TPS_MIN and
@@ -42,14 +44,14 @@ def sniper_entry(data):
         data["ats_now"] > data["ats_prev"]
     )
 
-# === MAIN LOOP ===
+# === LOOP ===
 while True:
     try:
-        # Reset daily counter
+        # reset daily
         if datetime.utcnow().date() != current_day:
             signals_sent = 0
             current_day = datetime.utcnow().date()
-            logging.info("🔄 Daily reset of signals counter")
+            logging.info("🔄 Daily reset")
 
         data = get_market_data()
 
@@ -57,8 +59,6 @@ while True:
             if signals_sent < MAX_SIGNALS_PER_DAY:
                 signals_sent += 1
                 logging.info(f"🔥 SIGNAL #{signals_sent} | DATA: {data}")
-            else:
-                logging.warning("⚠️ Max signals reached for today")
 
         time.sleep(5)
 
