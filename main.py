@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - TELEGRAM FORCE FIX
+# SNIPER BOT - TELEGRAM FIXED VERSION (Railway Ready)
 
 import time
 import logging
 import sys
+import os
 from datetime import datetime
 import requests
 
@@ -26,8 +27,14 @@ MAX_SIGNALS_PER_DAY = 20
 signals_sent = 0
 current_day = datetime.utcnow().date()
 
-TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_TOKEN"
-CHAT_ID = "PUT_YOUR_CHAT_ID"
+# ✅ FIX: use environment variables from Railway
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
+if not TELEGRAM_TOKEN or not CHAT_ID:
+    logging.error("❌ TELEGRAM_TOKEN or CHAT_ID not set in environment variables")
+else:
+    logging.info("✅ Environment variables loaded successfully")
 
 def clean(n):
     return round(float(n), 4)
@@ -46,7 +53,7 @@ def send_telegram(msg):
     except Exception as e:
         logging.error(f"Telegram Error: {e}")
 
-# 🔥 إرسال رسالة مباشرة عند التشغيل
+# 🔥 test message on startup
 send_telegram("✅ BOT STARTED - IF YOU SEE THIS TELEGRAM WORKS")
 
 def get_market_data():
@@ -103,7 +110,7 @@ while True:
 
         logging.info(f"DATA → TPS:{data['tps']} | VΔ:{data['vdelta']} | VOL:{data['vol_ratio']}")
 
-        # 🔥 إرسال رسالة كل 60 ثانية للتأكد
+        # keep-alive message every 60 sec
         if int(time.time()) % 60 == 0:
             send_telegram(f"📡 BOT RUNNING | PRICE: {data['price']}")
 
