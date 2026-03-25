@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - FIXED VERSION
+# SNIPER BOT - MEXC VERSION (FREE + NO GEO BLOCK)
 
 import time
 import logging
@@ -7,14 +7,16 @@ import sys
 from datetime import datetime
 import requests
 
+# === LOGGING ===
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-logging.info("🚀 SNIPER BOT STARTED (FIXED)")
+logging.info("🚀 SNIPER BOT STARTED (MEXC VERSION)")
 
+# === CONFIG ===
 SYMBOL = "BTCUSDT"
 INTERVAL = "1m"
 
@@ -26,15 +28,18 @@ MAX_SIGNALS_PER_DAY = 10
 signals_sent = 0
 current_day = datetime.utcnow().date()
 
+# === TELEGRAM ===
 TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "PUT_YOUR_CHAT_ID"
 
+# === FORMAT ===
 def clean(n):
     return round(float(n), 2)
 
+# === GET DATA FROM MEXC PUBLIC API ===
 def get_market_data():
     try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={SYMBOL}&interval={INTERVAL}&limit=3"
+        url = f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval={INTERVAL}&limit=3"
         response = requests.get(url, timeout=10)
 
         if response.status_code != 200:
@@ -42,12 +47,8 @@ def get_market_data():
 
         data = response.json()
 
-        # FIX: handle Binance error response
-        if isinstance(data, dict):
-            raise Exception(f"Binance API Error: {data}")
-
-        if len(data) < 3:
-            raise Exception("Not enough kline data")
+        if not isinstance(data, list) or len(data) < 3:
+            raise Exception(f"Bad response: {data}")
 
         last = data[-1]
         prev = data[-2]
@@ -78,6 +79,7 @@ def get_market_data():
         logging.error(f"DATA ERROR: {e}")
         return None
 
+# === LOGIC ===
 def sniper_entry(data):
     return (
         data["tps"] >= TPS_MIN and
@@ -86,6 +88,7 @@ def sniper_entry(data):
         data["ats_now"] > data["ats_prev"]
     )
 
+# === TELEGRAM SEND ===
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -97,6 +100,7 @@ def send_telegram(msg):
     except Exception as e:
         logging.error(f"Telegram Error: {e}")
 
+# === LOOP ===
 while True:
     try:
         if datetime.utcnow().date() != current_day:
