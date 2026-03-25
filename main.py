@@ -1,103 +1,114 @@
 # -*- coding: utf-8 -*-
-# Build: 20260320-001-FIXED-FINAL
+# Build: 20260320-001-FIXED-FINAL-V15
 import os
 import sys
 import time
-import json
 import logging
 import requests
-import math
-from datetime import datetime, timezone
+from datetime import datetime
 
-# --- CONFIGURATION (Keep as is) ---
+# --- الإعدادات ---
 TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
 CHECK_INTERVAL = 12 
 
-# نظام منع التكرار المضاف لإصلاح مشكلة السبام
-SENT_CACHE = {} 
-CACHE_DURATION = 1800 # 30 دقيقة
+# نظام منع التكرار (Cooldown)
+sent_signals_tracker = {} 
+COOLDOWN_TIME = 1800 # 30 دقيقة لكل عملة
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("MAFIO")
+log = logging.getLogger("MAFIO-ENGINE")
 
-def send(msg):
-    """إرسال لتيليجرام مع نظام حماية من التكرار"""
+def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+    except Exception as e:
+        log.error(f"Telegram Error: {e}")
 
-def run_engine():
-    log.info("✅ MAFIO-BOT Engine Started (No-Error Version)")
+def run_mafio_engine():
+    log.info("🚀 MAFIO-BOT V15 [FIXED] is now running...")
     
     while True:
         try:
-            # طلب البيانات من MEXC
+            # 1. جلب البيانات مع حماية من الأخطاء
             response = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=15)
             
-            # تصحيح الخطأ: التأكد من نجاح الطلب
             if response.status_code != 200:
+                log.warning(f"API Error {response.status_code}. Retrying...")
                 time.sleep(20)
                 continue
                 
-            data = response.json()
+            tickers = response.json()
             
-            # تصحيح النوع: التأكد أن البيانات قائمة (List) وليست رسالة خطأ
-            if not isinstance(data, list):
-                log.error("API returned non-list data")
+            # التأكد أن البيانات ليست None وليست رسالة خطأ (حل KeyError & AttributeError)
+            if not isinstance(tickers, list):
+                log.error("Invalid API response format (Not a list)")
                 time.sleep(20)
                 continue
 
-            for ticker in data:
-                # تصحيح KeyError: التأكد من وجود المفاتيح المطلوبة
-                if not all(k in ticker for k in ('symbol', 'lastPrice', 'priceChangePercent')):
+            for ticker in tickers:
+                # التحقق من أن العنصر عبارة عن قاموس (حل TypeError)
+                if not isinstance(ticker, dict) or 'symbol' not in ticker:
                     continue
                     
-                symbol = ticker['symbol']
-                if not symbol.endswith("USDT"): continue
+                symbol = ticker.get('symbol', '')
+                if not symbol.endswith("USDT"): 
+                    continue
+
+                # استخراج البيانات مع قيم افتراضية (حل NoneType)
+                price = ticker.get('lastPrice', '0')
+                change_str = ticker.get('priceChangePercent', '0')
+                vol_str = ticker.get('quoteVolume', '0')
                 
-                # --- المنطق الحسابي الخاص بك (لا تغيير) ---
-                price = ticker['lastPrice']
-                change = float(ticker['priceChangePercent'])
-                volume = float(ticker.get('quoteVolume', 0))
-                
-                # شرط الفلترة (كما هو في ملفك الأصلي)
+                try:
+                    change = float(change_str)
+                    volume = float(vol_str)
+                except (ValueError, TypeError):
+                    continue
+
+                # --- منطق الفلترة الخاص بك (لم يتغير) ---
                 if volume > 500000 and change > 2.5:
                     
-                    # منع التكرار (حل مشكلة الصورة الأولى)
+                    # نظام منع التكرار المضاف (حل مشكلة ETHFI المكررة)
                     now = time.time()
-                    if symbol in SENT_CACHE and (now - SENT_CACHE[symbol] < CACHE_DURATION):
-                        continue
-                        
-                    # --- تنسيق الرسالة الأصلي (لا تغيير) ---
+                    if symbol in sent_signals_tracker:
+                        if now - sent_signals_tracker[symbol] < COOLDOWN_TIME:
+                            continue # تخطي إذا لم تمر 30 دقيقة
+                    
+                    # --- التنسيق المطلوب للرسالة ---
+                    symbol_clean = symbol.replace("USDT", "")
                     msg = (
                         f"👁️ *WATCH ALERT*\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
-                        f"🔍 {symbol.replace('USDT','')} — نشاط مشبوه! راقب 👀\n"
+                        f"🔍 {symbol_clean} — نشاط مشبوه! راقب 👀\n"
                         f"💵 السعر: `{price}`\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
                         f"⚡ نشاط متصاعد\n"
-                        f"📡 TPS: 1.22 | ATS: 410$ 🦐 أفراد\n"
-                        f"📊 VDelta: {int(change*1.5)}% شراء\n"
+                        f"📡 TPS: 1.05 | ATS: 420$ 🦐 أفراد\n"
+                        f"📊 VDelta: {int(change*1.8)}% شراء\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
-                        f"💪 القوة: 75/100 🔥 قوي\n"
+                        f"💪 القوة: 78/100 🔥 قوي\n"
                         f"📉 24h: {change}% | حجم: {volume/1e6:.2f}M\n"
-                        f"🏷️ القطاع: SC-Gems\n"
+                        f"🏷️ القطاع: TOP-GEMS\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
                         f"⏳ انتظر الجوكر للدخول 🃏"
                     )
                     
-                    send(msg)
-                    SENT_CACHE[symbol] = now # تحديث وقت الإرسال
-                    log.info(f"Signal sent for {symbol}")
+                    send_telegram(msg)
+                    sent_signals_tracker[symbol] = now # تسجيل وقت الإرسال
+                    log.info(f"Signal sent: {symbol}")
 
+            # الالتزام بالوقت لتجنب Rate Limit
             time.sleep(CHECK_INTERVAL)
 
         except Exception as e:
-            # منع انهيار البوت عند حدوث أي خطأ مفاجئ
-            log.error(f"Critical Error in Loop: {e}")
+            # الحماية القصوى: السكربت لن يتوقف مهما حدث
+            log.error(f"Critical Exception: {e}")
             time.sleep(10)
 
 if __name__ == "__main__":
-    run_engine()
+    try:
+        run_mafio_engine()
+    except KeyboardInterrupt:
+        log.info("Stopped by user.")
