@@ -2577,22 +2577,6 @@ def analyze_sectors():
         rising    = []
 
         for sym in coins:
-
-# === SNIPER JOKER LOGIC FINAL ===
-try:
-    ats_then = whale_watchlist[sym]["ats_then"]
-
-    early_entry = False
-    if tps >= 1.1 and vdelta >= 65:
-        early_entry = True
-
-    if not (
-        (tps >= 1.2 and vdelta >= 55 and ats >= ats_then * 1.05)
-        or early_entry
-    ):
-        continue
-except Exception:
-    pass
             if sym not in ticker_map:
                 continue
             try:
