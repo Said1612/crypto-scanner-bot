@@ -123,11 +123,11 @@ EXTRA_COINS = [
     "NEARUSDT", "SOLUSDT", "AVAXUSDT", "ADAUSDT",
 ]
 
-TPS_SPIKE      = 1.6
-TPS_MAX_CHANGE = 7.0
-ATS_WHALE      = 3000
-ATS_RETAIL     = 300
-VDELTA_STRONG  = 0.62
+TPS_SPIKE      = 2.0
+TPS_MAX_CHANGE = 10.0
+ATS_WHALE      = 5000
+ATS_RETAIL     = 500
+VDELTA_STRONG  = 0.70
 TPS_COOLDOWN   = 7200
 TPS_SCAN_EVERY = 300
 BTC_CRASH_1H       = -1.5
@@ -1128,12 +1128,8 @@ def poll_commands():
                         base     = s.replace("USDT","")
                         elapsed  = int((now_t - v["time"]) / 60)
                         ats_then = v.get("ats_then", 0)
-    if ats < whale_watchlist[sym]["ats_then"] * 1.2:
-        continue
                         txt += "👁️ *{}* | منذ {} دقيقة | ATS كان: {:.0f}$\n".format(
                             base, elapsed, ats_then)
-    if ats < whale_watchlist[sym]["ats_then"] * 1.2:
-        continue
                     txt += "━━━━━━━━━━━━━━━━━━\n"
                     txt += "⏳ _الجوكر يراقب — ينتظر الحيتان_ 🐋"
                     send(txt)
@@ -5724,9 +5720,9 @@ def refresh_tickers():
 # TPS/ATS + Volume Delta
 
 TPS_LIMIT         = 100
-TPS_SPIKE      = 1.6
+TPS_SPIKE         = 2.0
 ATS_WHALE         = 2000
-ATS_RETAIL     = 300
+ATS_RETAIL        = 500
 VDELTA_STRONG     = 0.65
 TPS_COOLDOWN      = 7200
 TPS_SCAN_EVERY    = 300
@@ -5868,8 +5864,6 @@ def whale_watch_add(sym, ats, vdelta, price):
         whale_watchlist[sym] = {
             "time":        time.time(),
             "ats_then":    ats,
-    if ats < whale_watchlist[sym]["ats_then"] * 1.2:
-        continue
             "vdelta_then": vdelta,
             "price_then":  price,
         }
@@ -6223,12 +6217,8 @@ def scan_whale_confirmation(price_map):
 
         price_then  = data["price_then"]
         ats_then    = data["ats_then"]
-    if ats < whale_watchlist[sym]["ats_then"] * 1.2:
-        continue
         price_chg   = (price - price_then) / price_then * 100 if price_then > 0 else 0
         ats_mult    = ats / ats_then if ats_then > 0 else 1.0
-    if ats < whale_watchlist[sym]["ats_then"] * 1.2:
-        continue
         elapsed_min = int((now - data["time"]) / 60)
 
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
@@ -6249,8 +6239,6 @@ def scan_whale_confirmation(price_map):
                 "📊 *التطور:*\n"
                 "  🦐 قبل `{min}` دقيقة: ATS `{ats_b:.0f}$`\n".format(
                     min=elapsed_min, ats_b=ats_then) +
-    if ats < whale_watchlist[sym]["ats_then"] * 1.2:
-        continue
                 "  {wt} الآن: ATS `{ats:.0f}$` (+{mult:.1f}×) 🔥\n".format(
                     wt=whale_type, ats=ats, mult=ats_mult) +
                 "━━━━━━━━━━━━━━━━━━\n"
@@ -6509,7 +6497,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
 
-        if vdelta < 0.60:
+        if vdelta < 0.66:
             continue
 
         if score < LZ_TPS_SCORE_MIN:
@@ -6559,8 +6547,6 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                     "time":       now,
                     "price_then": price,
                     "ats_then":   ats,
-    if ats < whale_watchlist[sym]["ats_then"] * 1.2:
-        continue
                     "reason":     "LZ+TPS silent add",
                 }
                 log.info(" LZ+TPS silent watchlist add: %s", sym)
@@ -7993,23 +7979,23 @@ def get_coin_tier(vol_24h):
 
 TIER_SETTINGS = {
     "big": {
-        "vdelta_min":  0.58,
-        "ats_min":     150,
-        "tps_spike":   1.6,
+        "vdelta_min":  0.60,
+        "ats_min":     200,
+        "tps_spike":   2.0,
         "vol_min":     10_000_000,
         "label":       "Big Cap 🏦",
     },
     "mid": {
-        "vdelta_min":  0.56,
-        "ats_min":     80,
-        "tps_spike":   1.6,
+        "vdelta_min":  0.58,
+        "ats_min":     100,    # ATS 200$+
+        "tps_spike":   2.0,
         "vol_min":     1_000_000,
         "label":       "Mid Cap 📊",
     },
     "small": {
-        "vdelta_min":  0.54,
-        "ats_min":     40,
-        "tps_spike":   2.0,
+        "vdelta_min":  0.55,
+        "ats_min":     50,
+        "tps_spike":   2.5,
         "vol_min":     20_000,
         "label":       "Small Cap 🚀",
     },
