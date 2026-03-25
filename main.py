@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - FIXED LOG ISSUE (RAILWAY CLEAN)
+# SNIPER BOT - CLEAN + TELEGRAM READY + NICE NUMBERS
 
 import time
 import random
@@ -7,14 +7,14 @@ import logging
 import sys
 from datetime import datetime
 
-# === LOGGING FIX (IMPORTANT) ===
+# === LOGGING ===
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]  # <-- FIX HERE
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-logging.info("🚀 SNIPER BOT STARTED SUCCESSFULLY")
+logging.info("🚀 SNIPER BOT STARTED")
 
 # === CONFIG ===
 TPS_MIN = 1.08
@@ -25,14 +25,18 @@ MAX_SIGNALS_PER_DAY = 10
 signals_sent = 0
 current_day = datetime.utcnow().date()
 
-# === MOCK DATA ===
+# === FORMAT FUNCTION (FIX FLOAT ISSUE) ===
+def clean(n):
+    return round(n, 2)
+
+# === MOCK DATA (KEEP UNTIL API RESTORED) ===
 def get_market_data():
     return {
-        "tps": random.uniform(0.9, 1.3),
-        "vdelta": random.uniform(0.4, 0.7),
-        "vol_ratio": random.uniform(1.0, 2.0),
-        "ats_now": random.uniform(100, 200),
-        "ats_prev": random.uniform(90, 190)
+        "tps": clean(random.uniform(0.9, 1.3)),
+        "vdelta": clean(random.uniform(0.4, 0.7)),
+        "vol_ratio": clean(random.uniform(1.0, 2.0)),
+        "ats_now": clean(random.uniform(100, 200)),
+        "ats_prev": clean(random.uniform(90, 190))
     }
 
 # === LOGIC ===
@@ -44,21 +48,38 @@ def sniper_entry(data):
         data["ats_now"] > data["ats_prev"]
     )
 
+# === TELEGRAM (PUT YOUR DATA BACK HERE) ===
+def send_telegram(msg):
+    try:
+        # ⚠️ رجع التوكن ديالك هنا
+        # مثال:
+        # import requests
+        # TOKEN = "YOUR_TOKEN"
+        # CHAT_ID = "YOUR_CHAT_ID"
+        # url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        # requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        pass
+    except Exception as e:
+        logging.error(f"Telegram Error: {e}")
+
 # === LOOP ===
 while True:
     try:
-        # reset daily
         if datetime.utcnow().date() != current_day:
             signals_sent = 0
             current_day = datetime.utcnow().date()
-            logging.info("🔄 Daily reset")
+            logging.info("🔄 Reset signals")
 
         data = get_market_data()
 
         if sniper_entry(data):
             if signals_sent < MAX_SIGNALS_PER_DAY:
                 signals_sent += 1
-                logging.info(f"🔥 SIGNAL #{signals_sent} | DATA: {data}")
+
+                message = f"🔥 SIGNAL #{signals_sent}\nTPS: {data['tps']} | VΔ: {data['vdelta']} | VOL: {data['vol_ratio']}"
+
+                logging.info(message)
+                send_telegram(message)
 
         time.sleep(5)
 
