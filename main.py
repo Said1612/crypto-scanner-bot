@@ -125,7 +125,7 @@ EXTRA_COINS = [
 
 TPS_SPIKE      = 2.0
 TPS_MAX_CHANGE = 10.0
-ATS_WHALE      = 5000
+ATS_WHALE      = 2000   # FIX: كان 5000 خطأ — يتطابق مع التعريف الصحيح في الأسفل
 ATS_RETAIL     = 500
 VDELTA_STRONG  = 0.70
 TPS_COOLDOWN   = 7200
@@ -922,13 +922,18 @@ def send(msg, personal_only=False):
     """
 
 
-    if 'WATCH ALERT' in msg and 'نشاط مشبوه' in msg:
+    # FIX: فلتر VDelta محسّن — يعمل فقط على WATCH ALERT (ليس الجوكر أو DIRECT ENTRY)
+    # الجوكر يحتوي "الجوكر يلعب" أو "الجوكر الذهبي" — لا يُحجب أبداً
+    _is_joker_msg = (u'\U0001f0cf' in msg or 'GOLDEN' in msg or 'الجوكر يلعب' in msg)
+    _is_direct_msg = 'DIRECT ENTRY' in msg
+    if ('WATCH ALERT' in msg and 'نشاط مشبوه' in msg
+            and not _is_joker_msg and not _is_direct_msg):
         import re as _re
         # نبحث عن VDelta بعد كلمة VDelta مباشرة
-        vd_match = _re.search(r"\U0001f4ca VDelta: `?(\d+)%", msg) or _re.search(r"VDelta[^\n]*?(\d+)%[^\n]*", msg)
+        vd_match = (_re.search(r"VDelta: `?(\d+)%", msg) or
+                    _re.search(r"VDelta[^\n]*?(\d+)%", msg))
         if vd_match:
             vd_val = int(vd_match.group(1))
-
             vol_match = _re.search(r'حجم[^\d]*([\d\.]+)M', msg)
             vol_m = float(vol_match.group(1)) if vol_match else 1.0
             vol_usdt = vol_m * 1_000_000
@@ -10543,39 +10548,144 @@ def _send_daily_report_body(today, now_utc):
     _sell_vol    = float(sell_vol)        if sell_vol        is not None else 0.0
     _total_vol   = float(total_market_vol) if total_market_vol is not None else 0.0
 
+    # === بناء بلوكات إضافية للتقرير المطور ===
+
+    # 1. BTC Dominance
+    _btcd_now = get_btc_dominance(vol_now) if vol_now else 0.0
+    _btcd_line = ""
+    if _btcd_now > 0:
+        _btcd_trend_txt = ""
+        if len(btcd_history) >= 2:
+            _btcd_chg = _btcd_now - btcd_history[0]
+            if _btcd_chg <= -1.5:
+                _btcd_trend_txt = "📉 ينزل `{:+.2f}%` ← Alt Season قادم!".format(_btcd_chg)
+            elif _btcd_chg >= 1.5:
+                _btcd_trend_txt = "📈 يرتفع `{:+.2f}%` ← BTC يسيطر ⚠️".format(_btcd_chg)
+            else:
+                _btcd_trend_txt = "➡️ مستقر `{:+.2f}%`".format(_btcd_chg)
+        _btcd_line = "  📊 BTC.D: `{:.2f}%` {}\n".format(_btcd_now, _btcd_trend_txt)
+
+    # 2. أفضل القطاعات اليوم
+    _hot_sectors_block = ""
+    if hot_sectors:
+        _hot_sectors_block = "🔥 *القطاعات الساخنة اليوم:*\n"
+        for _hs in hot_sectors[:5]:
+            _hs_coins = SECTORS.get(_hs, [])
+            _hs_top = []
+            for _hsc in _hs_coins:
+                _hsc_ch = change_now.get(_hsc, 0)
+                _hsc_vol = vol_now.get(_hsc, 0)
+                if _hsc_ch > 0 and _hsc_vol > 200_000:
+                    _hs_top.append((_hsc.replace("USDT",""), _hsc_ch))
+            _hs_top.sort(key=lambda x: -x[1])
+            _hs_coins_txt = " | ".join("*{}* +{:.1f}%".format(n, c) for n, c in _hs_top[:3])
+            _hot_sectors_block += "  🔥 *{}*: {}\n".format(_hs, _hs_coins_txt or "—")
+        _hot_sectors_block += "━━━━━━━━━━━━━━━━━━\n"
+
+    # 3. نسبة نجاح الإشارات (Win Rate) من perf_signals
+    _wr_block = ""
+    try:
+        _total_sig = 0; _win_sig = 0; _best_sig = None; _worst_sig = None
+        for _sid, _sd in perf_signals.items():
+            _r4h = _sd.get("result_4h")
+            if _r4h is not None:
+                _total_sig += 1
+                if _r4h > 0: _win_sig += 1
+                if _best_sig is None or _r4h > _best_sig[1]:
+                    _best_sig = (_sd["sym"].replace("USDT",""), _r4h)
+                if _worst_sig is None or _r4h < _worst_sig[1]:
+                    _worst_sig = (_sd["sym"].replace("USDT",""), _r4h)
+        if _total_sig > 0:
+            _wr_pct = round(_win_sig / _total_sig * 100)
+            _wr_icon = "🟢" if _wr_pct >= 65 else ("🟡" if _wr_pct >= 45 else "🔴")
+            _wr_block = (
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📈 *Win Rate الإشارات:* {} `{}%` ({}/{} إشارة)\n".format(
+                    _wr_icon, _wr_pct, _win_sig, _total_sig)
+            )
+            if _best_sig:
+                _wr_block += "  🏆 أفضل: *{}* `{:+.1f}%`".format(_best_sig[0], _best_sig[1])
+            if _worst_sig and _worst_sig[1] < 0:
+                _wr_block += "  |  💀 أسوأ: *{}* `{:+.1f}%`".format(_worst_sig[0], _worst_sig[1])
+            _wr_block += "\n"
+    except Exception:
+        _wr_block = ""
+
+    # 4. أفضل وأسوأ العملات اليوم
+    top_gainers.sort(key=lambda x: -x[1])
+    top_losers.sort(key=lambda x: x[1])
+    _gainers_block = ""
+    _losers_block = ""
+    if top_gainers:
+        _gainers_block = "🚀 *أفضل العملات اليوم:*\n"
+        for _gbase, _gch, _gvol in top_gainers[:5]:
+            _gvol_txt = "{:.0f}M".format(_gvol/1e6) if _gvol >= 1e6 else "{:.0f}K".format(_gvol/1e3)
+            _gainers_block += "  🟢 *{}* `+{:.1f}%` 💧{}\n".format(_gbase, _gch, _gvol_txt)
+    if top_losers:
+        _losers_block = "📉 *أكثر هبوطاً:*\n"
+        for _lbase, _lch, _lvol in top_losers[:3]:
+            _losers_block += "  🔴 *{}* `{:.1f}%`\n".format(_lbase, _lch)
+
+    # 5. توصية الدخول الواضحة
+    _rec_score = 0
+    if _buy_pct >= 60:       _rec_score += 2
+    if btc_tps_stats and btc_tps_stats.get("vdelta", 0.5) >= 0.65: _rec_score += 2
+    if hot_sectors:          _rec_score += 1
+    if _btcd_now > 0 and len(btcd_history) >= 2 and (_btcd_now - btcd_history[0]) <= -1.0: _rec_score += 2
+    if market_state == "SAFE":    _rec_score += 2
+    elif market_state == "CAUTION": _rec_score += 0
+    else:                          _rec_score -= 3
+
+    if _rec_score >= 6:
+        _final_rec = "✅ *ادخل السوق — ظروف مثالية*\n💡 _Buy Pct مرتفع + حيتان نشطون + قطاعات ساخنة_"
+    elif _rec_score >= 4:
+        _final_rec = "🔵 *ادخل بحذر — ظروف جيدة*\n💡 _ابحث عن إشارات قوية فقط_"
+    elif _rec_score >= 2:
+        _final_rec = "🟡 *انتظر — ظروف مختلطة*\n💡 _لا تفتح مراكز جديدة حتى يتضح الاتجاه_"
+    else:
+        _final_rec = "🔴 *ابتعد — ظروف سلبية*\n💡 _ضغط بيعي قوي — انتظر الاستقرار_"
+
+    # === بناء الرسالة الرئيسية المطورة ===
     msg = (
-        "📊 *DAILY REPORT* 📅\n"
-        "🗓️ `{date}` — إغلاق اليوم\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 *DAILY REPORT — MAFIO BOT* 📅\n"
+        "🗓️ `{date}` | 🕐 `{time}` UTC\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "{mkt_icon} *السوق: {mkt_state}*\n"
-        "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\n"
+        "₿ BTC: `{btc:+.2f}%` (24h) | `{btc1h:+.2f}%` (1h)\n"
         "{btc_tps_line}"
-        "Ξ ETH 24h: `{eth:+.2f}%`\n"
+        "Ξ ETH: `{eth:+.2f}%` (24h)\n"
         "{eth_tps_line}"
+        "{btcd_line}"
         "━━━━━━━━━━━━━━━━━━\n"
         "{whale_icon} {verdict}\n"
         "_{desc}_\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 *تدفق السيولة (Order Flow):*\n"
+        "📊 *Order Flow — تدفق السيولة:*\n"
         "{bar}\n"
         "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol})\n"
         "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol})\n"
+        "  {arrow} حجم اليوم: `{total_vol}` | عن أمس: `{vol_ch}`\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "💰 *تدفق رأس المال:*\n"
-        "  {arrow} حجم السوق: `{vol_ch}` عن أمس\n"
-        "  📦 إجمالي: `{total_vol}` USDT\n"
+        "{hot_sectors}"
+        "{gainers}"
+        "{losers}"
         "━━━━━━━━━━━━━━━━━━\n"
         "💸 *تدفق السيولة بين القطاعات:*\n"
         "{flow}"
+        "{wr_block}"
         "━━━━━━━━━━━━━━━━━━\n"
-        "{action}"
+        "🎯 *التوصية النهائية:*\n"
+        "{final_rec}"
     ).format(
         date=today,
+        time=now_utc.strftime("%H:%M"),
         whale_icon=whale_icon,
         verdict=whale_verdict,
         desc=whale_desc,
         btc=_btc, eth=_eth,
         btc1h=_btc1h,
+        btcd_line=_btcd_line,
         btc_tps_line=(
             "  🐋 BTC TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
                 btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
@@ -10596,21 +10706,18 @@ def _send_daily_report_body(today, now_utc):
         ),
         mkt_icon=_mkt_icons.get(_display_state,"📊"), mkt_state=_display_state,
         bar=mkt_bar,
-        rp=rising_pct,  fp=falling_pct,
-        rising=rising,  falling=falling,
-        total=total_coins,
         buy=_buy_pct,    sell=_sell_pct,
         buy_vol=("{:.2f}B".format(_buy_vol/1_000_000_000) if _buy_vol>=1_000_000_000 else "{:.0f}M".format(_buy_vol/1_000_000)),
         sell_vol=("{:.2f}B".format(_sell_vol/1_000_000_000) if _sell_vol>=1_000_000_000 else "{:.0f}M".format(_sell_vol/1_000_000)),
         arrow=vol_arrow,
-        vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة 📊"),
-        
+        vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "📊 جديد"),
         total_vol=("{:.2f}B".format(_total_vol/1_000_000_000) if _total_vol>=1_000_000_000 else "{:.0f}M".format(_total_vol/1_000_000)),
-        vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة"),
-
+        hot_sectors=_hot_sectors_block,
+        gainers=_gainers_block,
+        losers=_losers_block,
         flow=flow_sum,
-        action=whale_action,
-
+        wr_block=_wr_block,
+        final_rec=_final_rec,
     )
 
 
