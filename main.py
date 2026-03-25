@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - MEXC VERSION (FREE + NO GEO BLOCK)
+# SNIPER BOT - MEXC IMPROVED (SMART SIGNALS)
 
 import time
 import logging
@@ -7,39 +7,35 @@ import sys
 from datetime import datetime
 import requests
 
-# === LOGGING ===
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-logging.info("🚀 SNIPER BOT STARTED (MEXC VERSION)")
+logging.info("🚀 SNIPER BOT STARTED (MEXC IMPROVED)")
 
-# === CONFIG ===
 SYMBOL = "BTCUSDT"
 INTERVAL = "1m"
 
-TPS_MIN = 1.08
-VDELTA_MIN = 0.52
-VOL_RATIO_MIN = 1.4
-MAX_SIGNALS_PER_DAY = 10
+# === IMPROVED THRESHOLDS ===
+TPS_MIN = 1.001
+VDELTA_MIN = 0.25
+VOL_RATIO_MIN = 1.2
+MAX_SIGNALS_PER_DAY = 20
 
 signals_sent = 0
 current_day = datetime.utcnow().date()
 
-# === TELEGRAM ===
 TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "PUT_YOUR_CHAT_ID"
 
-# === FORMAT ===
 def clean(n):
-    return round(float(n), 2)
+    return round(float(n), 4)
 
-# === GET DATA FROM MEXC PUBLIC API ===
 def get_market_data():
     try:
-        url = f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval={INTERVAL}&limit=3"
+        url = f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval={INTERVAL}&limit=5"
         response = requests.get(url, timeout=10)
 
         if response.status_code != 200:
@@ -60,7 +56,6 @@ def get_market_data():
         close_price = float(last[4])
 
         tps = clean(close_price / open_price)
-
         vdelta = clean((volume_now - volume_prev) / volume_prev) if volume_prev != 0 else 0
         vol_ratio = clean(volume_now / volume_prev) if volume_prev != 0 else 1
 
@@ -72,14 +67,14 @@ def get_market_data():
             "vdelta": vdelta,
             "vol_ratio": vol_ratio,
             "ats_now": ats_now,
-            "ats_prev": ats_prev
+            "ats_prev": ats_prev,
+            "price": close_price
         }
 
     except Exception as e:
         logging.error(f"DATA ERROR: {e}")
         return None
 
-# === LOGIC ===
 def sniper_entry(data):
     return (
         data["tps"] >= TPS_MIN and
@@ -88,19 +83,16 @@ def sniper_entry(data):
         data["ats_now"] > data["ats_prev"]
     )
 
-# === TELEGRAM SEND ===
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        response = requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-
-        if response.status_code != 200:
-            logging.error(f"Telegram HTTP Error: {response.status_code} | {response.text}")
-
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except Exception as e:
         logging.error(f"Telegram Error: {e}")
 
-# === LOOP ===
+# === SEND START MESSAGE ===
+send_telegram("✅ BOT STARTED SUCCESSFULLY")
+
 while True:
     try:
         if datetime.utcnow().date() != current_day:
@@ -116,20 +108,29 @@ while True:
 
         logging.info(f"DATA → TPS:{data['tps']} | VΔ:{data['vdelta']} | VOL:{data['vol_ratio']}")
 
-        if sniper_entry(data):
-            if signals_sent < MAX_SIGNALS_PER_DAY:
-                signals_sent += 1
+        if sniper_entry(data) and signals_sent < MAX_SIGNALS_PER_DAY:
+            signals_sent += 1
 
-                message = (
-                    f"🔥 SIGNAL #{signals_sent}\n"
-                    f"Symbol: {SYMBOL}\n"
-                    f"TPS: {data['tps']}\n"
-                    f"VΔ: {data['vdelta']}\n"
-                    f"VOL: {data['vol_ratio']}"
-                )
+            strength = int((data["tps"]*100 + data["vdelta"]*100 + data["vol_ratio"]*100)/3)
 
-                logging.info(message)
-                send_telegram(message)
+            message = (
+                f"👁️ WATCH ALERT\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🔍 {SYMBOL} — نشاط متصاعد\n"
+                f"💵 السعر: {data['price']}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"⚡ TPS: {data['tps']}\n"
+                f"📊 VDelta: {round(data['vdelta']*100,2)}%\n"
+                f"📊 Volume Ratio: {data['vol_ratio']}\n"
+                f"💰 ATS: {data['ats_now']}$\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"💪 القوة: {strength}/100\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🃏 فرصة محتملة — راقب الدخول"
+            )
+
+            logging.info(message)
+            send_telegram(message)
 
         time.sleep(5)
 
