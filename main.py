@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - MEXC IMPROVED (SMART SIGNALS)
+# SNIPER BOT - TELEGRAM FORCE FIX
 
 import time
 import logging
@@ -13,12 +13,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-logging.info("🚀 SNIPER BOT STARTED (MEXC IMPROVED)")
+logging.info("🚀 BOT STARTED")
 
 SYMBOL = "BTCUSDT"
 INTERVAL = "1m"
 
-# === IMPROVED THRESHOLDS ===
 TPS_MIN = 1.001
 VDELTA_MIN = 0.25
 VOL_RATIO_MIN = 1.2
@@ -33,18 +32,29 @@ CHAT_ID = "PUT_YOUR_CHAT_ID"
 def clean(n):
     return round(float(n), 4)
 
+def send_telegram(msg):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        r = requests.post(url, data={
+            "chat_id": CHAT_ID,
+            "text": msg
+        }, timeout=10)
+
+        logging.info(f"TELEGRAM STATUS: {r.status_code}")
+        logging.info(f"TELEGRAM RESPONSE: {r.text}")
+
+    except Exception as e:
+        logging.error(f"Telegram Error: {e}")
+
+# 🔥 إرسال رسالة مباشرة عند التشغيل
+send_telegram("✅ BOT STARTED - IF YOU SEE THIS TELEGRAM WORKS")
+
 def get_market_data():
     try:
-        url = f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval={INTERVAL}&limit=5"
+        url = f"https://api.mexc.com/api/v3/klines?symbol={SYMBOL}&interval={INTERVAL}&limit=3"
         response = requests.get(url, timeout=10)
 
-        if response.status_code != 200:
-            raise Exception(f"HTTP {response.status_code}")
-
         data = response.json()
-
-        if not isinstance(data, list) or len(data) < 3:
-            raise Exception(f"Bad response: {data}")
 
         last = data[-1]
         prev = data[-2]
@@ -83,23 +93,8 @@ def sniper_entry(data):
         data["ats_now"] > data["ats_prev"]
     )
 
-def send_telegram(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except Exception as e:
-        logging.error(f"Telegram Error: {e}")
-
-# === SEND START MESSAGE ===
-send_telegram("✅ BOT STARTED SUCCESSFULLY")
-
 while True:
     try:
-        if datetime.utcnow().date() != current_day:
-            signals_sent = 0
-            current_day = datetime.utcnow().date()
-            logging.info("🔄 Reset signals")
-
         data = get_market_data()
 
         if data is None:
@@ -108,28 +103,12 @@ while True:
 
         logging.info(f"DATA → TPS:{data['tps']} | VΔ:{data['vdelta']} | VOL:{data['vol_ratio']}")
 
-        if sniper_entry(data) and signals_sent < MAX_SIGNALS_PER_DAY:
-            signals_sent += 1
+        # 🔥 إرسال رسالة كل 60 ثانية للتأكد
+        if int(time.time()) % 60 == 0:
+            send_telegram(f"📡 BOT RUNNING | PRICE: {data['price']}")
 
-            strength = int((data["tps"]*100 + data["vdelta"]*100 + data["vol_ratio"]*100)/3)
-
-            message = (
-                f"👁️ WATCH ALERT\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"🔍 {SYMBOL} — نشاط متصاعد\n"
-                f"💵 السعر: {data['price']}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"⚡ TPS: {data['tps']}\n"
-                f"📊 VDelta: {round(data['vdelta']*100,2)}%\n"
-                f"📊 Volume Ratio: {data['vol_ratio']}\n"
-                f"💰 ATS: {data['ats_now']}$\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"💪 القوة: {strength}/100\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"🃏 فرصة محتملة — راقب الدخول"
-            )
-
-            logging.info(message)
+        if sniper_entry(data):
+            message = f"🔥 SIGNAL {SYMBOL} | PRICE {data['price']}"
             send_telegram(message)
 
         time.sleep(5)
