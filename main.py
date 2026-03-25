@@ -6192,30 +6192,56 @@ def scan_whale_confirmation(price_map):
             continue
 
 
+        # تحديد نوع العملة — صغيرة أم كبيرة
+        _is_small_cap = _j_ats <= 50 or _j_vol < 2_000_000
+        _vdelta_very_strong = vdelta >= 0.80
+
+        # فلتر التوزيع — للعملات الكبيرة فقط أو إذا التوزيع صريح جداً
         _is_dist, _dist_reason = detect_distribution(sym, price, vdelta, ats)
         if _is_dist:
-            log.info(" DISTRIBUTION: %s | %s", sym, _dist_reason)
-            continue
+            # العملات الصغيرة بـ VDelta قوي جداً: تجاهل فلتر التوزيع
+            if _is_small_cap and _vdelta_very_strong:
+                log.info(" DIST SKIP (SmallCap+VDelta) %s | %s", sym, _dist_reason)
+            else:
+                log.info(" DISTRIBUTION: %s | %s", sym, _dist_reason)
+                continue
 
 
+        # فلتر الذيول (Wick) — مخفف للعملات الصغيرة بـ VDelta ≥ 75%
         _wick_ok, _wick_reason = calc_wick_filter(sym, "15m")
         if not _wick_ok:
-            log.info(" WICK FILTER: %s | %s", sym, _wick_reason)
-            continue
+            if _is_small_cap and vdelta >= 0.75:
+                log.info(" WICK SKIP (SmallCap) %s | %s", sym, _wick_reason)
+            else:
+                log.info(" WICK FILTER: %s | %s", sym, _wick_reason)
+                continue
 
 
+        # فلتر MACD — مخفف: يُتجاوز إذا VDelta ≥ 80% أو العملة صغيرة بـ VDelta ≥ 72%
         _macd_hist = calc_macd_histogram(sym, "1h")
         if _macd_hist < 0:
-            log.info(" MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
-            continue
+            _macd_bypass = (
+                (_vdelta_very_strong and _macd_hist > -0.00015) or
+                (_is_small_cap and vdelta >= 0.72 and _macd_hist > -0.00050)
+            )
+            if _macd_bypass:
+                log.info(" MACD BYPASS (VDelta %.0f%%) %s | hist=%.6f", vdelta*100, sym, _macd_hist)
+            else:
+                log.info(" MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
+                continue
 
 
+        # فلتر CVD — مخفف للعملات الصغيرة بـ VDelta قوي
         _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER")
         if not _cvd_ok:
-            log.info(" CVD FILTER: %s | %s", sym, _cvd_trend)
-            continue
+            if _is_small_cap and _vdelta_very_strong:
+                log.info(" CVD SKIP (SmallCap+VDelta) %s | %s", sym, _cvd_trend)
+            else:
+                log.info(" CVD FILTER: %s | %s", sym, _cvd_trend)
+                continue
 
 
+        # فلتر Order Book — يبقى صارماً دائماً (strong_sell = خطر حقيقي)
         _ob = calc_ob_imbalance(sym)
         _ob_ratio  = _ob.get("ratio", 1.0)
         _ob_signal = _ob.get("signal", "neutral")
@@ -8067,6 +8093,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
         _tier    = get_tier_settings(vol)
         _vd_min  = _tier["vdelta_min"]
+        _ats_min = _tier["ats_min"]   # 200 big | 100 mid | 50 small
+        _is_sc   = _tier["label"].startswith("Small")
 
 
         if vdelta <= _vd_min - 0.001:
@@ -8082,20 +8110,41 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         score   = 0
         signals = []
 
-        if ratio >= TPS_SPIKE:
-            score += min(int(ratio * 10), 40)
-            signals.append("⚡ TPS {:.1f}×".format(ratio))
-        elif ratio >= 2.0:
-            score += 15
-            signals.append("⚡ TPS {:.1f}×".format(ratio))
+        # ── TPS ──────────────────────────────────────────────────────
+        # العملات الصغيرة: TPS المنخفض (تجميع هادئ) = إشارة إيجابية
+        if _is_sc:
+            if tps <= 1.0 and vdelta >= 0.72:
+                # تجميع صامت — أهم من الـ spike للعملات الصغيرة
+                score += 20
+                signals.append("🐢 TPS {:.2f} تجميع هادئ".format(tps))
+            elif ratio >= TPS_SPIKE:
+                score += min(int(ratio * 8), 30)
+                signals.append("⚡ TPS {:.1f}×".format(ratio))
+        else:
+            # للعملات الكبيرة: نريد spike حقيقي
+            if ratio >= TPS_SPIKE:
+                score += min(int(ratio * 10), 40)
+                signals.append("⚡ TPS {:.1f}×".format(ratio))
+            elif ratio >= 2.0:
+                score += 15
+                signals.append("⚡ TPS {:.1f}×".format(ratio))
 
+        # ── ATS — حسب الـ Tier ───────────────────────────────────────
         if ats >= ATS_WHALE:
             score += 35
             signals.append("🐋 ATS {:.0f}$".format(ats))
         elif ats >= 2000:
             score += 20
             signals.append("🐟 ATS {:.0f}$".format(ats))
+        elif _is_sc and ats >= _ats_min:
+            # العملات الصغيرة: ATS 50$+ كافٍ
+            score += 25
+            signals.append("🦐→🐟 ATS {:.0f}$ [SmallCap]".format(ats))
+        elif not _is_sc and ats >= 150:
+            score += 12
+            signals.append("🦐 ATS {:.0f}$".format(ats))
 
+        # ── VDelta ───────────────────────────────────────────────────
         if vdelta >= VDELTA_STRONG:
             score += 25
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
@@ -8103,11 +8152,10 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             score += 12
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
-        _tps_min = 0.2 if sym in EXTRA_COINS else 0.5
+        _tps_min = 0.1 if _is_sc else (0.2 if sym in EXTRA_COINS else 0.5)
         _vdelta  = stats["vdelta"]
         _tps     = stats["tps"]
         _ats     = stats["ats"]
-
 
 
         if BULL_MODE_ACTIVE:
@@ -8118,12 +8166,15 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 or _vdelta >= 0.65
                 or (_vdelta >= 0.58 and _tps >= 0.3 and _ats >= 50)
                 or (_vdelta >= 0.58 and _ats >= 200)
+                or (_is_sc and _vdelta >= 0.70 and _ats >= _ats_min)  # small cap path
             )
 
         if _vdelta < 0.66:
             continue
 
-        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 200:
+        # حد ATS النهائي — حسب الـ Tier
+        _ats_final_min = _ats_min if _is_sc else 200
+        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= _ats_final_min:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
@@ -12688,39 +12739,4 @@ def run():
                     pre_score = (
                         (vol / 1_000_000) * 0.5 +
                         max(change, 0) * 0.3 +
-                        (2  if in_hot       else 0) +
-                        (5  if in_watchlist else 0) +
-                        (10 if wl_priority  else 0)
-                    )
-                    pre_scored.append((sym, price, change, pre_score))
-
-
-                pre_scored.sort(key=lambda x: -x[3])
-
-
-                scanned = 0
-                for rank, (sym, price, change, _) in enumerate(pre_scored):
-
-                    fetch_ob = (rank < 20)
-                    deep_scan(sym, price, change, fetch_orderbook=fetch_ob)
-                    scanned += 1
-                    if scanned % 10 == 0:
-                        time.sleep(0.5)
-
-                last_deep_scan = now
-                log.info(" Deep Scan  | %d ", scanned)
-
-            cycle += 1
-
-            time.sleep(CHECK_INTERVAL)
-
-        except KeyboardInterrupt:
-            send("⛔ *MAFIO-BOT* — تم الإيقاف")
-            break
-        except Exception as e:
-            log.error(": %s", e, exc_info=True)
-            time.sleep(10)
-
-
-if __name__ == "__main__":
-    run()
+                        (2  if 
