@@ -5926,27 +5926,30 @@ LZ_TPS_SCORE_MIN  = 60
 lz_tps_alerted    = {}      # type: Dict[str, float]
 
 
-def get_adaptive_thresholds():
-    # type: () -> Dict
+def get_adaptive_thresholds(coin_vol=0, coin_ats=0):
+    # type: (float, float) -> Dict
     """
     إعدادات تتكيف مع حالة السوق تلقائياً.
-    SAFE   → إعدادات عادية — كل الفرص
+    SAFE    → إعدادات عادية — كل الفرص
     CAUTION → إعدادات متشددة — فرص واثقة فقط
-    DANGER  → إعدادات صارمة — تجميع خفي + حيتان فقط
+    DANGER  → إعدادات صارمة — حيتان العملة نفسها أو BTC يشتري
+
+    coin_vol: حجم العملة 24h بـ USDT (لتحديد tier)
+    coin_ats: ATS الفعلي للعملة (للكشف عن حيتانها)
     """
     _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
     _btc_ats = btc_tps_stats.get("ats", 0)       if btc_tps_stats else 0
 
     if market_state == "SAFE":
         return {
-            "score_big":    55,   # حد النقاط للعملات الكبيرة
+            "score_big":    55,
             "score_mid":    42,
             "score_small":  30,
             "vdelta_min":   0.60,
             "tps_min":      0.20,
-            "ats_boost":    1.0,  # مضاعف ATS (1.0 = طبيعي)
+            "ats_boost":    1.0,
             "rr_min":       1.5,
-            "sigs_min":     2,    # أدنى عدد إشارات
+            "sigs_min":     2,
             "cvd_required": False,
             "label":        "🟢 SAFE",
         }
@@ -5964,19 +5967,30 @@ def get_adaptive_thresholds():
             "label":        "🟡 CAUTION",
         }
     else:  # DANGER
-        # في DANGER: نسمح فقط إذا حيتان BTC يشترون أو إشارة CVD قوية
-        _whale_btc = _btc_vd >= 0.65 and _btc_ats >= 2000
+        # ── فحص حيتان BTC ───────────────────────────────────────────────
+        _whale_btc = _btc_vd >= 0.65 and _btc_ats >= ATS_WHALE * 0.6  # >= 3000$
+
+        # ── فحص حيتان العملة نفسها (نسبي حسب tier) ─────────────────────
+        # TIER_SETTINGS: big≥10M vol → ats_min=500, mid≥1M → 150, small → 50
+        _tier      = get_tier_settings(coin_vol) if coin_vol > 0 else {}
+        _tier_ats  = _tier.get("ats_min", 150)
+        _whale_coin = coin_ats >= _tier_ats * 2  # ضعف الحد الطبيعي للـ tier
+
+        _whale_any = _whale_btc or _whale_coin
+        _label_sfx = (" 🐋BTC" if _whale_btc else "") + (" 🐋Coin" if _whale_coin else "")
+
         return {
             "score_big":    75,
             "score_mid":    65,
             "score_small":  55,
             "vdelta_min":   0.72,
-            "tps_min":      0.50,   # موثوق فقط
+            "tps_min":      0.50,   # TPS موثوق فقط
             "ats_boost":    1.50,
             "rr_min":       2.0,
             "sigs_min":     3,
-            "cvd_required": not _whale_btc,  # CVD مطلوب إلا إذا حيتان BTC يشترون
-            "label":        "🔴 DANGER{}".format(" 🐋" if _whale_btc else ""),
+            # CVD مطلوب إلا إذا حيتان BTC أو العملة نفسها يشترون
+            "cvd_required": not _whale_any,
+            "label":        "🔴 DANGER{}".format(_label_sfx if _whale_any else ""),
         }
 
 
@@ -6258,17 +6272,20 @@ def scan_whale_confirmation(price_map):
     to_del  = []
 
 
-    _mth = get_adaptive_thresholds()
-    _block_danger = market_state == "DANGER" and not (
-        (btc_tps_stats or {}).get("vdelta", 0) >= 0.65 and
-        (btc_tps_stats or {}).get("ats", 0) >= 2000
-    )
+    # _mth يُحسب لكل عملة داخل الحلقة (يعتمد على vol/ats الخاص بها)
 
     for sym, data in list(whale_watchlist.items()):
         # فحص استثناء Sector Flow لكل عملة
         _sym_sector = next((s for s,syms in SECTORS.items() if sym+"USDT" in syms or sym in syms), "")
         _sector_hot_time = sector_flow_hot.get(_sym_sector, 0)
         _in_hot_sector = _sym_sector and (time.time() - _sector_hot_time < 14400)  # 4 ساعات
+
+        # ── فلتر DANGER بناءً على بيانات العملة نفسها ──────────────────
+        _coin_vol_j = float(next((t.get("quoteVolume", 0) for t in all_tickers
+                                   if t.get("symbol") == sym), 0)) if all_tickers else 0
+        _coin_ats_j = data.get("ats", 0)
+        _mth_j      = get_adaptive_thresholds(coin_vol=_coin_vol_j, coin_ats=_coin_ats_j)
+        _block_danger = market_state == "DANGER" and _mth_j.get("cvd_required", True)
 
         if _block_danger and not _in_hot_sector:
             continue
@@ -6525,11 +6542,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     global lz_tps_alerted
     now = time.time()
 
-    # ── إعدادات تكيفية حسب حالة السوق ─────────────────────────────────
-    _mth = get_adaptive_thresholds()
-    log.info("scan_lz_tps_fusion: market=%s", _mth["label"])
-
-
+    # _mth يُحسب لكل عملة داخل الحلقة بعد معرفة vol/ats الخاص بها
     all_syms = list(set(list(candidates) + EXTRA_COINS))
     ranked = sorted(
         [(s, vol_now.get(s, 0)) for s in all_syms],
@@ -6604,6 +6617,8 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         ats    = tps_stats["ats"]
         vdelta = tps_stats["vdelta"]
 
+        # ── إعدادات تكيفية حسب حالة السوق + بيانات العملة نفسها ────────
+        _mth = get_adaptive_thresholds(coin_vol=vol, coin_ats=ats)
 
         if in_cooldown:
             if not (ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN):
@@ -8631,11 +8646,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
     global tps_alerted, tps_baseline
     now = time.time()
 
-    # ── إعدادات تكيفية حسب حالة السوق ─────────────────────────────────
-    _mth = get_adaptive_thresholds()
-    log.info("scan_tps_ats: market=%s", _mth["label"])
-
-
+    # _mth يُحسب لكل عملة داخل الحلقة بعد معرفة vol/ats الخاص بها
     all_syms = list(set(list(candidates) + EXTRA_COINS))
     ranked = sorted(
         [(s, vol_now.get(s, 0)) for s in all_syms if s not in tracked],
@@ -8671,6 +8682,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         ats    = stats["ats"]
         vdelta = stats["vdelta"]
 
+        # ── إعدادات تكيفية حسب حالة السوق + بيانات العملة نفسها ────────
+        _mth  = get_adaptive_thresholds(coin_vol=vol, coin_ats=ats)
 
         _tier    = get_tier_settings(vol)
         _vd_min  = _tier["vdelta_min"]
