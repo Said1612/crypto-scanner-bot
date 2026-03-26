@@ -5926,6 +5926,60 @@ LZ_TPS_SCORE_MIN  = 60
 lz_tps_alerted    = {}      # type: Dict[str, float]
 
 
+def get_adaptive_thresholds():
+    # type: () -> Dict
+    """
+    إعدادات تتكيف مع حالة السوق تلقائياً.
+    SAFE   → إعدادات عادية — كل الفرص
+    CAUTION → إعدادات متشددة — فرص واثقة فقط
+    DANGER  → إعدادات صارمة — تجميع خفي + حيتان فقط
+    """
+    _btc_vd  = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+    _btc_ats = btc_tps_stats.get("ats", 0)       if btc_tps_stats else 0
+
+    if market_state == "SAFE":
+        return {
+            "score_big":    55,   # حد النقاط للعملات الكبيرة
+            "score_mid":    42,
+            "score_small":  30,
+            "vdelta_min":   0.60,
+            "tps_min":      0.20,
+            "ats_boost":    1.0,  # مضاعف ATS (1.0 = طبيعي)
+            "rr_min":       1.5,
+            "sigs_min":     2,    # أدنى عدد إشارات
+            "cvd_required": False,
+            "label":        "🟢 SAFE",
+        }
+    elif market_state == "CAUTION":
+        return {
+            "score_big":    65,
+            "score_mid":    52,
+            "score_small":  40,
+            "vdelta_min":   0.65,
+            "tps_min":      0.30,
+            "ats_boost":    1.25,
+            "rr_min":       1.8,
+            "sigs_min":     2,
+            "cvd_required": False,
+            "label":        "🟡 CAUTION",
+        }
+    else:  # DANGER
+        # في DANGER: نسمح فقط إذا حيتان BTC يشترون أو إشارة CVD قوية
+        _whale_btc = _btc_vd >= 0.65 and _btc_ats >= 2000
+        return {
+            "score_big":    75,
+            "score_mid":    65,
+            "score_small":  55,
+            "vdelta_min":   0.72,
+            "tps_min":      0.50,   # موثوق فقط
+            "ats_boost":    1.50,
+            "rr_min":       2.0,
+            "sigs_min":     3,
+            "cvd_required": not _whale_btc,  # CVD مطلوب إلا إذا حيتان BTC يشترون
+            "label":        "🔴 DANGER{}".format(" 🐋" if _whale_btc else ""),
+        }
+
+
 
 
 
@@ -6204,8 +6258,11 @@ def scan_whale_confirmation(price_map):
     to_del  = []
 
 
-    _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
-    _block_danger = market_state == "DANGER" and _btc_vd < 0.50
+    _mth = get_adaptive_thresholds()
+    _block_danger = market_state == "DANGER" and not (
+        (btc_tps_stats or {}).get("vdelta", 0) >= 0.65 and
+        (btc_tps_stats or {}).get("ats", 0) >= 2000
+    )
 
     for sym, data in list(whale_watchlist.items()):
         # فحص استثناء Sector Flow لكل عملة
@@ -6468,11 +6525,9 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     global lz_tps_alerted
     now = time.time()
 
-    # ── فلتر DANGER: لا إشارات في سوق هابط إلا إذا حيتان يشترون ──────
-    _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
-    if market_state == "DANGER" and _btc_vd < 0.55:
-        log.info("scan_lz_tps_fusion: skipped — DANGER market (BTC VDelta=%.0f%%)", _btc_vd * 100)
-        return
+    # ── إعدادات تكيفية حسب حالة السوق ─────────────────────────────────
+    _mth = get_adaptive_thresholds()
+    log.info("scan_lz_tps_fusion: market=%s", _mth["label"])
 
 
     all_syms = list(set(list(candidates) + EXTRA_COINS))
@@ -6616,7 +6671,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
 
-        if vdelta < 0.66:
+        if vdelta < _mth["vdelta_min"]:
             continue
 
         # ── موثوقية VDelta: TPS < 0.5 = عينة صغيرة جداً ──────────────
@@ -6635,7 +6690,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             score = int(score * 0.85)   # خصم 15%
             signals.append("⚠️ منطقة مستنزفة {}×".format(_touches))
 
-        if score < LZ_TPS_SCORE_MIN:
+        if score < _mth["score_big"]:
             continue
 
 
@@ -6658,13 +6713,13 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         rr = (target - price) / (price - stop_loss) if price > stop_loss else 0
 
 
-        if rr < 1.5:
+        if rr < _mth["rr_min"]:
             log.debug(" LZ+TPS skip %s: R/R=%.1f < 1.5", sym, rr)
             continue
 
 
 
-        if tps < 0.2:
+        if tps < _mth["tps_min"]:
             log.debug(" LZ+TPS skip %s: TPS=%.2f < 0.2", sym, tps)
             continue
 
@@ -8576,11 +8631,9 @@ def scan_tps_ats(price_map, vol_now, changes_map):
     global tps_alerted, tps_baseline
     now = time.time()
 
-    # ── فلتر DANGER: لا إشارات في سوق هابط إلا إذا حيتان يشترون ──────
-    _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
-    if market_state == "DANGER" and _btc_vd < 0.55:
-        log.info("scan_tps_ats: skipped — DANGER market (BTC VDelta=%.0f%%)", _btc_vd * 100)
-        return
+    # ── إعدادات تكيفية حسب حالة السوق ─────────────────────────────────
+    _mth = get_adaptive_thresholds()
+    log.info("scan_tps_ats: market=%s", _mth["label"])
 
 
     all_syms = list(set(list(candidates) + EXTRA_COINS))
@@ -8672,7 +8725,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             score += 6
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
-        _tps_min = 0.2 if sym in EXTRA_COINS else 0.5
+        _tps_min = _mth["tps_min"]
         _vdelta  = stats["vdelta"]
         _tps     = stats["tps"]
         _ats     = stats["ats"]
@@ -8690,12 +8743,16 @@ def scan_tps_ats(price_map, vol_now, changes_map):
             )
 
         # Use tier-based VDelta threshold
-        if _vdelta < max(_tier["vdelta_min"] - 0.02, 0.53):
+        if _vdelta < max(_mth["vdelta_min"] - 0.02, 0.53):
             continue
 
         # Tier-based score threshold: small-cap=30, mid=42, big=55
         _tier_ats_min = _tier["ats_min"]
-        _score_min    = {"big": 55, "mid": 42, "small": 30}.get(get_coin_tier(vol), 55)
+        _score_min = {
+            "big":   _mth["score_big"],
+            "mid":   _mth["score_mid"],
+            "small": _mth["score_small"],
+        }.get(get_coin_tier(vol), _mth["score_big"])
         if score >= _score_min and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= _tier_ats_min:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
