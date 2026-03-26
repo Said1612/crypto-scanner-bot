@@ -5981,7 +5981,7 @@ def whale_watch_add(sym, ats, vdelta, price):
     """يضيف عملة لقائمة مراقبة الحيتان"""
     global whale_watchlist
 
-    if vdelta < 0.60:
+    if vdelta < 0.55:
         log.debug(" whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
         return
     if sym not in whale_watchlist:
@@ -6320,9 +6320,13 @@ def scan_whale_confirmation(price_map):
 
 
         _macd_hist = calc_macd_histogram(sym, "1h")
-        if _macd_hist < 0:
-            log.info(" MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
+        # Block only when MACD momentum is sharply declining AND coin is not in hot sector AND not big whale
+        # (macd_hist = histogram[-1] - histogram[-2], i.e. momentum change, not absolute value)
+        if _macd_hist < -0.0003 and not _in_hot_sector and not _big_whale:
+            log.info(" MACD HARD_BLOCK: %s | delta=%.6f", sym, _macd_hist)
             continue
+        if _macd_hist < 0:
+            log.info(" MACD soft (early accum): %s | delta=%.6f — passing", sym, _macd_hist)
 
 
         _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER")
@@ -8132,9 +8136,103 @@ def get_tier_settings(vol_24h):
 
 
 
+_early_accum_seen    = {}  # {sym: timestamp} آخر اضافة للقائمة من المسح المبكر
+EARLY_ACCUM_EVERY    = 300   # فحص كل 5 دقائق
+EARLY_ACCUM_COOLDOWN = 3600  # لا تعيد الاضافة قبل ساعة
+last_early_accum_scan = 0.0
+
+
+def scan_early_accumulation(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🔍 Early Accumulation Scanner — يكتشف مراحل التجميع المبكر قبل الانفجار
+    يضيف للـ whale_watchlist بدون إرسال تنبيه مباشر — الجوكر يؤكد لاحقاً
+
+    المعايير:
+    - VDelta >= tier_min (0.55+ small, 0.58+ mid, 0.60+ big)
+    - TPS spike >= 1.5× baseline (نشاط متصاعد)
+    - 24h change بين -6% و +10% (لم يتحرك بعد = مبكر)
+    - حجم كافٍ (tier-based)
+    """
+    global _early_accum_seen, last_early_accum_scan
+    now = time.time()
+
+    if now - last_early_accum_scan < EARLY_ACCUM_EVERY:
+        return
+    last_early_accum_scan = now
+
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in all_syms],
+        key=lambda x: -x[1]
+    )[:80]
+
+    added = 0
+    for sym, vol in ranked:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS:
+            continue
+
+        _tier = get_tier_settings(vol)
+        if vol < _tier["vol_min"]:
+            continue
+
+        if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
+            continue
+        if now - _early_accum_seen.get(sym, 0) < EARLY_ACCUM_COOLDOWN:
+            continue
+        if sym in whale_watchlist:
+            continue
+        if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
+            continue
+
+        chg24 = changes_map.get(sym, 0)
+        # Must be in quiet zone — not already pumped, not in deep dump
+        if chg24 >= 10.0 or chg24 <= -8.0:
+            continue
+
+        stats = analyze_tps_ats(sym)
+        if not stats:
+            continue
+
+        ats    = stats["ats"]
+        vdelta = stats["vdelta"]
+        tps    = stats["tps"]
+
+        # VDelta must meet tier minimum for early accumulation
+        _vd_min = _tier["vdelta_min"]
+        if vdelta < _vd_min:
+            continue
+
+        # TPS spike — modest (1.5×) is enough for early detection
+        base_tps = tps_baseline.get(sym, tps)
+        ratio    = tps / base_tps if base_tps > 0 else 1.0
+        if ratio < 1.5:
+            continue
+
+        # ATS must meet tier minimum
+        if ats < _tier["ats_min"]:
+            continue
+
+        # Check OB — don't add if heavy ask pressure
+        _ob = calc_ob_imbalance(sym)
+        if _ob.get("signal") == "strong_sell":
+            continue
+
+        price = price_map.get(sym, 0)
+        whale_watch_add(sym, ats, vdelta, price)
+        _early_accum_seen[sym] = now
+        added += 1
+        log.info(" EARLY_ACCUM: %s | VD=%.0f%% | TPS×%.1f | ATS=%.0f$ | 24h=%.1f%%",
+                 sym, vdelta*100, ratio, ats, chg24)
+
+    if added > 0:
+        log.info(" scan_early_accumulation: added %d coins to whale_watchlist", added)
+
+
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
-    log.info(" scan_tps_ats V20 - VDelta filter >= 65%%")
+    log.info(" scan_tps_ats V21 - tier-based thresholds")
     """
     يفحص أفضل 40 عملة بالحجم
     يبحث عن: TPS spike + ATS حيتان + VDelta قوي
@@ -8235,10 +8333,13 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 or (_vdelta >= 0.58 and _ats >= 200)
             )
 
-        if _vdelta < 0.66:
+        # Use tier-based VDelta threshold — allows small-cap early accumulation at 0.55+
+        if _vdelta < max(_tier["vdelta_min"] - 0.02, 0.53):
             continue
 
-        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 200:
+        # Use tier-based ATS minimum — small-caps need only 50$, mid 100$, big 200$
+        _tier_ats_min = _tier["ats_min"]
+        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= _tier_ats_min:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
@@ -8381,7 +8482,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         perf_register(sym, price_map.get(sym, 0), "tps_ats", score, " | ".join(signals))
 
 
-        if ats < WHALE_ATS_MIN and vdelta >= 0.65:
+        if ats < WHALE_ATS_MIN and vdelta >= 0.60:
             whale_watch_add(sym, ats, vdelta, price_map.get(sym, 0))
         log.info(" TPS/ATS | %s | score=%d | tps=%.1f | ats=%.0f | vdelta=%.0f%%",
                  sym, score, stats["tps"], stats["ats"], stats["vdelta"] * 100)
@@ -12976,6 +13077,7 @@ def run():
     global perf_signals, perf_id_counter
     global mtf_liq_alerted, last_mtf_liq_scan
     global last_4h_report
+    global _early_accum_seen, last_early_accum_scan
 
     log.info(" MAFIO-BOT ...")
 
@@ -13034,8 +13136,10 @@ def run():
     last_lh_scan      = 0.0
     last_sc_refresh   = 0.0
     last_sr_alert     = 0.0
-    last_mtf_liq_scan = 0.0
-    last_4h_report    = 0.0
+    last_mtf_liq_scan    = 0.0
+    last_4h_report       = 0.0
+    last_early_accum_scan = 0.0
+    _early_accum_seen    = {}
 
     send(
         "💀 *MAFIO-BOT* 💀\n"
@@ -13237,6 +13341,9 @@ def run():
             track_liquidity_flow(vol_now, change_now)
 
 
+
+            # Early accumulation scanner — يكتشف التجميع المبكر ويضيف للـ watchlist
+            scan_early_accumulation(price_map, vol_now, change_now)
 
             if now - last_tps_scan >= TPS_SCAN_EVERY:
                 check_liquidity_exit(vol_now, price_map)
