@@ -7,13 +7,6 @@
 ║   Smart Top10 — اصطياد العملات قبل الانفجار               ║
 ╚══════════════════════════════════════════════════════════════╝
 
-التحسينات في V15 (فوق V14):
-  ✅ FIX: تنظيف جميع الرموز الخاطئة في SECTORS (مسافات + حروف سيريلية)
-  🆕 vol_ratio تاريخي: مقارنة حجم العملة بمتوسطها التاريخي (لا بمتوسط القطاع)
-  🆕 RSI Filter: فلتر RSI على 14 فترة — يرفض العملات overbought (RSI>70)
-  🆕 Backtesting: تتبع إشارات Top10 وقياس الأداء الفعلي بعد 1h/4h/24h
-  🆕 رسالة Telegram محسّنة: أوضح + RSI + نسبة النجاح التاريخية
-
 استراتيجية الطلبات (Anti-Rate-Limit):
   ● طلب واحد للـ 24h Ticker  كل 12 ثانية   → 5/دقيقة
   ● Cache ذكي: 15m=60s, 1h=5min, 4h=15min
@@ -6398,18 +6391,36 @@ def scan_whale_confirmation(price_map):
             btcd_line = ""
             footer   = "🃏 _المال الكبير دخل — الجوكر يلعب!_ 🎴"
 
+        # ── CVD Divergence + Consolidation إضافية للرسالة ─────────
+        _cvd_div_j = detect_cvd_divergence(sym)
+        _consol_j  = detect_consolidation_breakout(sym, price)
+        _extra_signals = ""
+        if _cvd_div_j.get("bullish_div") and _cvd_div_j.get("score", 0) >= 30:
+            _extra_signals += "📈 *CVD Divergence* — سعر ينزل + ضغط شراء خفي 🔥\n"
+        if _consol_j.get("consolidating"):
+            _nb = " ⚡ *اختراق وشيك!*" if _consol_j.get("near_breakout") else ""
+            _extra_signals += "🎯 *Consolidation* — نطاق {:.1f}% | حجم ×{:.1f}{}\n".format(
+                _consol_j["range_pct"], _consol_j["vol_ratio"], _nb)
+
+        _activity = ("🐌 نشاط ضعيف جداً" if tps < 0.5 else
+                     "🐢 نشاط عادي"       if tps < 1.0 else
+                     "⚡ نشاط جيد"        if tps < 3.0 else
+                     "🔥 نشاط قوي"        if tps < 5.0 else
+                     "💥 نشاط انفجاري")
+
         msg = (
             header +
             "💥 *{sym}* — حيتان دخلوا! ادخل الآن!\n".format(sym=sym.replace("USDT","")) +
             "━━━━━━━━━━━━━━━━━━\n" +
             evolution_line +
-            "{}\n".format("🐌 نشاط ضعيف جداً" if tps < 0.5 else ("🐢 نشاط عادي" if tps < 1.0 else ("⚡ نشاط جيد" if tps < 3.0 else ("🔥 نشاط قوي" if tps < 5.0 else "💥 نشاط انفجاري")))) +
+            "{}\n".format(_activity) +
             "📡 TPS: `{tps:.2f}` | ATS: `{ats:.0f}$`\n".format(tps=tps, ats=ats) +
             "📊 VDelta: `{vd:.0f}%` شراء حقيقي 🔥\n".format(vd=vdelta*100) +
             "💰 السعر:  `{pr}` {chg_txt}\n".format(
                 pr=fmt_price(price),
                 chg_txt=("◼️ لم يتحرك بعد" if abs(price_chg) < 0.01
                          else "({:+.2f}%)".format(price_chg))) +
+            ("━━━━━━━━━━━━━━━━━━\n" + _extra_signals if _extra_signals else "") +
             "━━━━━━━━━━━━━━━━━━\n" +
             btcd_line +
             "🏷️ القطاع: `{sec}`\n".format(sec=sector) +
@@ -8144,6 +8155,142 @@ EARLY_ACCUM_COOLDOWN = 3600  # لا تعيد الاضافة قبل ساعة
 last_early_accum_scan = 0.0
 
 
+def detect_cvd_divergence(sym):
+    # type: (str) -> dict
+    """
+    🔍 CVD Divergence — يكتشف: سعر ينخفض لكن CVD يرتفع = تجميع خفي
+    هذه إشارة الدخول الأقوى قبل الانعكاس
+
+    يعيد: {
+      "bullish_div": bool,   # تباعد صعودي (شراء خفي)
+      "bearish_div": bool,   # تباعد هبوطي (بيع خفي)
+      "score":       int,    # 0-100 قوة الإشارة
+      "reason":      str
+    }
+    """
+    kd15 = get_klines(sym, "15m", 24)
+    kd1h = get_klines(sym, "1h",  12)
+
+    result = {"bullish_div": False, "bearish_div": False, "score": 0, "reason": ""}
+
+    for kd, label in [(kd15, "15m"), (kd1h, "1h")]:
+        if not kd or len(kd["closes"]) < 10:
+            continue
+        try:
+            closes = kd["closes"]
+            opens  = kd["opens"]
+            vols   = kd["vols"]
+            n      = len(closes)
+
+            # بناء CVD
+            cvd = []
+            cum = 0.0
+            for i in range(n):
+                v = vols[i] if i < len(vols) else 0
+                if closes[i] > opens[i]:
+                    cum += v
+                elif closes[i] < opens[i]:
+                    cum -= v
+                cvd.append(cum)
+
+            half = n // 2
+            # سعر النصف الأول مقابل الثاني
+            price_first  = sum(closes[:half]) / half
+            price_second = sum(closes[half:]) / max(n - half, 1)
+            # CVD النصف الأول مقابل الثاني
+            cvd_first  = sum(cvd[:half]) / half
+            cvd_second = sum(cvd[half:]) / max(n - half, 1)
+
+            price_falling = price_second < price_first * 0.998   # سعر ينزل
+            price_rising  = price_second > price_first * 1.002   # سعر يرتفع
+            cvd_rising    = cvd_second   > cvd_first  * 1.02     # CVD يرتفع
+            cvd_falling   = cvd_second   < cvd_first  * 0.98     # CVD ينزل
+
+            # Bullish Divergence: سعر ينزل + CVD يرتفع = تجميع خفي
+            if price_falling and cvd_rising:
+                div_strength = abs(cvd_second - cvd_first) / (abs(cvd_first) + 1) * 100
+                sc = min(int(div_strength * 2), 60)
+                if sc > result["score"]:
+                    result["bullish_div"] = True
+                    result["score"]  = sc
+                    result["reason"] = "CVD↑ + Price↓ ({})".format(label)
+
+            # Bearish Divergence: سعر يرتفع + CVD ينزل = توزيع خفي
+            if price_rising and cvd_falling:
+                result["bearish_div"] = True
+
+        except (IndexError, ValueError, ZeroDivisionError):
+            continue
+
+    return result
+
+
+def detect_consolidation_breakout(sym, price):
+    # type: (str, float) -> dict
+    """
+    🎯 Consolidation Breakout — يكتشف: سعر يتحرك جانبياً + حجم يرتفع = اختراق وشيك
+
+    المعايير:
+    - نطاق السعر آخر 8 شمعات 15m < 4% (تضغط)
+    - متوسط حجم آخر 3 شمعات > 1.5× المتوسط الكلي (حجم يرتفع)
+    - السعر قريب من أعلى النطاق (جاهز للاختراق)
+
+    يعيد: {
+      "consolidating": bool,
+      "near_breakout":  bool,
+      "range_pct":      float,
+      "vol_ratio":      float,
+      "score":          int
+    }
+    """
+    kd = get_klines(sym, "15m", 16)
+    result = {"consolidating": False, "near_breakout": False,
+              "range_pct": 0.0, "vol_ratio": 0.0, "score": 0}
+
+    if not kd or len(kd["closes"]) < 10:
+        return result
+    try:
+        closes = kd["closes"]
+        highs  = kd["highs"]
+        lows   = kd["lows"]
+        vols   = kd["vols"]
+        n      = len(closes)
+
+        # نطاق السعر آخر 8 شمعات
+        window_h = max(highs[-8:])
+        window_l = min(lows[-8:])
+        range_pct = (window_h - window_l) / window_l * 100 if window_l > 0 else 99
+
+        # نسبة الحجم: آخر 3 شمعات مقارنة بمتوسط الـ 13 السابقة
+        avg_vol = sum(vols[:-3]) / max(len(vols[:-3]), 1)
+        rec_vol = sum(vols[-3:]) / 3.0
+        vol_ratio = rec_vol / avg_vol if avg_vol > 0 else 1.0
+
+        consolidating = range_pct <= 4.0
+        vol_rising    = vol_ratio >= 1.5
+
+        # قريب من أعلى النطاق = جاهز للاختراق الصعودي
+        near_top = price >= window_h * 0.99 if window_h > 0 else False
+
+        if consolidating and vol_rising:
+            sc = 0
+            sc += min(int((4.0 - range_pct) * 15), 40)   # نطاق أضيق = أعلى نقطة
+            sc += min(int((vol_ratio - 1.5) * 30), 40)   # حجم أكبر = أعلى نقطة
+            if near_top:
+                sc += 20                                   # قرب الاختراق
+
+            result["consolidating"]  = True
+            result["near_breakout"]  = near_top
+            result["range_pct"]      = round(range_pct, 2)
+            result["vol_ratio"]      = round(vol_ratio, 2)
+            result["score"]          = min(sc, 100)
+
+    except (IndexError, ValueError, ZeroDivisionError):
+        pass
+
+    return result
+
+
 def scan_early_accumulation(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
     """
@@ -8226,11 +8373,32 @@ def scan_early_accumulation(price_map, vol_now, changes_map):
             continue
 
         price = price_map.get(sym, 0)
+
+        # ── CVD Divergence + Consolidation — تقييم إضافي لكل عملة ─────
+        _cvd_div  = detect_cvd_divergence(sym)
+        _consol   = detect_consolidation_breakout(sym, price)
+        _extra_sc = _cvd_div.get("score", 0) + _consol.get("score", 0)
+
+        # إذا VDelta أقل من المثالي لكن CVD divergence قوي → اقبل
+        if vdelta < _vd_min and _cvd_div.get("score", 0) >= 40:
+            pass   # CVD divergence يعوّض VDelta المنخفض
+        elif vdelta < _vd_min:
+            continue
+
+        reasons = []
+        if _cvd_div.get("bullish_div"):
+            reasons.append("CVD_DIV({})".format(_cvd_div.get("reason","")))
+        if _consol.get("consolidating"):
+            reasons.append("CONSOL {:.1f}% vol×{:.1f}".format(
+                _consol["range_pct"], _consol["vol_ratio"]))
+        if _consol.get("near_breakout"):
+            reasons.append("NEAR_BO!")
+
         whale_watch_add(sym, ats, vdelta, price)
         _early_accum_seen[sym] = now
         added += 1
-        log.info(" EARLY_ACCUM: %s | VD=%.0f%% | TPS×%.1f | ATS=%.0f$ | 24h=%.1f%%",
-                 sym, vdelta*100, ratio, ats, chg24)
+        log.info(" EARLY_ACCUM: %s | VD=%.0f%% | TPS×%.1f | ATS=%.0f$ | 24h=%.1f%% | extra=%d %s",
+                 sym, vdelta*100, ratio, ats, chg24, _extra_sc, " | ".join(reasons))
 
     if added > 0:
         log.info(" scan_early_accumulation: added %d coins to whale_watchlist", added)
