@@ -13443,8 +13443,8 @@ def run():
 
             send_daily_report()
 
-            # تقرير 4 ساعات — BTC+ETH ATS/TPS/VDelta + SAFE/CAUTION/DANGER
-            send_4h_market_report()
+            # تقرير 4 ساعات — محذوف بطلب المستخدم
+            # send_4h_market_report()
 
             if now - last_expand      >= EXPAND_EVERY:
 
