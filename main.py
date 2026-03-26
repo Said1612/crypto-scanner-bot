@@ -11631,7 +11631,7 @@ def send_4h_market_report():
         def _vd_bar(vd):
             # type: (float) -> str
             filled = int(vd * 10)
-            return "🟢" * filled + "⚪" * (10 - filled)
+            return "🟢" * filled + "🔴" * (10 - filled)
 
         reasons_txt = ""
         for r in reasons[:5]:
