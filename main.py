@@ -12280,11 +12280,7 @@ def load_state():
         log.info(" State loaded | gems=%d | watchlist=%d | ath=%d | BT=%d",
                  len(gem_watchlist), len(watchlist), len(ath_tracker), len(backtest_signals))
 
-        send("♻️ *Bot Restarted* — تم استعادة البيانات\n"
-             "👁️ Watchlist: `{}` | 🐋 جوكر: `{}` | 📊 BT: `{}`\n"
-             "⏱️ آخر حفظ: `{:.1f}h` | ☁️ Redis".format(
-                 len(watchlist), len(whale_watchlist),
-                 len(backtest_signals), age_hours))
+        # رسالة إعادة التشغيل — محذوفة بطلب المستخدم
 
     except Exception as e:
         log.error(" load_state error: %s", e)
