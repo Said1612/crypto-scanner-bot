@@ -8223,6 +8223,7 @@ def get_tier_settings(vol_24h):
 # ══════════════════════════════════════════════════════════════════
 
 _vol_surge_seen     = {}    # {sym: timestamp}
+_vol_surge_baseline = {}    # {sym: avg_vol} — مرجع لـ smart_market_scan أيضاً
 VOL_SURGE_EVERY     = 300   # فحص كل 5 دقائق
 VOL_SURGE_COOLDOWN  = 7200  # cooldown ساعتان لكل عملة
 VOL_SURGE_RATIO     = 3.5   # الحجم ارتفع 3.5× المعدل الطبيعي
@@ -13077,7 +13078,7 @@ _smart_scan_every = 300
 
 def smart_market_scan():
     # type: () -> None
-    global candidates, _smart_scan_last
+    global candidates, _smart_scan_last, _vol_surge_baseline
     now = time.time()
     if now - _smart_scan_last < _smart_scan_every:
         return
