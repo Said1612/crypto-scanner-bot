@@ -11534,18 +11534,25 @@ def send_4h_market_report():
                                  if t.get("symbol") == "BTCUSDT"), 0))
         _eth_price = float(next((t.get("lastPrice", 0) for t in all_tickers
                                  if t.get("symbol") == "ETHUSDT"), 0))
-        btc_bvol  = btc_stats.get("buy_vol",  0.0) * (_btc_price if _btc_price > 0 else 1) if btc_stats else 0.0
-        btc_svol  = btc_stats.get("sell_vol", 0.0) * (_btc_price if _btc_price > 0 else 1) if btc_stats else 0.0
+        # حجم BTC/ETH من ticker (24h quoteVolume = USDT مباشرة)
+        _btc_total_vol = float(next((t.get("quoteVolume", 0) for t in all_tickers
+                                     if t.get("symbol") == "BTCUSDT"), 0))
+        _eth_total_vol = float(next((t.get("quoteVolume", 0) for t in all_tickers
+                                     if t.get("symbol") == "ETHUSDT"), 0))
+        # اشتقاق شراء/بيع من VDelta × الحجم الكلي — متسق تماماً مع VDelta
+        btc_bvol  = _btc_total_vol * btc_vd
+        btc_svol  = _btc_total_vol * (1.0 - btc_vd)
 
         eth_tps   = eth_stats.get("tps",   0.0) if eth_stats else 0.0
         eth_ats   = eth_stats.get("ats",   0.0) if eth_stats else 0.0
         eth_vd    = eth_stats.get("vdelta", 0.5) if eth_stats else 0.5
-        eth_bvol  = eth_stats.get("buy_vol",  0.0) * (_eth_price if _eth_price > 0 else 1) if eth_stats else 0.0
-        eth_svol  = eth_stats.get("sell_vol", 0.0) * (_eth_price if _eth_price > 0 else 1) if eth_stats else 0.0
+        # نفس الطريقة لـ ETH
+        eth_bvol  = _eth_total_vol * eth_vd
+        eth_svol  = _eth_total_vol * (1.0 - eth_vd)
 
-        # ── حجم السوق الكلي buy/sell — باستخدام موقع السعر (Price Position)
-        # الطريقة: buy_ratio = (lastPrice - lowPrice) / (highPrice - lowPrice)
-        # أدق بكثير من اتجاه 24h لأنها تعكس أين أغلق السعر في نطاق اليوم
+        # ── حجم السوق الكلي — Price Position مرجّح بالحجم ─────────────
+        # buy_ratio لكل عملة = (lastPrice - low) / (high - low)
+        # هذا يعكس أين أغلق السعر ضمن نطاق اليوم → متسق مع VDelta
         mkt_buy = 0.0
         mkt_sell = 0.0
         for _t in all_tickers:
@@ -11554,22 +11561,25 @@ def send_4h_market_report():
                 _high = float(_t.get("highPrice",   0))
                 _low  = float(_t.get("lowPrice",    0))
                 _last = float(_t.get("lastPrice",   0))
+                _open = float(_t.get("openPrice",   0))
                 if _v < 50_000:
                     continue
                 if not _t.get("symbol", "").endswith("USDT"):
                     continue
                 if _high > _low:
-                    # موقع الإغلاق في نطاق High-Low: 1.0 = أغلق عند الأعلى (شراء)، 0.0 = أغلق عند الأدنى (بيع)
-                    _buy_ratio = max(0.0, min(1.0, (_last - _low) / (_high - _low)))
+                    # موقع الإغلاق: 1.0 = أعلى النطاق (شراء)، 0.0 = أدنى النطاق (بيع)
+                    _pp = max(0.0, min(1.0, (_last - _low) / (_high - _low)))
+                    # تعزيز: إذا أغلق فوق الفتح (شمعة خضراء) نُعطي وزناً إضافياً
+                    _green = 1 if _last >= _open else 0
+                    _buy_ratio = (_pp * 0.7) + (_green * 0.3)
                 else:
-                    # نطاق = صفر (عملة ثابتة جداً) — استخدم 0.5 محايد
                     _buy_ratio = 0.5
                 mkt_buy  += _v * _buy_ratio
                 mkt_sell += _v * (1.0 - _buy_ratio)
             except (ValueError, TypeError, ZeroDivisionError):
                 pass
 
-        mkt_total = mkt_buy + mkt_sell
+        mkt_total    = mkt_buy + mkt_sell
         mkt_buy_pct  = mkt_buy  / mkt_total * 100 if mkt_total > 0 else 50
         mkt_sell_pct = mkt_sell / mkt_total * 100 if mkt_total > 0 else 50
         mkt_vd       = mkt_buy  / mkt_total        if mkt_total > 0 else 0.5
