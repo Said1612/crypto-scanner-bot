@@ -117,7 +117,7 @@ EXTRA_COINS = [
 ]
 
 TPS_SPIKE      = 2.0
-TPS_MAX_CHANGE = 10.0
+TPS_MAX_CHANGE = 5.0
 ATS_WHALE      = 5000
 ATS_RETAIL     = 500
 VDELTA_STRONG  = 0.70
@@ -155,7 +155,7 @@ HIGHER_LOWS_MIN    = 0.60
 
 
 WHALE_MIN_VOL      = 1_000_000
-WHALE_MAX_CHANGE   = 25.0
+WHALE_MAX_CHANGE   = 8.0
 
 
 BOTTOM_PRICE_RANGE   = 1.15
@@ -5951,6 +5951,7 @@ def get_adaptive_thresholds(coin_vol=0, coin_ats=0):
             "rr_min":       1.5,
             "sigs_min":     2,
             "cvd_required": False,
+            "chg_max":      8.0,   # أقصى ارتفاع مقبول للدخول
             "label":        "🟢 SAFE",
         }
     elif market_state == "CAUTION":
@@ -5964,6 +5965,7 @@ def get_adaptive_thresholds(coin_vol=0, coin_ats=0):
             "rr_min":       1.8,
             "sigs_min":     2,
             "cvd_required": False,
+            "chg_max":      5.0,   # أكثر صرامة في CAUTION
             "label":        "🟡 CAUTION",
         }
     else:  # DANGER
@@ -5988,8 +5990,8 @@ def get_adaptive_thresholds(coin_vol=0, coin_ats=0):
             "ats_boost":    1.50,
             "rr_min":       2.0,
             "sigs_min":     3,
-            # CVD مطلوب إلا إذا حيتان BTC أو العملة نفسها يشترون
             "cvd_required": not _whale_any,
+            "chg_max":      5.0,   # صارم في DANGER
             "label":        "🔴 DANGER{}".format(_label_sfx if _whale_any else ""),
         }
 
@@ -8225,7 +8227,7 @@ VOL_SURGE_EVERY     = 300   # فحص كل 5 دقائق
 VOL_SURGE_COOLDOWN  = 7200  # cooldown ساعتان لكل عملة
 VOL_SURGE_RATIO     = 3.5   # الحجم ارتفع 3.5× المعدل الطبيعي
 VOL_SURGE_GOLD      = 7.0   # 7× = إشارة ذهبية نادرة
-VOL_SURGE_MAX_CHG   = 8.0   # السعر لم يرتفع أكثر من 8% بعد (الفرصة لم تفت)
+VOL_SURGE_MAX_CHG   = 5.0   # السعر لم يرتفع أكثر من 5% بعد (الفرصة لم تفت)
 VOL_SURGE_MIN_USDT  = 3_000  # حجم الساعة الأخيرة بـ USDT (خفيف لالتقاط micro-cap)
 last_vol_surge_scan = 0.0
 
@@ -12280,11 +12282,7 @@ def load_state():
         log.info(" State loaded | gems=%d | watchlist=%d | ath=%d | BT=%d",
                  len(gem_watchlist), len(watchlist), len(ath_tracker), len(backtest_signals))
 
-        send("♻️ *Bot Restarted* — تم استعادة البيانات\n"
-             "👁️ Watchlist: `{}` | 🐋 جوكر: `{}` | 📊 BT: `{}`\n"
-             "⏱️ آخر حفظ: `{:.1f}h` | ☁️ Redis".format(
-                 len(watchlist), len(whale_watchlist),
-                 len(backtest_signals), age_hours))
+        # رسالة إعادة التشغيل — محذوفة بطلب المستخدم
 
     except Exception as e:
         log.error(" load_state error: %s", e)
