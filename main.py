@@ -6641,6 +6641,22 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         if vdelta < 0.66:
             continue
 
+        # ── موثوقية VDelta: TPS < 0.5 = عينة صغيرة جداً ──────────────
+        # مثال: 3 صفقات شراء متتالية تُعطي VDelta=100% لكنها غير ذات معنى
+        _vd_reliable = tps >= 0.5
+        _vd_warn     = vdelta >= 0.75 and not _vd_reliable  # VDelta مرتفع + TPS ضعيف
+
+        # إذا VDelta غير موثوق → خفّض النقاط وأضف تحذيراً
+        if _vd_warn:
+            score = int(score * 0.80)   # خصم 20%
+            signals.append("⚠️ VDelta غير موثوق (TPS={:.1f})".format(tps))
+
+        # ── المناطق المستنزفة: REPEAT >= 15 → تحذير ──────────────────
+        _touches = nearest_zone.get("touches", 1)
+        if _touches >= 15:
+            score = int(score * 0.85)   # خصم 15%
+            signals.append("⚠️ منطقة مستنزفة {}×".format(_touches))
+
         if score < LZ_TPS_SCORE_MIN:
             continue
 
@@ -6726,7 +6742,8 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         )
 
 
-        _direct = vdelta >= 0.80 and rr >= 1.5 and _real_liq_lz
+        # DIRECT ENTRY يشترط TPS موثوق أيضاً
+        _direct = vdelta >= 0.80 and rr >= 1.5 and _real_liq_lz and _vd_reliable
 
         if _direct:
             msg = (
@@ -6765,7 +6782,9 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                 "━━━━━━━━━━━━━━━━━━\n"
                 "{}\n".format(_tps_label) +
                 "📡 TPS: `{:.2f}` {} | ATS: `{:.0f}$` {}\n".format(tps, get_tps_label(tps), ats, get_ats_label(ats)) +
-                "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta * 100) +
+                "📊 VDelta: `{:.0f}%` {}\n".format(
+                    vdelta * 100,
+                    "⚠️ _غير موثوق — TPS ضعيف جداً_" if _vd_warn else "شراء") +
                 "━━━━━━━━━━━━━━━━━━\n"
                 "💪 القوة: `{}/100` {}\n".format(score, rarity) +
                 "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol_now.get(sym,0)/1_000_000) +
