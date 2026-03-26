@@ -5836,15 +5836,7 @@ def refresh_tickers():
 
 
 
-# TPS/ATS + Volume Delta
-
-TPS_LIMIT         = 100
-TPS_SPIKE         = 2.0
-ATS_WHALE         = 2000
-ATS_RETAIL        = 500
-VDELTA_STRONG     = 0.65
-TPS_COOLDOWN      = 7200
-TPS_SCAN_EVERY    = 300
+# TPS/ATS + Volume Delta  (القيم المرجعية في الأعلى: ATS_WHALE=5000, VDELTA_STRONG=0.70)
 
 
 
@@ -10878,6 +10870,50 @@ def _send_daily_report_body(today, now_utc):
 
     flow_sum = get_flow_summary()
 
+    # ── نسبة سيولة كل قطاع من إجمالي السوق ──────────────────────
+    sector_liq_block = ""
+    try:
+        _sector_vol_map = {}
+        _tick_map = {t["symbol"]: t for t in all_tickers}
+        for _sec, _coins in SECTORS.items():
+            _sv = 0.0
+            _buy_s = 0.0
+            _sell_s = 0.0
+            for _sc in _coins:
+                _t2 = _tick_map.get(_sc)
+                if not _t2:
+                    continue
+                try:
+                    _v2 = float(_t2.get("quoteVolume", 0))
+                    _c2 = float(_t2.get("priceChangePercent", 0))
+                    _sv += _v2
+                    if _c2 > 0:
+                        _buy_s += _v2
+                    else:
+                        _sell_s += _v2
+                except (ValueError, TypeError):
+                    pass
+            if _sv >= 10_000:
+                _sv_b = _buy_s / _sv if _sv > 0 else 0.5
+                _sector_vol_map[_sec] = (_sv, _sv_b)
+
+        _grand_total = sum(v for v, _ in _sector_vol_map.values())
+        if _grand_total > 0:
+            _sorted_secs = sorted(_sector_vol_map.items(), key=lambda x: -x[1][0])
+            sector_liq_block = "━━━━━━━━━━━━━━━━━━\n"
+            sector_liq_block += "🏦 *نسبة السيولة لكل قطاع (24h):*\n"
+            for _sname, (_sv, _sv_b) in _sorted_secs[:8]:
+                _pct_total = _sv / _grand_total * 100
+                _buy_bar   = int(_sv_b * 5)
+                _sell_bar  = 5 - _buy_bar
+                _bar_str   = "🟢" * _buy_bar + "🔴" * _sell_bar
+                _vol_str   = "{:.1f}B".format(_sv / 1e9) if _sv >= 1e9 else "{:.0f}M".format(_sv / 1e6)
+                _flow_icon = "🔥" if _sv_b >= 0.60 else ("⚠️" if _sv_b <= 0.40 else "")
+                sector_liq_block += "  *{}* `{:.1f}%` ({}) {} {}\n".format(
+                    _sname, _pct_total, _vol_str, _bar_str, _flow_icon
+                )
+    except Exception as _se:
+        log.error("sector_liq_block error: %s", _se)
 
     _btc         = float(btc_ch)          if btc_ch          is not None else 0.0
 
@@ -10921,9 +10957,12 @@ def _send_daily_report_body(today, now_utc):
         "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol})\n"
         "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol})\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "💰 *تدفق رأس المال:*\n"
+        "💰 *تدفق رأس المال (24h):*\n"
         "  {arrow} حجم السوق: `{vol_ch}` عن أمس\n"
         "  📦 إجمالي: `{total_vol}` USDT\n"
+        "  🟢 شراء:   `{buy:.1f}%` = `{buy_vol}` USDT\n"
+        "  🔴 بيع:    `{sell:.1f}%` = `{sell_vol}` USDT\n"
+        "{sector_liq}"
         "━━━━━━━━━━━━━━━━━━\n"
         "💸 *تدفق السيولة بين القطاعات:*\n"
         "{flow}"
@@ -10940,18 +10979,18 @@ def _send_daily_report_body(today, now_utc):
             "  🐋 BTC TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
                 btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
                 btc_tps_stats.get("vdelta",0.5)*100,
-                "حيتان يشترون 🔥" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) >= 0.65
+                "🐋 حيتان يشترون 🔥" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) >= VDELTA_STRONG
                 else ("🔴 حيتان يبيعون!" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) < 0.40
-                else "نشاط عادي")
+                else ("⚡ شراء متوسط" if btc_tps_stats.get("vdelta",0) >= 0.55 else "نشاط عادي"))
             ) if btc_tps_stats else ""
         ),
         eth_tps_line=(
-            "  🐋 ETH TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
+            "  🔷 ETH TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
                 eth_tps_stats.get("tps",0), eth_tps_stats.get("ats",0),
                 eth_tps_stats.get("vdelta",0.5)*100,
-                "حيتان يشترون 🔥" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) >= 0.65
+                "🐋 حيتان يشترون 🔥" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) >= VDELTA_STRONG
                 else ("🔴 حيتان يبيعون!" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) < 0.40
-                else "نشاط عادي")
+                else ("⚡ شراء متوسط" if eth_tps_stats.get("vdelta",0) >= 0.55 else "نشاط عادي"))
             ) if eth_tps_stats else ""
         ),
         mkt_icon=_mkt_icons.get(_display_state,"📊"), mkt_state=_display_state,
@@ -10964,13 +11003,10 @@ def _send_daily_report_body(today, now_utc):
         sell_vol=("{:.2f}B".format(_sell_vol/1_000_000_000) if _sell_vol>=1_000_000_000 else "{:.0f}M".format(_sell_vol/1_000_000)),
         arrow=vol_arrow,
         vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة 📊"),
-        
         total_vol=("{:.2f}B".format(_total_vol/1_000_000_000) if _total_vol>=1_000_000_000 else "{:.0f}M".format(_total_vol/1_000_000)),
-        vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة"),
-
+        sector_liq=sector_liq_block,
         flow=flow_sum,
         action=whale_action,
-
     )
 
 
@@ -11056,6 +11092,302 @@ def _send_daily_report_body(today, now_utc):
 
 
 
+
+
+
+
+# ══════════════════════════════════════════════════════════════════
+#  4-HOUR MARKET REPORT — BTC + ETH ATS/TPS/VDelta
+# ══════════════════════════════════════════════════════════════════
+
+REPORT_4H_EVERY   = 14400   # كل 4 ساعات
+last_4h_report    = 0.0
+
+# عتبات تحديد حالة السوق في التقرير الرباعي
+_4H_SAFE_VD       = 0.58    # VDelta >= 58% = SAFE
+_4H_DANGER_VD     = 0.42    # VDelta <= 42% = DANGER
+_4H_SAFE_BTC      = -1.0    # BTC 1h >= -1% = لا خطر
+_4H_DANGER_BTC    = -2.0    # BTC 1h <= -2% = خطر
+
+
+def _fmt_vol(v):
+    # type: (float) -> str
+    if v >= 1_000_000_000:
+        return "{:.2f}B".format(v / 1_000_000_000)
+    return "{:.0f}M".format(v / 1_000_000)
+
+
+def _market_state_from_metrics(btc_vd, eth_vd, mkt_vd, btc_1h, btc_24h, ats_btc, ats_eth):
+    # type: (float, float, float, float, float, float, float) -> tuple
+    """
+    يحسب حالة السوق الفعلية بناءً على المؤشرات المجمّعة.
+    يعيد: (state, score, reasons)
+    state:   SAFE / CAUTION / DANGER
+    score:   0-100
+    reasons: قائمة بالأسباب
+    """
+    score   = 50   # نقطة البداية محايد
+    reasons = []
+
+    # ── VDelta BTC ─────────────────────────────────────────────────
+    if btc_vd >= 0.65:
+        score += 20
+        reasons.append("✅ BTC VDelta قوي `{:.0f}%`".format(btc_vd * 100))
+    elif btc_vd >= _4H_SAFE_VD:
+        score += 10
+        reasons.append("🟡 BTC VDelta متوسط `{:.0f}%`".format(btc_vd * 100))
+    elif btc_vd <= _4H_DANGER_VD:
+        score -= 25
+        reasons.append("🔴 BTC VDelta ضعيف `{:.0f}%` — ضغط بيعي".format(btc_vd * 100))
+    else:
+        score -= 5
+
+    # ── VDelta ETH ─────────────────────────────────────────────────
+    if eth_vd >= 0.65:
+        score += 10
+        reasons.append("✅ ETH VDelta قوي `{:.0f}%`".format(eth_vd * 100))
+    elif eth_vd <= _4H_DANGER_VD:
+        score -= 15
+        reasons.append("🔴 ETH VDelta ضعيف `{:.0f}%`".format(eth_vd * 100))
+
+    # ── ATS حجم الصفقة المتوسط ────────────────────────────────────
+    if ats_btc >= ATS_WHALE:
+        if btc_vd >= VDELTA_STRONG:
+            score += 15
+            reasons.append("🐋 BTC — حيتان يشترون! ATS:`{:.0f}$`".format(ats_btc))
+        else:
+            score -= 10
+            reasons.append("🐋 BTC — حيتان يبيعون! ATS:`{:.0f}$`".format(ats_btc))
+    elif ats_btc >= ATS_RETAIL:
+        if btc_vd >= 0.55:
+            score += 5
+            reasons.append("🐟 BTC — شراء مؤسسي متوسط ATS:`{:.0f}$`".format(ats_btc))
+
+    if ats_eth >= ATS_WHALE:
+        if eth_vd >= VDELTA_STRONG:
+            score += 8
+            reasons.append("🐋 ETH — حيتان يشترون! ATS:`{:.0f}$`".format(ats_eth))
+        else:
+            score -= 8
+            reasons.append("🐋 ETH — حيتان يبيعون! ATS:`{:.0f}$`".format(ats_eth))
+
+    # ── BTC السعر 1h / 4h ─────────────────────────────────────────
+    if btc_1h <= _4H_DANGER_BTC:
+        score -= 20
+        reasons.append("📉 BTC 1h: `{:+.2f}%` — هبوط حاد".format(btc_1h))
+    elif btc_1h <= _4H_SAFE_BTC:
+        score -= 8
+        reasons.append("⚠️ BTC 1h: `{:+.2f}%`".format(btc_1h))
+    elif btc_1h >= 1.0:
+        score += 10
+        reasons.append("📈 BTC 1h: `{:+.2f}%` — زخم صاعد".format(btc_1h))
+
+    if btc_24h <= -3.0:
+        score -= 15
+        reasons.append("🔴 BTC 24h: `{:+.2f}%` — نزول قوي".format(btc_24h))
+    elif btc_24h >= 3.0:
+        score += 8
+        reasons.append("🟢 BTC 24h: `{:+.2f}%`".format(btc_24h))
+
+    # ── VDelta السوق الكلي ────────────────────────────────────────
+    if mkt_vd >= 0.60:
+        score += 5
+        reasons.append("✅ السوق: شراء كلي `{:.0f}%`".format(mkt_vd * 100))
+    elif mkt_vd <= 0.40:
+        score -= 10
+        reasons.append("🔴 السوق: بيع كلي `{:.0f}%`".format(mkt_vd * 100))
+
+    score = max(0, min(100, score))
+
+    if score >= 65:
+        state = "SAFE"
+    elif score >= 40:
+        state = "CAUTION"
+    else:
+        state = "DANGER"
+
+    return state, score, reasons
+
+
+def send_4h_market_report():
+    # type: () -> None
+    """
+    📡 تقرير السوق كل 4 ساعات
+    يحسب ATS / TPS / VDelta لـ BTC و ETH
+    ويصدر حكم: SAFE / CAUTION / DANGER مع الأسباب
+    """
+    global last_4h_report
+    now = time.time()
+
+    if now - last_4h_report < REPORT_4H_EVERY:
+        return
+    last_4h_report = now
+
+    if not all_tickers:
+        return
+
+    try:
+        # ── جلب بيانات BTC / ETH ───────────────────────────────────
+        btc_stats = analyze_tps_ats("BTCUSDT")
+        eth_stats = analyze_tps_ats("ETHUSDT")
+
+        if not btc_stats and not eth_stats:
+            log.warning("4h report: لا بيانات TPS/ATS")
+            return
+
+        btc_tps   = btc_stats.get("tps",   0.0) if btc_stats else 0.0
+        btc_ats   = btc_stats.get("ats",   0.0) if btc_stats else 0.0
+        btc_vd    = btc_stats.get("vdelta", 0.5) if btc_stats else 0.5
+        btc_bvol  = btc_stats.get("buy_vol",  0.0) if btc_stats else 0.0
+        btc_svol  = btc_stats.get("sell_vol", 0.0) if btc_stats else 0.0
+
+        eth_tps   = eth_stats.get("tps",   0.0) if eth_stats else 0.0
+        eth_ats   = eth_stats.get("ats",   0.0) if eth_stats else 0.0
+        eth_vd    = eth_stats.get("vdelta", 0.5) if eth_stats else 0.5
+        eth_bvol  = eth_stats.get("buy_vol",  0.0) if eth_stats else 0.0
+        eth_svol  = eth_stats.get("sell_vol", 0.0) if eth_stats else 0.0
+
+        # ── حجم السوق الكلي buy/sell من all_tickers ────────────────
+        mkt_buy = 0.0
+        mkt_sell = 0.0
+        for _t in all_tickers:
+            try:
+                _v = float(_t.get("quoteVolume", 0))
+                _c = float(_t.get("priceChangePercent", 0))
+                if _v < 50_000:
+                    continue
+                _sym = _t.get("symbol", "")
+                if not _sym.endswith("USDT"):
+                    continue
+                if _c > 0:
+                    mkt_buy += _v
+                else:
+                    mkt_sell += _v
+            except (ValueError, TypeError):
+                pass
+
+        mkt_total = mkt_buy + mkt_sell
+        mkt_buy_pct  = mkt_buy  / mkt_total * 100 if mkt_total > 0 else 50
+        mkt_sell_pct = mkt_sell / mkt_total * 100 if mkt_total > 0 else 50
+        mkt_vd       = mkt_buy  / mkt_total        if mkt_total > 0 else 0.5
+
+        # ── BTC سعر 1h ─────────────────────────────────────────────
+        _btc_1h_now = 0.0
+        try:
+            _kd = get_klines("BTCUSDT", "1h", 3)
+            if _kd and len(_kd["closes"]) >= 2:
+                _btc_1h_now = (_kd["closes"][-1] - _kd["closes"][-2]) / _kd["closes"][-2] * 100
+        except Exception:
+            _btc_1h_now = float(btc_trend_1h) if btc_trend_1h else 0.0
+
+        # ── تحديد حالة السوق ───────────────────────────────────────
+        state, score, reasons = _market_state_from_metrics(
+            btc_vd=btc_vd, eth_vd=eth_vd, mkt_vd=mkt_vd,
+            btc_1h=_btc_1h_now, btc_24h=btc_change_24h,
+            ats_btc=btc_ats, ats_eth=eth_ats
+        )
+
+        # ── رموز ───────────────────────────────────────────────────
+        state_icons  = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
+        state_emojis = {
+            "SAFE":    "🟢🟢🟢 SAFE — ادخل بثقة",
+            "CAUTION": "🟡🟡🟡 CAUTION — توخَّ الحذر",
+            "DANGER":  "🔴🔴🔴 DANGER — ابتعد الآن",
+        }
+        state_advice = {
+            "SAFE":    "✅ _السوق آمن — مناسب لفتح مراكز_",
+            "CAUTION": "⚠️ _انتظر تأكيداً قبل الدخول_",
+            "DANGER":  "🛑 _أغلق المراكز المفتوحة — لا تدخل_",
+        }
+
+        icon_s = state_icons.get(state, "📊")
+
+        # ── بناء تفاصيل BTC / ETH ─────────────────────────────────
+        def _vd_label(vd, ats):
+            # type: (float, float) -> str
+            if ats >= ATS_WHALE and vd >= VDELTA_STRONG:
+                return "🐋🔥 حيتان يشترون"
+            if ats >= ATS_WHALE and vd < 0.40:
+                return "🐋🔴 حيتان يبيعون"
+            if vd >= 0.60:
+                return "⬆️ شراء قوي"
+            if vd >= 0.50:
+                return "↗️ شراء متوسط"
+            if vd <= 0.40:
+                return "⬇️ بيع"
+            return "➡️ محايد"
+
+        btc_bvol_str  = _fmt_vol(btc_bvol)  if btc_bvol  > 0 else "—"
+        btc_svol_str  = _fmt_vol(btc_svol)  if btc_svol  > 0 else "—"
+        eth_bvol_str  = _fmt_vol(eth_bvol)  if eth_bvol  > 0 else "—"
+        eth_svol_str  = _fmt_vol(eth_svol)  if eth_svol  > 0 else "—"
+
+        # ── نسبة VDelta مرئية ──────────────────────────────────────
+        def _vd_bar(vd):
+            # type: (float) -> str
+            filled = int(vd * 10)
+            return "🟢" * filled + "⚪" * (10 - filled)
+
+        reasons_txt = ""
+        for r in reasons[:5]:
+            reasons_txt += "  {}\n".format(r)
+
+        # ── الوقت ──────────────────────────────────────────────────
+        now_utc = datetime.now(timezone.utc)
+        time_str = now_utc.strftime("%H:%M UTC")
+
+        msg = (
+            "📡 *4H MARKET REPORT*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🕐 `{}` | {} *{}*\n"
+            "🎯 نقاط الحالة: `{}/100`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "₿ *BTC — التحليل الكامل:*\n"
+            "  TPS: `{:.1f}` صفقة/ثانية\n"
+            "  ATS: `{:.0f} USDT` — {}\n"
+            "  VDelta: `{:.0f}%` {}\n"
+            "  🟢 شراء: `{}` | 🔴 بيع: `{}`\n"
+            "  24h: `{:+.2f}%` | 1h: `{:+.2f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "Ξ *ETH — التحليل الكامل:*\n"
+            "  TPS: `{:.1f}` صفقة/ثانية\n"
+            "  ATS: `{:.0f} USDT` — {}\n"
+            "  VDelta: `{:.0f}%` {}\n"
+            "  🟢 شراء: `{}` | 🔴 بيع: `{}`\n"
+            "  24h: `{:+.2f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 *السوق الكلي:*\n"
+            "  🟢 شراء: `{:.1f}%` ({}) | 🔴 بيع: `{:.1f}%` ({})\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🔍 *أسباب الحكم:*\n"
+            "{}"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "{}\n"
+        ).format(
+            time_str,
+            icon_s, state_emojis.get(state, state),
+            score,
+            btc_tps,
+            btc_ats, _vd_label(btc_vd, btc_ats),
+            btc_vd * 100, _vd_bar(btc_vd),
+            btc_bvol_str, btc_svol_str,
+            btc_change_24h, _btc_1h_now,
+            eth_tps,
+            eth_ats, _vd_label(eth_vd, eth_ats),
+            eth_vd * 100, _vd_bar(eth_vd),
+            eth_bvol_str, eth_svol_str,
+            eth_change_24h,
+            mkt_buy_pct, _fmt_vol(mkt_buy),
+            mkt_sell_pct, _fmt_vol(mkt_sell),
+            reasons_txt,
+            state_advice.get(state, ""),
+        )
+        send(msg)
+        log.info("4h Report | state=%s | score=%d | btc_vd=%.0f%% | eth_vd=%.0f%%",
+                 state, score, btc_vd * 100, eth_vd * 100)
+
+    except Exception as _err:
+        log.error("send_4h_market_report error: %s", _err, exc_info=True)
 
 
 def send_breakout_report():
@@ -12643,6 +12975,7 @@ def run():
     global last_sr_alert
     global perf_signals, perf_id_counter
     global mtf_liq_alerted, last_mtf_liq_scan
+    global last_4h_report
 
     log.info(" MAFIO-BOT ...")
 
@@ -12702,6 +13035,7 @@ def run():
     last_sc_refresh   = 0.0
     last_sr_alert     = 0.0
     last_mtf_liq_scan = 0.0
+    last_4h_report    = 0.0
 
     send(
         "💀 *MAFIO-BOT* 💀\n"
@@ -12800,6 +13134,9 @@ def run():
 
 
             send_daily_report()
+
+            # تقرير 4 ساعات — BTC+ETH ATS/TPS/VDelta + SAFE/CAUTION/DANGER
+            send_4h_market_report()
 
             if now - last_expand      >= EXPAND_EVERY:
 
