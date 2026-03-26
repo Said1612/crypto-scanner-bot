@@ -1670,6 +1670,125 @@ def calc_ob_imbalance(sym, min_vol=500_000):
 
 
 
+def calc_ob_depth_analysis(sym):
+    # type: (str) -> dict
+    """
+    تحليل عميق لدفتر الطلبات — يكشف:
+    1. جدران الشراء الكبيرة (Bid Walls) = دعم مخفي
+    2. جدران البيع الكبيرة (Ask Walls) = مقاومة
+    3. نسبة التركيز: أين تتمركز السيولة في أول 10 مستويات
+    4. Bid Pressure: هل الشراء يضغط على البيع؟
+    """
+    ob = get_order_book(sym)
+    if not ob:
+        return {"has_bid_wall": False, "has_ask_wall": False,
+                "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                "pressure": "neutral", "score": 0}
+    try:
+        raw_bids = ob.get("raw_bids", [])
+        raw_asks = ob.get("raw_asks", [])
+
+        if not raw_bids or not raw_asks:
+            return {"has_bid_wall": False, "has_ask_wall": False,
+                    "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                    "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                    "pressure": "neutral", "score": 0}
+
+        # حساب قيمة كل مستوى
+        bid_levels = [(float(b[0]), float(b[1]), float(b[0]) * float(b[1]))
+                      for b in raw_bids if len(b) >= 2]
+        ask_levels = [(float(a[0]), float(a[1]), float(a[0]) * float(a[1]))
+                      for a in raw_asks if len(a) >= 2]
+
+        if not bid_levels or not ask_levels:
+            return {"has_bid_wall": False, "has_ask_wall": False,
+                    "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                    "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                    "pressure": "neutral", "score": 0}
+
+        total_bid = sum(lv[2] for lv in bid_levels)
+        total_ask = sum(lv[2] for lv in ask_levels)
+
+        avg_bid_lvl = total_bid / len(bid_levels) if bid_levels else 1
+        avg_ask_lvl = total_ask / len(ask_levels) if ask_levels else 1
+
+        # كشف جدران الشراء
+        bid_wall_val  = 0.0
+        bid_wall_pct  = 0.0
+        has_bid_wall  = False
+        for price, qty, val in bid_levels:
+            if val >= avg_bid_lvl * OB_WALL_RATIO and val >= OB_WALL_MIN_USDT:
+                has_bid_wall = True
+                bid_wall_val = max(bid_wall_val, val)
+        if total_bid > 0:
+            bid_wall_pct = round(bid_wall_val / total_bid * 100, 1)
+
+        # كشف جدران البيع
+        ask_wall_val  = 0.0
+        ask_wall_pct  = 0.0
+        has_ask_wall  = False
+        for price, qty, val in ask_levels:
+            if val >= avg_ask_lvl * OB_WALL_RATIO and val >= OB_WALL_MIN_USDT:
+                has_ask_wall = True
+                ask_wall_val = max(ask_wall_val, val)
+        if total_ask > 0:
+            ask_wall_pct = round(ask_wall_val / total_ask * 100, 1)
+
+        # تركيز السيولة في أول 10 مستويات
+        top10_bid = sum(lv[2] for lv in bid_levels[:10])
+        top10_ask = sum(lv[2] for lv in ask_levels[:10])
+        top10_bid_ratio = round(top10_bid / total_bid, 2) if total_bid > 0 else 0.0
+        top10_ask_ratio = round(top10_ask / total_ask, 2) if total_ask > 0 else 0.0
+
+        # ضغط الشراء مقابل البيع
+        imb = ob.get("imb", 1.0)
+        if imb >= 2.0 and has_bid_wall:
+            pressure = "strong_buy"
+        elif imb >= 1.5:
+            pressure = "buy"
+        elif imb <= 0.5 and has_ask_wall:
+            pressure = "strong_sell"
+        elif imb <= 0.7:
+            pressure = "sell"
+        else:
+            pressure = "neutral"
+
+        # نتيجة تحليل OB (0-100)
+        score = 0
+        if has_bid_wall:
+            score += 30
+            if bid_wall_pct >= 30:
+                score += 20
+        if imb >= 2.0:
+            score += 25
+        elif imb >= 1.5:
+            score += 15
+        if top10_bid_ratio >= 0.6:
+            score += 10
+        if not has_ask_wall:
+            score += 15
+
+        return {
+            "has_bid_wall":     has_bid_wall,
+            "has_ask_wall":     has_ask_wall,
+            "bid_wall_pct":     bid_wall_pct,
+            "ask_wall_pct":     ask_wall_pct,
+            "top10_bid_ratio":  top10_bid_ratio,
+            "top10_ask_ratio":  top10_ask_ratio,
+            "pressure":         pressure,
+            "score":            min(score, 100),
+            "imb":              round(imb, 2),
+            "total_bid":        round(total_bid, 0),
+            "total_ask":        round(total_ask, 0),
+        }
+    except (ValueError, TypeError, ZeroDivisionError):
+        return {"has_bid_wall": False, "has_ask_wall": False,
+                "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                "pressure": "neutral", "score": 0}
+
+
 def calc_direction_engine(sym, interval="1h"):
     # type: (str, str) -> dict
     kd = get_klines(sym, interval, 60)
@@ -5717,15 +5836,7 @@ def refresh_tickers():
 
 
 
-# TPS/ATS + Volume Delta
-
-TPS_LIMIT         = 100
-TPS_SPIKE         = 2.0
-ATS_WHALE         = 2000
-ATS_RETAIL        = 500
-VDELTA_STRONG     = 0.65
-TPS_COOLDOWN      = 7200
-TPS_SCAN_EVERY    = 300
+# TPS/ATS + Volume Delta  (القيم المرجعية في الأعلى: ATS_WHALE=5000, VDELTA_STRONG=0.70)
 
 
 
@@ -5746,6 +5857,19 @@ LH_BTC_DIV_MIN    = 1.5
 LH_COOLDOWN       = 14400
 LH_SCORE_MIN      = 50
 LH_SCAN_EVERY     = 300
+
+# Order Book Deep Analysis
+OB_DEPTH_LIMIT   = 50        # عمق دفتر الطلبات (مستوى)
+OB_WALL_RATIO    = 4.0       # الجدار = 4× متوسط مستوى واحد
+OB_WALL_MIN_USDT = 50_000    # حجم الجدار الأدنى بـ USDT
+
+# Multi-Timeframe Liquidity Scanner
+MTF_LIQ_EVERY    = 600       # كل 10 دقائق
+MTF_LIQ_COOLDOWN = 10800     # 3 ساعات بين تنبيهات نفس العملة
+MTF_LIQ_SCORE    = 65        # الحد الأدنى للنتيجة
+MTF_LIQ_MIN_TF   = 2         # يجب أن يوافق إطارين على الأقل
+MTF_VOL_SPIKE    = 2.0       # حجم الإطار يرتفع 2× المتوسط
+MTF_PRICE_MAX    = 5.0       # السعر لا يتجاوز 5% تغيير
 
 
 
@@ -5857,7 +5981,7 @@ def whale_watch_add(sym, ats, vdelta, price):
     """يضيف عملة لقائمة مراقبة الحيتان"""
     global whale_watchlist
 
-    if vdelta < 0.60:
+    if vdelta < 0.55:
         log.debug(" whale_watch_add rejected: %s | VDelta=%.0f%% < 55%%", sym, vdelta*100)
         return
     if sym not in whale_watchlist:
@@ -6177,9 +6301,10 @@ def scan_whale_confirmation(price_map):
         _early_entry   = ats >= max(300, _j_ats*2) and vdelta >= 0.70
         _normal_entry  = ats >= WHALE_ATS_MIN and vdelta >= WHALE_VDELTA_MIN
         _big_whale     = ats >= ATS_WHALE and vdelta >= 0.50
-        _small_cap     = _j_ats <= 50 and ats >= _j_ats and vdelta >= 0.70
+        _small_cap     = _j_ats <= 50 and ats >= _j_ats and vdelta >= 0.58     # كان 0.70
+        _tier_entry    = ats >= _j_ats and vdelta >= _j_tier["vdelta_min"]     # tier catch-all
 
-        if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale or _small_cap):
+        if not (_vdelta_strong or _early_entry or _normal_entry or _big_whale or _small_cap or _tier_entry):
             continue
 
 
@@ -6196,9 +6321,14 @@ def scan_whale_confirmation(price_map):
 
 
         _macd_hist = calc_macd_histogram(sym, "1h")
-        if _macd_hist < 0:
-            log.info(" MACD FALLING: %s | hist=%.6f", sym, _macd_hist)
+        # نجعل الحد نسبياً بالسعر حتى يعمل مع العملات الرخيصة ($0.001 مقابل $100)
+        _macd_pct_of_price = abs(_macd_hist / price) * 100 if price > 0 else 0
+        _macd_bad = _macd_hist < 0 and _macd_pct_of_price > 0.05   # أكثر من 0.05% من السعر نزولاً
+        if _macd_bad and not _in_hot_sector and not _big_whale and not _tier_entry:
+            log.info(" MACD BLOCK: %s | delta=%.8f (%.4f%% of price)", sym, _macd_hist, _macd_pct_of_price)
             continue
+        if _macd_hist < 0:
+            log.info(" MACD soft pass: %s | %.8f (%.4f%%)", sym, _macd_hist, _macd_pct_of_price)
 
 
         _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER")
@@ -8008,9 +8138,107 @@ def get_tier_settings(vol_24h):
 
 
 
+_early_accum_seen    = {}  # {sym: timestamp} آخر اضافة للقائمة من المسح المبكر
+EARLY_ACCUM_EVERY    = 300   # فحص كل 5 دقائق
+EARLY_ACCUM_COOLDOWN = 3600  # لا تعيد الاضافة قبل ساعة
+last_early_accum_scan = 0.0
+
+
+def scan_early_accumulation(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🔍 Early Accumulation Scanner — يكتشف مراحل التجميع المبكر قبل الانفجار
+    يضيف للـ whale_watchlist بدون إرسال تنبيه مباشر — الجوكر يؤكد لاحقاً
+
+    المعايير:
+    - VDelta >= tier_min (0.55+ small, 0.58+ mid, 0.60+ big)
+    - TPS spike >= 1.5× baseline (نشاط متصاعد)
+    - 24h change بين -6% و +10% (لم يتحرك بعد = مبكر)
+    - حجم كافٍ (tier-based)
+    """
+    global _early_accum_seen, last_early_accum_scan
+    now = time.time()
+
+    if now - last_early_accum_scan < EARLY_ACCUM_EVERY:
+        return
+    last_early_accum_scan = now
+
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in all_syms],
+        key=lambda x: -x[1]
+    )[:80]
+
+    added = 0
+    for sym, vol in ranked:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS:
+            continue
+
+        _tier = get_tier_settings(vol)
+        if vol < _tier["vol_min"]:
+            continue
+
+        if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
+            continue
+        if now - _early_accum_seen.get(sym, 0) < EARLY_ACCUM_COOLDOWN:
+            continue
+        if sym in whale_watchlist:
+            continue
+        if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
+            continue
+
+        chg24 = changes_map.get(sym, 0)
+        # Must be in quiet zone — not already pumped, not in deep dump
+        if chg24 >= 10.0 or chg24 <= -8.0:
+            continue
+
+        stats = analyze_tps_ats(sym)
+        if not stats:
+            continue
+
+        ats    = stats["ats"]
+        vdelta = stats["vdelta"]
+        tps    = stats["tps"]
+
+        # VDelta must meet tier minimum for early accumulation
+        _vd_min = _tier["vdelta_min"]
+        if vdelta < _vd_min:
+            continue
+
+        # TPS spike — modest (1.5×) is enough for early detection
+        base_tps = tps_baseline.get(sym, 0)
+        if base_tps > 0:
+            ratio = tps / base_tps
+        else:
+            # لا baseline بعد — نستخدم قيمة مطلقة: tps >= 1.0 كافي
+            ratio = 2.5 if tps >= 1.5 else (1.8 if tps >= 0.8 else (1.5 if tps >= 0.3 else 0.0))
+        if ratio < 1.5:
+            continue
+
+        # ATS must meet tier minimum
+        if ats < _tier["ats_min"]:
+            continue
+
+        # Check OB — don't add if heavy ask pressure
+        _ob = calc_ob_imbalance(sym)
+        if _ob.get("signal") == "strong_sell":
+            continue
+
+        price = price_map.get(sym, 0)
+        whale_watch_add(sym, ats, vdelta, price)
+        _early_accum_seen[sym] = now
+        added += 1
+        log.info(" EARLY_ACCUM: %s | VD=%.0f%% | TPS×%.1f | ATS=%.0f$ | 24h=%.1f%%",
+                 sym, vdelta*100, ratio, ats, chg24)
+
+    if added > 0:
+        log.info(" scan_early_accumulation: added %d coins to whale_watchlist", added)
+
+
 def scan_tps_ats(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
-    log.info(" scan_tps_ats V20 - VDelta filter >= 65%%")
+    log.info(" scan_tps_ats V21 - tier-based thresholds")
     """
     يفحص أفضل 40 عملة بالحجم
     يبحث عن: TPS spike + ATS حيتان + VDelta قوي
@@ -8079,6 +8307,9 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         elif ratio >= 2.0:
             score += 15
             signals.append("⚡ TPS {:.1f}×".format(ratio))
+        elif ratio >= 1.5:
+            score += 8
+            signals.append("⚡ TPS {:.1f}×".format(ratio))
 
         if ats >= ATS_WHALE:
             score += 35
@@ -8086,12 +8317,24 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         elif ats >= 2000:
             score += 20
             signals.append("🐟 ATS {:.0f}$".format(ats))
+        elif ats >= _tier["ats_min"] * 3:
+            score += 18
+            signals.append("🐟 ATS {:.0f}$".format(ats))
+        elif ats >= _tier["ats_min"]:
+            score += 10
+            signals.append("🦐 ATS {:.0f}$".format(ats))
 
         if vdelta >= VDELTA_STRONG:
             score += 25
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
+        elif vdelta >= 0.65:
+            score += 18
+            signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
         elif vdelta >= 0.60:
             score += 12
+            signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
+        elif vdelta >= _tier["vdelta_min"]:
+            score += 6
             signals.append("💚 VDelta {:.0f}%".format(vdelta * 100))
 
         _tps_min = 0.2 if sym in EXTRA_COINS else 0.5
@@ -8102,19 +8345,23 @@ def scan_tps_ats(price_map, vol_now, changes_map):
 
 
         if BULL_MODE_ACTIVE:
-            _ready = _vdelta >= 0.65
+            _ready = _vdelta >= _tier["vdelta_min"]
         else:
             _ready = (
                 _vdelta >= 0.75
                 or _vdelta >= 0.65
-                or (_vdelta >= 0.58 and _tps >= 0.3 and _ats >= 50)
-                or (_vdelta >= 0.58 and _ats >= 200)
+                or (_vdelta >= _tier["vdelta_min"] and _tps >= 0.3 and _ats >= _tier["ats_min"])
+                or (_vdelta >= _tier["vdelta_min"] and _ats >= _tier["ats_min"] * 2)
             )
 
-        if _vdelta < 0.66:
+        # Use tier-based VDelta threshold
+        if _vdelta < max(_tier["vdelta_min"] - 0.02, 0.53):
             continue
 
-        if score >= 55 and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= 200:
+        # Tier-based score threshold: small-cap=30, mid=42, big=55
+        _tier_ats_min = _tier["ats_min"]
+        _score_min    = {"big": 55, "mid": 42, "small": 30}.get(get_coin_tier(vol), 55)
+        if score >= _score_min and len(signals) >= 2 and _tps >= _tps_min and _ready and stats.get("ats", 0) >= _tier_ats_min:
             chg = changes_map.get(sym, 0)
             results.append((score, sym, signals, stats, chg, vol))
 
@@ -8257,7 +8504,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         perf_register(sym, price_map.get(sym, 0), "tps_ats", score, " | ".join(signals))
 
 
-        if ats < WHALE_ATS_MIN and vdelta >= 0.65:
+        if ats < WHALE_ATS_MIN and vdelta >= 0.60:
             whale_watch_add(sym, ats, vdelta, price_map.get(sym, 0))
         log.info(" TPS/ATS | %s | score=%d | tps=%.1f | ats=%.0f | vdelta=%.0f%%",
                  sym, score, stats["tps"], stats["ats"], stats["vdelta"] * 100)
@@ -8379,6 +8626,32 @@ def liquidity_hunter(price_map, vol_now, changes_map):
             signals.append("📈 VolTrend {}/4".format(vol_trend))
 
 
+        # ── سيناريو 5: OB Bid Wall ─────────────────────────────────
+        # جدار شراء ضخم في دفتر الطلبات = دعم مخفي محمي
+        try:
+            ob_deep = calc_ob_depth_analysis(sym)
+            if ob_deep.get("has_bid_wall") and not ob_deep.get("has_ask_wall"):
+                ob_score = ob_deep.get("score", 0)
+                if ob_score >= 40:
+                    pts = min(ob_score // 2, 35)
+                    score += pts
+                    signals.append("🧱 BidWall {:.0f}% imb:{:.1f}×".format(
+                        ob_deep.get("bid_wall_pct", 0),
+                        ob_deep.get("imb", 1.0)
+                    ))
+        except Exception:
+            ob_deep = {}
+
+        # ── سيناريو 6: CVD صاعد ────────────────────────────────────
+        # ضغط شراء تراكمي مستمر = أموال حقيقية تدخل
+        try:
+            cvd = calc_cvd(sym, "15m", 24)
+            if cvd.get("trend") == "rising" and cvd.get("pct_change", 0) >= 8:
+                pts = min(int(cvd["pct_change"] * 0.8), 30)
+                score += pts
+                signals.append("📊 CVD↑ +{:.0f}%".format(cvd["pct_change"]))
+        except Exception:
+            pass
 
 
         if score >= LH_SCORE_MIN and len(signals) >= 2:
@@ -8656,6 +8929,199 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
 
 
 
+
+
+
+# ══════════════════════════════════════════════════════════════════
+#  MULTI-TIMEFRAME LIQUIDITY SCANNER  — V17
+# ══════════════════════════════════════════════════════════════════
+
+mtf_liq_alerted   = {}   # type: Dict[str, float]  {sym: last_alert_time}
+last_mtf_liq_scan = 0.0
+
+
+def _check_tf_liquidity(sym, interval, limit):
+    # type: (str, str, int) -> dict
+    """
+    يفحص سيولة عملة في إطار زمني واحد.
+    يعيد: confirmed (bool), vol_ratio, price_chg, wick_count, cvd_rising
+    """
+    kd = get_klines(sym, interval, limit)
+    if not kd or len(kd.get("closes", [])) < limit // 2:
+        return {"confirmed": False, "vol_ratio": 0.0, "price_chg": 99.0,
+                "wick_count": 0, "cvd_rising": False}
+
+    closes = kd["closes"]
+    opens  = kd["opens"]
+    vols   = kd["vols"]
+    lows   = kd["lows"]
+    n      = len(closes)
+
+    avg_vol = sum(vols) / n if n > 0 else 1
+    if avg_vol <= 0:
+        return {"confirmed": False, "vol_ratio": 0.0, "price_chg": 99.0,
+                "wick_count": 0, "cvd_rising": False}
+
+    vol_last  = sum(vols[-3:]) / 3
+    vol_ratio = vol_last / avg_vol
+
+    price_chg = abs((closes[-1] - closes[-4]) / closes[-4] * 100) if len(closes) >= 4 and closes[-4] > 0 else 99
+
+    wick_count = 0
+    for i in range(-4, 0):
+        body       = abs(closes[i] - opens[i])
+        lower_wick = min(opens[i], closes[i]) - lows[i]
+        if body > 0 and lower_wick > body * 1.5:
+            wick_count += 1
+
+    cumul = 0.0
+    cvd_vals = []
+    for i in range(n):
+        vol = vols[i] if i < len(vols) else 0
+        cumul += vol if closes[i] >= opens[i] else -vol
+        cvd_vals.append(cumul)
+
+    cvd_rising = False
+    if len(cvd_vals) >= 6:
+        first3 = sum(cvd_vals[:3]) / 3
+        last3  = sum(cvd_vals[-3:]) / 3
+        if first3 != 0 and last3 > first3 * 1.05:
+            cvd_rising = True
+
+    confirmed = (
+        vol_ratio >= MTF_VOL_SPIKE
+        and price_chg <= MTF_PRICE_MAX
+        and (wick_count >= 2 or cvd_rising)
+    )
+
+    return {
+        "confirmed":  confirmed,
+        "vol_ratio":  round(vol_ratio, 2),
+        "price_chg":  round(price_chg, 2),
+        "wick_count": wick_count,
+        "cvd_rising": cvd_rising,
+    }
+
+
+def scan_multi_timeframe_liquidity(price_map=None, vol_now=None, changes_map=None):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🕐 MULTI-TIMEFRAME LIQUIDITY — V17
+    يفحص 3 أطر زمنية دفعة واحدة: 15m + 1h + 4h
+    يرسل تنبيه فقط عند توافق ≥ MTF_LIQ_MIN_TF إطارات
+
+    ● إطار واحد = ضجيج عادي
+    ● إطارين   = سيولة حقيقية 🔥
+    ● ثلاثة     = إشارة ذهبية 🐋
+    """
+    global mtf_liq_alerted, last_mtf_liq_scan
+    now = time.time()
+
+    if now - last_mtf_liq_scan < MTF_LIQ_EVERY:
+        return
+    last_mtf_liq_scan = now
+
+    if not all_tickers:
+        return
+
+    price_map   = price_map   or {}
+    vol_now     = vol_now     or {}
+    changes_map = changes_map or {}
+
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in all_syms
+         if vol_now.get(s, 0) >= 150_000
+         and now - mtf_liq_alerted.get(s, 0) >= MTF_LIQ_COOLDOWN
+         and now - coin_alerted.get(s, 0) >= MTF_LIQ_COOLDOWN // 2],
+        key=lambda x: -x[1]
+    )[:80]
+
+    results = []
+
+    for sym, vol in ranked:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS:
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        tf15 = _check_tf_liquidity(sym, "15m", 20)
+        tf1h = _check_tf_liquidity(sym, "1h",  12)
+        tf4h = _check_tf_liquidity(sym, "4h",  10)
+
+        confirmed_tfs = []
+        if tf15.get("confirmed"):
+            confirmed_tfs.append(("15m", tf15))
+        if tf1h.get("confirmed"):
+            confirmed_tfs.append(("1h",  tf1h))
+        if tf4h.get("confirmed"):
+            confirmed_tfs.append(("4h",  tf4h))
+
+        if len(confirmed_tfs) < MTF_LIQ_MIN_TF:
+            continue
+
+        score     = len(confirmed_tfs) * 30
+        max_vol_r = max(tf["vol_ratio"] for _, tf in confirmed_tfs)
+        score    += min(int(max_vol_r * 10), 25)
+
+        cvd1h  = calc_cvd(sym, "1h", 12)
+        ob_imb = calc_ob_imbalance(sym)
+        ob_buy = ob_imb.get("signal") in ("buy", "strong_buy")
+        if ob_buy:
+            score += 10
+        if cvd1h.get("trend") == "rising":
+            score += 10
+
+        if score < MTF_LIQ_SCORE:
+            continue
+
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+        chg    = changes_map.get(sym, 0)
+
+        tf_lines = []
+        for tf_name, tf_data in confirmed_tfs:
+            wick_tag = " 🕯️×{}".format(tf_data["wick_count"]) if tf_data["wick_count"] >= 2 else ""
+            cvd_tag  = " CVD↑" if tf_data["cvd_rising"] else ""
+            tf_lines.append("  ✅ `{}` حجم `{:.1f}×`{}{}".format(
+                tf_name, tf_data["vol_ratio"], wick_tag, cvd_tag
+            ))
+
+        stars   = "🐋🔥" if len(confirmed_tfs) == 3 else "🔥"
+        triple  = " — ثلاثي 🏆" if len(confirmed_tfs) == 3 else ""
+        ob_line = "  📒 OB: `{}`".format(ob_imb.get("signal", "—")) if ob_buy else ""
+
+        msg = (
+            "{} *MTF LIQUIDITY{}*\n".format(stars, triple)
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "🎯 *{}* — سيولة متعددة الأطر!\n".format(base)
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "📡 *الأطر المؤكدة ({}/3)* :\n".format(len(confirmed_tfs))
+            + "\n".join(tf_lines) + "\n"
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "💵 السعر: `{}`  |  24h: `{:+.1f}%`\n".format(fmt_price(price), chg)
+            + (ob_line + "\n" if ob_line else "")
+            + "🏷️ القطاع: `{}`\n".format(sector)
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "⚡ _{} إطارات تؤكد — سيولة حقيقية_ 🌊".format(len(confirmed_tfs))
+        )
+
+        results.append((score, sym, msg, price))
+
+    if not results:
+        return
+
+    results.sort(key=lambda x: -x[0])
+    for score, sym, msg, price in results[:3]:
+        send(msg)
+        mtf_liq_alerted[sym] = now
+        coin_alerted[sym]    = now
+        perf_register(sym, price, "mtf_liq", score, "MTF_confirmed")
+        log.info(" MTF Liq | %s | score=%d", sym, score)
 
 
 def detect_hidden_accumulation(kd, ob=None):
@@ -8971,13 +9437,22 @@ def detect_pre_breakout(symbol):
 
 def get_order_book(symbol):
     # type: (str) -> Optional[Dict]
-    data = safe_get(MEXC_DEPTH, {"symbol": symbol, "limit": 20})
+    data = safe_get(MEXC_DEPTH, {"symbol": symbol, "limit": OB_DEPTH_LIMIT})
     if not data: return None
     try:
-        bid = sum(float(b[0])*float(b[1]) for b in data.get("bids",[]))
-        ask = sum(float(a[0])*float(a[1]) for a in data.get("asks",[]))
-        return {"bid": bid, "ask": ask, "imb": bid/ask if ask>0 else 99}
-    except: return None
+        raw_bids = data.get("bids", [])
+        raw_asks = data.get("asks", [])
+        bid = sum(float(b[0]) * float(b[1]) for b in raw_bids)
+        ask = sum(float(a[0]) * float(a[1]) for a in raw_asks)
+        return {
+            "bid":      bid,
+            "ask":      ask,
+            "imb":      bid / ask if ask > 0 else 99,
+            "raw_bids": raw_bids,
+            "raw_asks": raw_asks,
+        }
+    except:
+        return None
 
 
 
@@ -10518,6 +10993,50 @@ def _send_daily_report_body(today, now_utc):
 
     flow_sum = get_flow_summary()
 
+    # ── نسبة سيولة كل قطاع من إجمالي السوق ──────────────────────
+    sector_liq_block = ""
+    try:
+        _sector_vol_map = {}
+        _tick_map = {t["symbol"]: t for t in all_tickers}
+        for _sec, _coins in SECTORS.items():
+            _sv = 0.0
+            _buy_s = 0.0
+            _sell_s = 0.0
+            for _sc in _coins:
+                _t2 = _tick_map.get(_sc)
+                if not _t2:
+                    continue
+                try:
+                    _v2 = float(_t2.get("quoteVolume", 0))
+                    _c2 = float(_t2.get("priceChangePercent", 0))
+                    _sv += _v2
+                    if _c2 > 0:
+                        _buy_s += _v2
+                    else:
+                        _sell_s += _v2
+                except (ValueError, TypeError):
+                    pass
+            if _sv >= 10_000:
+                _sv_b = _buy_s / _sv if _sv > 0 else 0.5
+                _sector_vol_map[_sec] = (_sv, _sv_b)
+
+        _grand_total = sum(v for v, _ in _sector_vol_map.values())
+        if _grand_total > 0:
+            _sorted_secs = sorted(_sector_vol_map.items(), key=lambda x: -x[1][0])
+            sector_liq_block = "━━━━━━━━━━━━━━━━━━\n"
+            sector_liq_block += "🏦 *نسبة السيولة لكل قطاع (24h):*\n"
+            for _sname, (_sv, _sv_b) in _sorted_secs[:8]:
+                _pct_total = _sv / _grand_total * 100
+                _buy_bar   = int(_sv_b * 5)
+                _sell_bar  = 5 - _buy_bar
+                _bar_str   = "🟢" * _buy_bar + "🔴" * _sell_bar
+                _vol_str   = "{:.1f}B".format(_sv / 1e9) if _sv >= 1e9 else "{:.0f}M".format(_sv / 1e6)
+                _flow_icon = "🔥" if _sv_b >= 0.60 else ("⚠️" if _sv_b <= 0.40 else "")
+                sector_liq_block += "  *{}* `{:.1f}%` ({}) {} {}\n".format(
+                    _sname, _pct_total, _vol_str, _bar_str, _flow_icon
+                )
+    except Exception as _se:
+        log.error("sector_liq_block error: %s", _se)
 
     _btc         = float(btc_ch)          if btc_ch          is not None else 0.0
 
@@ -10561,9 +11080,12 @@ def _send_daily_report_body(today, now_utc):
         "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol})\n"
         "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol})\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "💰 *تدفق رأس المال:*\n"
+        "💰 *تدفق رأس المال (24h):*\n"
         "  {arrow} حجم السوق: `{vol_ch}` عن أمس\n"
         "  📦 إجمالي: `{total_vol}` USDT\n"
+        "  🟢 شراء:   `{buy:.1f}%` = `{buy_vol}` USDT\n"
+        "  🔴 بيع:    `{sell:.1f}%` = `{sell_vol}` USDT\n"
+        "{sector_liq}"
         "━━━━━━━━━━━━━━━━━━\n"
         "💸 *تدفق السيولة بين القطاعات:*\n"
         "{flow}"
@@ -10580,18 +11102,18 @@ def _send_daily_report_body(today, now_utc):
             "  🐋 BTC TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
                 btc_tps_stats.get("tps",0), btc_tps_stats.get("ats",0),
                 btc_tps_stats.get("vdelta",0.5)*100,
-                "حيتان يشترون 🔥" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) >= 0.65
+                "🐋 حيتان يشترون 🔥" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) >= VDELTA_STRONG
                 else ("🔴 حيتان يبيعون!" if btc_tps_stats.get("ats",0) >= ATS_WHALE and btc_tps_stats.get("vdelta",0) < 0.40
-                else "نشاط عادي")
+                else ("⚡ شراء متوسط" if btc_tps_stats.get("vdelta",0) >= 0.55 else "نشاط عادي"))
             ) if btc_tps_stats else ""
         ),
         eth_tps_line=(
-            "  🐋 ETH TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
+            "  🔷 ETH TPS:`{:.1f}` ATS:`{:.0f}$` VD:`{:.0f}%` — {}\n".format(
                 eth_tps_stats.get("tps",0), eth_tps_stats.get("ats",0),
                 eth_tps_stats.get("vdelta",0.5)*100,
-                "حيتان يشترون 🔥" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) >= 0.65
+                "🐋 حيتان يشترون 🔥" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) >= VDELTA_STRONG
                 else ("🔴 حيتان يبيعون!" if eth_tps_stats.get("ats",0) >= ATS_WHALE and eth_tps_stats.get("vdelta",0) < 0.40
-                else "نشاط عادي")
+                else ("⚡ شراء متوسط" if eth_tps_stats.get("vdelta",0) >= 0.55 else "نشاط عادي"))
             ) if eth_tps_stats else ""
         ),
         mkt_icon=_mkt_icons.get(_display_state,"📊"), mkt_state=_display_state,
@@ -10604,13 +11126,10 @@ def _send_daily_report_body(today, now_utc):
         sell_vol=("{:.2f}B".format(_sell_vol/1_000_000_000) if _sell_vol>=1_000_000_000 else "{:.0f}M".format(_sell_vol/1_000_000)),
         arrow=vol_arrow,
         vol_ch=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة 📊"),
-        
         total_vol=("{:.2f}B".format(_total_vol/1_000_000_000) if _total_vol>=1_000_000_000 else "{:.0f}M".format(_total_vol/1_000_000)),
-        vol_chg=("{:+.1f}%".format(vol_change_pct) if vol_change_pct is not None else "بيانات جديدة"),
-
+        sector_liq=sector_liq_block,
         flow=flow_sum,
         action=whale_action,
-
     )
 
 
@@ -10696,6 +11215,302 @@ def _send_daily_report_body(today, now_utc):
 
 
 
+
+
+
+
+# ══════════════════════════════════════════════════════════════════
+#  4-HOUR MARKET REPORT — BTC + ETH ATS/TPS/VDelta
+# ══════════════════════════════════════════════════════════════════
+
+REPORT_4H_EVERY   = 14400   # كل 4 ساعات
+last_4h_report    = 0.0
+
+# عتبات تحديد حالة السوق في التقرير الرباعي
+_4H_SAFE_VD       = 0.58    # VDelta >= 58% = SAFE
+_4H_DANGER_VD     = 0.42    # VDelta <= 42% = DANGER
+_4H_SAFE_BTC      = -1.0    # BTC 1h >= -1% = لا خطر
+_4H_DANGER_BTC    = -2.0    # BTC 1h <= -2% = خطر
+
+
+def _fmt_vol(v):
+    # type: (float) -> str
+    if v >= 1_000_000_000:
+        return "{:.2f}B".format(v / 1_000_000_000)
+    return "{:.0f}M".format(v / 1_000_000)
+
+
+def _market_state_from_metrics(btc_vd, eth_vd, mkt_vd, btc_1h, btc_24h, ats_btc, ats_eth):
+    # type: (float, float, float, float, float, float, float) -> tuple
+    """
+    يحسب حالة السوق الفعلية بناءً على المؤشرات المجمّعة.
+    يعيد: (state, score, reasons)
+    state:   SAFE / CAUTION / DANGER
+    score:   0-100
+    reasons: قائمة بالأسباب
+    """
+    score   = 50   # نقطة البداية محايد
+    reasons = []
+
+    # ── VDelta BTC ─────────────────────────────────────────────────
+    if btc_vd >= 0.65:
+        score += 20
+        reasons.append("✅ BTC VDelta قوي `{:.0f}%`".format(btc_vd * 100))
+    elif btc_vd >= _4H_SAFE_VD:
+        score += 10
+        reasons.append("🟡 BTC VDelta متوسط `{:.0f}%`".format(btc_vd * 100))
+    elif btc_vd <= _4H_DANGER_VD:
+        score -= 25
+        reasons.append("🔴 BTC VDelta ضعيف `{:.0f}%` — ضغط بيعي".format(btc_vd * 100))
+    else:
+        score -= 5
+
+    # ── VDelta ETH ─────────────────────────────────────────────────
+    if eth_vd >= 0.65:
+        score += 10
+        reasons.append("✅ ETH VDelta قوي `{:.0f}%`".format(eth_vd * 100))
+    elif eth_vd <= _4H_DANGER_VD:
+        score -= 15
+        reasons.append("🔴 ETH VDelta ضعيف `{:.0f}%`".format(eth_vd * 100))
+
+    # ── ATS حجم الصفقة المتوسط ────────────────────────────────────
+    if ats_btc >= ATS_WHALE:
+        if btc_vd >= VDELTA_STRONG:
+            score += 15
+            reasons.append("🐋 BTC — حيتان يشترون! ATS:`{:.0f}$`".format(ats_btc))
+        else:
+            score -= 10
+            reasons.append("🐋 BTC — حيتان يبيعون! ATS:`{:.0f}$`".format(ats_btc))
+    elif ats_btc >= ATS_RETAIL:
+        if btc_vd >= 0.55:
+            score += 5
+            reasons.append("🐟 BTC — شراء مؤسسي متوسط ATS:`{:.0f}$`".format(ats_btc))
+
+    if ats_eth >= ATS_WHALE:
+        if eth_vd >= VDELTA_STRONG:
+            score += 8
+            reasons.append("🐋 ETH — حيتان يشترون! ATS:`{:.0f}$`".format(ats_eth))
+        else:
+            score -= 8
+            reasons.append("🐋 ETH — حيتان يبيعون! ATS:`{:.0f}$`".format(ats_eth))
+
+    # ── BTC السعر 1h / 4h ─────────────────────────────────────────
+    if btc_1h <= _4H_DANGER_BTC:
+        score -= 20
+        reasons.append("📉 BTC 1h: `{:+.2f}%` — هبوط حاد".format(btc_1h))
+    elif btc_1h <= _4H_SAFE_BTC:
+        score -= 8
+        reasons.append("⚠️ BTC 1h: `{:+.2f}%`".format(btc_1h))
+    elif btc_1h >= 1.0:
+        score += 10
+        reasons.append("📈 BTC 1h: `{:+.2f}%` — زخم صاعد".format(btc_1h))
+
+    if btc_24h <= -3.0:
+        score -= 15
+        reasons.append("🔴 BTC 24h: `{:+.2f}%` — نزول قوي".format(btc_24h))
+    elif btc_24h >= 3.0:
+        score += 8
+        reasons.append("🟢 BTC 24h: `{:+.2f}%`".format(btc_24h))
+
+    # ── VDelta السوق الكلي ────────────────────────────────────────
+    if mkt_vd >= 0.60:
+        score += 5
+        reasons.append("✅ السوق: شراء كلي `{:.0f}%`".format(mkt_vd * 100))
+    elif mkt_vd <= 0.40:
+        score -= 10
+        reasons.append("🔴 السوق: بيع كلي `{:.0f}%`".format(mkt_vd * 100))
+
+    score = max(0, min(100, score))
+
+    if score >= 65:
+        state = "SAFE"
+    elif score >= 40:
+        state = "CAUTION"
+    else:
+        state = "DANGER"
+
+    return state, score, reasons
+
+
+def send_4h_market_report():
+    # type: () -> None
+    """
+    📡 تقرير السوق كل 4 ساعات
+    يحسب ATS / TPS / VDelta لـ BTC و ETH
+    ويصدر حكم: SAFE / CAUTION / DANGER مع الأسباب
+    """
+    global last_4h_report
+    now = time.time()
+
+    if now - last_4h_report < REPORT_4H_EVERY:
+        return
+    last_4h_report = now
+
+    if not all_tickers:
+        return
+
+    try:
+        # ── جلب بيانات BTC / ETH ───────────────────────────────────
+        btc_stats = analyze_tps_ats("BTCUSDT")
+        eth_stats = analyze_tps_ats("ETHUSDT")
+
+        if not btc_stats and not eth_stats:
+            log.warning("4h report: لا بيانات TPS/ATS")
+            return
+
+        btc_tps   = btc_stats.get("tps",   0.0) if btc_stats else 0.0
+        btc_ats   = btc_stats.get("ats",   0.0) if btc_stats else 0.0
+        btc_vd    = btc_stats.get("vdelta", 0.5) if btc_stats else 0.5
+        btc_bvol  = btc_stats.get("buy_vol",  0.0) if btc_stats else 0.0
+        btc_svol  = btc_stats.get("sell_vol", 0.0) if btc_stats else 0.0
+
+        eth_tps   = eth_stats.get("tps",   0.0) if eth_stats else 0.0
+        eth_ats   = eth_stats.get("ats",   0.0) if eth_stats else 0.0
+        eth_vd    = eth_stats.get("vdelta", 0.5) if eth_stats else 0.5
+        eth_bvol  = eth_stats.get("buy_vol",  0.0) if eth_stats else 0.0
+        eth_svol  = eth_stats.get("sell_vol", 0.0) if eth_stats else 0.0
+
+        # ── حجم السوق الكلي buy/sell من all_tickers ────────────────
+        mkt_buy = 0.0
+        mkt_sell = 0.0
+        for _t in all_tickers:
+            try:
+                _v = float(_t.get("quoteVolume", 0))
+                _c = float(_t.get("priceChangePercent", 0))
+                if _v < 50_000:
+                    continue
+                _sym = _t.get("symbol", "")
+                if not _sym.endswith("USDT"):
+                    continue
+                if _c > 0:
+                    mkt_buy += _v
+                else:
+                    mkt_sell += _v
+            except (ValueError, TypeError):
+                pass
+
+        mkt_total = mkt_buy + mkt_sell
+        mkt_buy_pct  = mkt_buy  / mkt_total * 100 if mkt_total > 0 else 50
+        mkt_sell_pct = mkt_sell / mkt_total * 100 if mkt_total > 0 else 50
+        mkt_vd       = mkt_buy  / mkt_total        if mkt_total > 0 else 0.5
+
+        # ── BTC سعر 1h ─────────────────────────────────────────────
+        _btc_1h_now = 0.0
+        try:
+            _kd = get_klines("BTCUSDT", "1h", 3)
+            if _kd and len(_kd["closes"]) >= 2:
+                _btc_1h_now = (_kd["closes"][-1] - _kd["closes"][-2]) / _kd["closes"][-2] * 100
+        except Exception:
+            _btc_1h_now = float(btc_trend_1h) if btc_trend_1h else 0.0
+
+        # ── تحديد حالة السوق ───────────────────────────────────────
+        state, score, reasons = _market_state_from_metrics(
+            btc_vd=btc_vd, eth_vd=eth_vd, mkt_vd=mkt_vd,
+            btc_1h=_btc_1h_now, btc_24h=btc_change_24h,
+            ats_btc=btc_ats, ats_eth=eth_ats
+        )
+
+        # ── رموز ───────────────────────────────────────────────────
+        state_icons  = {"SAFE": "🟢", "CAUTION": "🟡", "DANGER": "🔴"}
+        state_emojis = {
+            "SAFE":    "🟢🟢🟢 SAFE — ادخل بثقة",
+            "CAUTION": "🟡🟡🟡 CAUTION — توخَّ الحذر",
+            "DANGER":  "🔴🔴🔴 DANGER — ابتعد الآن",
+        }
+        state_advice = {
+            "SAFE":    "✅ _السوق آمن — مناسب لفتح مراكز_",
+            "CAUTION": "⚠️ _انتظر تأكيداً قبل الدخول_",
+            "DANGER":  "🛑 _أغلق المراكز المفتوحة — لا تدخل_",
+        }
+
+        icon_s = state_icons.get(state, "📊")
+
+        # ── بناء تفاصيل BTC / ETH ─────────────────────────────────
+        def _vd_label(vd, ats):
+            # type: (float, float) -> str
+            if ats >= ATS_WHALE and vd >= VDELTA_STRONG:
+                return "🐋🔥 حيتان يشترون"
+            if ats >= ATS_WHALE and vd < 0.40:
+                return "🐋🔴 حيتان يبيعون"
+            if vd >= 0.60:
+                return "⬆️ شراء قوي"
+            if vd >= 0.50:
+                return "↗️ شراء متوسط"
+            if vd <= 0.40:
+                return "⬇️ بيع"
+            return "➡️ محايد"
+
+        btc_bvol_str  = _fmt_vol(btc_bvol)  if btc_bvol  > 0 else "—"
+        btc_svol_str  = _fmt_vol(btc_svol)  if btc_svol  > 0 else "—"
+        eth_bvol_str  = _fmt_vol(eth_bvol)  if eth_bvol  > 0 else "—"
+        eth_svol_str  = _fmt_vol(eth_svol)  if eth_svol  > 0 else "—"
+
+        # ── نسبة VDelta مرئية ──────────────────────────────────────
+        def _vd_bar(vd):
+            # type: (float) -> str
+            filled = int(vd * 10)
+            return "🟢" * filled + "⚪" * (10 - filled)
+
+        reasons_txt = ""
+        for r in reasons[:5]:
+            reasons_txt += "  {}\n".format(r)
+
+        # ── الوقت ──────────────────────────────────────────────────
+        now_utc = datetime.now(timezone.utc)
+        time_str = now_utc.strftime("%H:%M UTC")
+
+        msg = (
+            "📡 *4H MARKET REPORT*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🕐 `{}` | {} *{}*\n"
+            "🎯 نقاط الحالة: `{}/100`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "₿ *BTC — التحليل الكامل:*\n"
+            "  TPS: `{:.1f}` صفقة/ثانية\n"
+            "  ATS: `{:.0f} USDT` — {}\n"
+            "  VDelta: `{:.0f}%` {}\n"
+            "  🟢 شراء: `{}` | 🔴 بيع: `{}`\n"
+            "  24h: `{:+.2f}%` | 1h: `{:+.2f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "Ξ *ETH — التحليل الكامل:*\n"
+            "  TPS: `{:.1f}` صفقة/ثانية\n"
+            "  ATS: `{:.0f} USDT` — {}\n"
+            "  VDelta: `{:.0f}%` {}\n"
+            "  🟢 شراء: `{}` | 🔴 بيع: `{}`\n"
+            "  24h: `{:+.2f}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 *السوق الكلي:*\n"
+            "  🟢 شراء: `{:.1f}%` ({}) | 🔴 بيع: `{:.1f}%` ({})\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🔍 *أسباب الحكم:*\n"
+            "{}"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "{}\n"
+        ).format(
+            time_str,
+            icon_s, state_emojis.get(state, state),
+            score,
+            btc_tps,
+            btc_ats, _vd_label(btc_vd, btc_ats),
+            btc_vd * 100, _vd_bar(btc_vd),
+            btc_bvol_str, btc_svol_str,
+            btc_change_24h, _btc_1h_now,
+            eth_tps,
+            eth_ats, _vd_label(eth_vd, eth_ats),
+            eth_vd * 100, _vd_bar(eth_vd),
+            eth_bvol_str, eth_svol_str,
+            eth_change_24h,
+            mkt_buy_pct, _fmt_vol(mkt_buy),
+            mkt_sell_pct, _fmt_vol(mkt_sell),
+            reasons_txt,
+            state_advice.get(state, ""),
+        )
+        send(msg)
+        log.info("4h Report | state=%s | score=%d | btc_vd=%.0f%% | eth_vd=%.0f%%",
+                 state, score, btc_vd * 100, eth_vd * 100)
+
+    except Exception as _err:
+        log.error("send_4h_market_report error: %s", _err, exc_info=True)
 
 
 def send_breakout_report():
@@ -12282,6 +13097,9 @@ def run():
     global sc_alerted
     global last_sr_alert
     global perf_signals, perf_id_counter
+    global mtf_liq_alerted, last_mtf_liq_scan
+    global last_4h_report
+    global _early_accum_seen, last_early_accum_scan
 
     log.info(" MAFIO-BOT ...")
 
@@ -12337,9 +13155,13 @@ def run():
 
 
     global last_lh_scan, last_sc_refresh, last_sr_alert
-    last_lh_scan    = 0.0
-    last_sc_refresh = 0.0
-    last_sr_alert   = 0.0
+    last_lh_scan      = 0.0
+    last_sc_refresh   = 0.0
+    last_sr_alert     = 0.0
+    last_mtf_liq_scan    = 0.0
+    last_4h_report       = 0.0
+    last_early_accum_scan = 0.0
+    _early_accum_seen    = {}
 
     send(
         "💀 *MAFIO-BOT* 💀\n"
@@ -12356,6 +13178,10 @@ def run():
         "🆕 V16: 🌊 Liquidity Zones يومية\n"
         "🆕 V16: Sigma تلقائي من التاريخ\n"
         "🆕 V16: إشارة عند الإغلاق فوق Zone\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🆕 V17: 🧱 OB Deep — كشف جدران الشراء/البيع\n"
+        "🆕 V17: 📊 CVD Signal — ضغط الشراء التراكمي\n"
+        "🆕 V17: 🕐 MTF Liquidity — تأكيد 15m+1h+4h\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "⚡ إشارات سريعة: 15m/1h (مستمر)\n"
         "📅 إشارات يومية: 1D (00:00 UTC)\n"
@@ -12434,6 +13260,9 @@ def run():
 
 
             send_daily_report()
+
+            # تقرير 4 ساعات — BTC+ETH ATS/TPS/VDelta + SAFE/CAUTION/DANGER
+            send_4h_market_report()
 
             if now - last_expand      >= EXPAND_EVERY:
 
@@ -12535,6 +13364,9 @@ def run():
 
 
 
+            # Early accumulation scanner — يكتشف التجميع المبكر ويضيف للـ watchlist
+            scan_early_accumulation(price_map, vol_now, change_now)
+
             if now - last_tps_scan >= TPS_SCAN_EVERY:
                 check_liquidity_exit(vol_now, price_map)
                 scan_tps_ats(price_map, vol_now, change_now)
@@ -12557,6 +13389,9 @@ def run():
 
             if now - last_lh_scan < 10 and small_caps:
                 liquidity_hunter_small_caps(price_map, vol_now, changes_map)
+
+            # MTF Liquidity — تأكيد متعدد الأطر الزمنية
+            scan_multi_timeframe_liquidity(price_map, vol_now, changes_map)
 
             # Deep Scan
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
