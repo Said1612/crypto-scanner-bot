@@ -11100,14 +11100,32 @@ def _send_daily_report_body(today, now_utc):
             vol      = float(t.get("quoteVolume", 0))
             if vol < 100_000: continue
 
-            taker_buy = float(t.get("takerBuyQuoteVolume", 0))
-            if taker_buy <= 0:
+            # ── حساب تدفق السيولة بـ Price Position (أدق من takerBuy) ──
+            # Price Position = موقع الإغلاق داخل النطاق اليومي
+            # PP=1.0 → إغلاق عند القمة (شراء كامل)
+            # PP=0.0 → إغلاق عند القاع (بيع كامل)
+            # PP=0.5 → محايد
+            try:
+                _last = float(t.get("lastPrice", 0))
+                _high = float(t.get("highPrice", _last))
+                _low  = float(t.get("lowPrice",  _last))
+                _open = float(t.get("openPrice", _last))
+                _rng  = _high - _low
+                if _rng > 0:
+                    _pp = (_last - _low) / _rng          # موقع السعر في النطاق
+                else:
+                    _pp = 0.5
+                # وزن إضافي لاتجاه الشمعة (أخضر/أحمر)
+                _candle_dir = 0.6 if _last >= _open else 0.4
+                _buy_ratio  = _pp * 0.65 + _candle_dir * 0.35
+                _buy_ratio  = max(0.15, min(0.85, _buy_ratio))  # حد منطقي 15%-85%
+            except (ValueError, TypeError, ZeroDivisionError):
+                _buy_ratio = 0.5
 
-                ch = float(t.get("priceChangePercent", 0))
-                taker_buy = vol if ch > 0 else 0
-            taker_sell = vol - taker_buy
+            taker_buy  = vol * _buy_ratio
+            taker_sell = vol * (1.0 - _buy_ratio)
             buy_vol  += taker_buy
-            sell_vol += max(taker_sell, 0)
+            sell_vol += taker_sell
             total_market_vol += vol
             ch = float(t.get("priceChangePercent", 0))
             if ch > 0 and vol > 1_000_000:
@@ -11117,9 +11135,43 @@ def _send_daily_report_body(today, now_utc):
         except (KeyError, ValueError):
             pass
 
+    # ── تدفق السيولة الحقيقي: stablecoin inflow/outflow ─────────────
+    # إذا الحيتان يشترون stablecoins = سيولة خارجة من السوق
+    # إذا الحيتان يبيعون stablecoins = سيولة داخلة للسوق
+    _stable_inflow  = 0.0   # USDT تحول لعملات (شراء)
+    _stable_outflow = 0.0   # عملات تحول لـ USDT (بيع)
+    for _ss in SMART_MONEY_STABLES:
+        _st = ticker_map.get(_ss)
+        if not _st: continue
+        try:
+            _sv   = float(_st.get("quoteVolume", 0))
+            _sch  = float(_st.get("priceChangePercent", 0))
+            # stablecoin حجمها ارتفع = الحيتان يجمعون = outflow من السوق
+            _sh   = stable_vol_history.get(_ss, [])
+            _savg = sum(_sh) / len(_sh) if len(_sh) >= 3 else _sv
+            _sratio = _sv / _savg if _savg > 0 else 1.0
+            if _sratio >= 1.5:
+                _stable_outflow += _sv * (_sratio - 1.0)
+            elif _sratio <= 0.7:
+                _stable_inflow  += _sv * (1.0 - _sratio)
+        except (ValueError, TypeError):
+            pass
+
     total_trade_vol = buy_vol + sell_vol
     buy_pct         = buy_vol  / total_trade_vol * 100 if total_trade_vol > 0 else 50
     sell_pct        = sell_vol / total_trade_vol * 100 if total_trade_vol > 0 else 50
+
+    # ── تصحيح بناءً على تدفق Stablecoins ────────────────────────────
+    # stablecoin outflow كبير = ضغط بيع حقيقي → خفض buy_pct
+    _liq_adj = 0.0
+    if _stable_outflow > 0 and total_trade_vol > 0:
+        _liq_adj = min((_stable_outflow / total_trade_vol) * 100, 10.0)
+        buy_pct  = max(15.0, buy_pct - _liq_adj)
+        sell_pct = min(85.0, sell_pct + _liq_adj)
+    elif _stable_inflow > 0 and total_trade_vol > 0:
+        _liq_adj = min((_stable_inflow / total_trade_vol) * 100, 10.0)
+        buy_pct  = min(85.0, buy_pct + _liq_adj)
+        sell_pct = max(15.0, sell_pct - _liq_adj)
 
 
 
@@ -11285,13 +11337,21 @@ def _send_daily_report_body(today, now_utc):
                 if not _t2:
                     continue
                 try:
-                    _v2 = float(_t2.get("quoteVolume", 0))
-                    _c2 = float(_t2.get("priceChangePercent", 0))
-                    _sv += _v2
-                    if _c2 > 0:
-                        _buy_s += _v2
+                    _v2   = float(_t2.get("quoteVolume", 0))
+                    _last2 = float(_t2.get("lastPrice", 0))
+                    _high2 = float(_t2.get("highPrice", _last2))
+                    _low2  = float(_t2.get("lowPrice",  _last2))
+                    _open2 = float(_t2.get("openPrice", _last2))
+                    _rng2  = _high2 - _low2
+                    if _rng2 > 0:
+                        _pp2 = (_last2 - _low2) / _rng2
                     else:
-                        _sell_s += _v2
+                        _pp2 = 0.5
+                    _cdir2 = 0.6 if _last2 >= _open2 else 0.4
+                    _br2   = max(0.15, min(0.85, _pp2 * 0.65 + _cdir2 * 0.35))
+                    _sv   += _v2
+                    _buy_s  += _v2 * _br2
+                    _sell_s += _v2 * (1.0 - _br2)
                 except (ValueError, TypeError):
                     pass
             if _sv >= 10_000:
@@ -11353,16 +11413,16 @@ def _send_daily_report_body(today, now_utc):
         "{whale_icon} {verdict}\n"
         "_{desc}_\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 *تدفق السيولة (Order Flow):*\n"
+        "📊 *تدفق السيولة (Price Position):*\n"
         "{bar}\n"
-        "  🟢 *Buy:*  `{buy:.1f}%` ({buy_vol})\n"
-        "  🔴 *Sell:* `{sell:.1f}%` ({sell_vol})\n"
+        "  💚 *سيولة داخلة:* `{buy:.1f}%` ({buy_vol})\n"
+        "  🔴 *سيولة خارجة:* `{sell:.1f}%` ({sell_vol})\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *تدفق رأس المال (24h):*\n"
         "  {arrow} حجم السوق: `{vol_ch}` عن أمس\n"
         "  📦 إجمالي: `{total_vol}` USDT\n"
-        "  🟢 شراء:   `{buy:.1f}%` = `{buy_vol}` USDT\n"
-        "  🔴 بيع:    `{sell:.1f}%` = `{sell_vol}` USDT\n"
+        "  💚 داخل:   `{buy:.1f}%` = `{buy_vol}` USDT\n"
+        "  🔴 خارج:   `{sell:.1f}%` = `{sell_vol}` USDT\n"
         "{sector_liq}"
         "━━━━━━━━━━━━━━━━━━\n"
         "💸 *تدفق السيولة بين القطاعات:*\n"
