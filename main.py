@@ -2635,36 +2635,8 @@ def analyze_btc():
             _rec = "\U0001f7e1 *انتظر* — حيتان يشترون، تحسن قريب" if _real_whales else "\U0001f7e1 *انتظر* — السوق غير مستقر"
         else:
             _rec = "\u26a0\ufe0f *انتظر* — حيتان يشترون لكن BTC ينزل" if _real_whales else "\U0001f534 *ابتعد* — ضغط بيع قوي"
-        send(
-            "📊 *تقرير السوق*\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "{icon} السوق: *{state}*\n"
-            "₿ BTC: `{ch:+.2f}%` | VD:`{bvd:.0f}%`\n"
-            "{btc_tps}"
-            "Ξ ETH: `{eth:+.2f}%` | VD:`{evd:.0f}%`\n"
-            "{eth_tps}"
-            "📊 VDelta السوق: `{mvd:.0f}%`\n"
-            "{hot}"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "{rec}\n"
-            "📡 قوة الإشارة: {confirm}/3".format(
-                icon=icons[market_state], state=market_state,
-                ch=btc_change_24h,
-                bvd=_btc_vd_now*100,
-                btc_tps=btc_tps_line,
-                eth=eth_change_24h,
-                evd=(eth_tps_stats.get("vdelta",0.5)*100 if eth_tps_stats else 50),
-                eth_tps=eth_tps_line,
-                mvd=_mkt_vd_pct,
-                hot=_hot_line,
-                rec=_rec,
-                confirm=(
-                    3 if market_state == "SAFE" else
-                    2 if market_state == "CAUTION" and (btc_tps_stats or {}).get("vdelta",0) >= 0.65 else
-                    1
-                ),
-            )
-        )
+        # تقرير السوق — محذوف بطلب المستخدم
+        pass
         log.info(" Market: %s%s | BTC %.2f%% | confirm=%d",
                  old, market_state, btc_change_24h, BTC_CONFIRM_COUNT)
 
