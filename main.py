@@ -2637,7 +2637,7 @@ def analyze_btc():
             _rec = "\u26a0\ufe0f *انتظر* — حيتان يشترون لكن BTC ينزل" if _real_whales else "\U0001f534 *ابتعد* — ضغط بيع قوي"
         # تقرير السوق — محذوف بطلب المستخدم
         pass
-        log.info(" Market: %s%s | BTC %.2f%% | confirm=%d",
+        log.info(" Market: %s→%s | BTC %.2f%% | confirm=%d",
                  old, market_state, btc_change_24h, BTC_CONFIRM_COUNT)
 
 
