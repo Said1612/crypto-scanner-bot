@@ -1670,6 +1670,125 @@ def calc_ob_imbalance(sym, min_vol=500_000):
 
 
 
+def calc_ob_depth_analysis(sym):
+    # type: (str) -> dict
+    """
+    تحليل عميق لدفتر الطلبات — يكشف:
+    1. جدران الشراء الكبيرة (Bid Walls) = دعم مخفي
+    2. جدران البيع الكبيرة (Ask Walls) = مقاومة
+    3. نسبة التركيز: أين تتمركز السيولة في أول 10 مستويات
+    4. Bid Pressure: هل الشراء يضغط على البيع؟
+    """
+    ob = get_order_book(sym)
+    if not ob:
+        return {"has_bid_wall": False, "has_ask_wall": False,
+                "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                "pressure": "neutral", "score": 0}
+    try:
+        raw_bids = ob.get("raw_bids", [])
+        raw_asks = ob.get("raw_asks", [])
+
+        if not raw_bids or not raw_asks:
+            return {"has_bid_wall": False, "has_ask_wall": False,
+                    "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                    "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                    "pressure": "neutral", "score": 0}
+
+        # حساب قيمة كل مستوى
+        bid_levels = [(float(b[0]), float(b[1]), float(b[0]) * float(b[1]))
+                      for b in raw_bids if len(b) >= 2]
+        ask_levels = [(float(a[0]), float(a[1]), float(a[0]) * float(a[1]))
+                      for a in raw_asks if len(a) >= 2]
+
+        if not bid_levels or not ask_levels:
+            return {"has_bid_wall": False, "has_ask_wall": False,
+                    "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                    "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                    "pressure": "neutral", "score": 0}
+
+        total_bid = sum(lv[2] for lv in bid_levels)
+        total_ask = sum(lv[2] for lv in ask_levels)
+
+        avg_bid_lvl = total_bid / len(bid_levels) if bid_levels else 1
+        avg_ask_lvl = total_ask / len(ask_levels) if ask_levels else 1
+
+        # كشف جدران الشراء
+        bid_wall_val  = 0.0
+        bid_wall_pct  = 0.0
+        has_bid_wall  = False
+        for price, qty, val in bid_levels:
+            if val >= avg_bid_lvl * OB_WALL_RATIO and val >= OB_WALL_MIN_USDT:
+                has_bid_wall = True
+                bid_wall_val = max(bid_wall_val, val)
+        if total_bid > 0:
+            bid_wall_pct = round(bid_wall_val / total_bid * 100, 1)
+
+        # كشف جدران البيع
+        ask_wall_val  = 0.0
+        ask_wall_pct  = 0.0
+        has_ask_wall  = False
+        for price, qty, val in ask_levels:
+            if val >= avg_ask_lvl * OB_WALL_RATIO and val >= OB_WALL_MIN_USDT:
+                has_ask_wall = True
+                ask_wall_val = max(ask_wall_val, val)
+        if total_ask > 0:
+            ask_wall_pct = round(ask_wall_val / total_ask * 100, 1)
+
+        # تركيز السيولة في أول 10 مستويات
+        top10_bid = sum(lv[2] for lv in bid_levels[:10])
+        top10_ask = sum(lv[2] for lv in ask_levels[:10])
+        top10_bid_ratio = round(top10_bid / total_bid, 2) if total_bid > 0 else 0.0
+        top10_ask_ratio = round(top10_ask / total_ask, 2) if total_ask > 0 else 0.0
+
+        # ضغط الشراء مقابل البيع
+        imb = ob.get("imb", 1.0)
+        if imb >= 2.0 and has_bid_wall:
+            pressure = "strong_buy"
+        elif imb >= 1.5:
+            pressure = "buy"
+        elif imb <= 0.5 and has_ask_wall:
+            pressure = "strong_sell"
+        elif imb <= 0.7:
+            pressure = "sell"
+        else:
+            pressure = "neutral"
+
+        # نتيجة تحليل OB (0-100)
+        score = 0
+        if has_bid_wall:
+            score += 30
+            if bid_wall_pct >= 30:
+                score += 20
+        if imb >= 2.0:
+            score += 25
+        elif imb >= 1.5:
+            score += 15
+        if top10_bid_ratio >= 0.6:
+            score += 10
+        if not has_ask_wall:
+            score += 15
+
+        return {
+            "has_bid_wall":     has_bid_wall,
+            "has_ask_wall":     has_ask_wall,
+            "bid_wall_pct":     bid_wall_pct,
+            "ask_wall_pct":     ask_wall_pct,
+            "top10_bid_ratio":  top10_bid_ratio,
+            "top10_ask_ratio":  top10_ask_ratio,
+            "pressure":         pressure,
+            "score":            min(score, 100),
+            "imb":              round(imb, 2),
+            "total_bid":        round(total_bid, 0),
+            "total_ask":        round(total_ask, 0),
+        }
+    except (ValueError, TypeError, ZeroDivisionError):
+        return {"has_bid_wall": False, "has_ask_wall": False,
+                "bid_wall_pct": 0.0, "ask_wall_pct": 0.0,
+                "top10_bid_ratio": 0.0, "top10_ask_ratio": 0.0,
+                "pressure": "neutral", "score": 0}
+
+
 def calc_direction_engine(sym, interval="1h"):
     # type: (str, str) -> dict
     kd = get_klines(sym, interval, 60)
@@ -5747,6 +5866,19 @@ LH_COOLDOWN       = 14400
 LH_SCORE_MIN      = 50
 LH_SCAN_EVERY     = 300
 
+# Order Book Deep Analysis
+OB_DEPTH_LIMIT   = 50        # عمق دفتر الطلبات (مستوى)
+OB_WALL_RATIO    = 4.0       # الجدار = 4× متوسط مستوى واحد
+OB_WALL_MIN_USDT = 50_000    # حجم الجدار الأدنى بـ USDT
+
+# Multi-Timeframe Liquidity Scanner
+MTF_LIQ_EVERY    = 600       # كل 10 دقائق
+MTF_LIQ_COOLDOWN = 10800     # 3 ساعات بين تنبيهات نفس العملة
+MTF_LIQ_SCORE    = 65        # الحد الأدنى للنتيجة
+MTF_LIQ_MIN_TF   = 2         # يجب أن يوافق إطارين على الأقل
+MTF_VOL_SPIKE    = 2.0       # حجم الإطار يرتفع 2× المتوسط
+MTF_PRICE_MAX    = 5.0       # السعر لا يتجاوز 5% تغيير
+
 
 
 
@@ -8379,6 +8511,32 @@ def liquidity_hunter(price_map, vol_now, changes_map):
             signals.append("📈 VolTrend {}/4".format(vol_trend))
 
 
+        # ── سيناريو 5: OB Bid Wall ─────────────────────────────────
+        # جدار شراء ضخم في دفتر الطلبات = دعم مخفي محمي
+        try:
+            ob_deep = calc_ob_depth_analysis(sym)
+            if ob_deep.get("has_bid_wall") and not ob_deep.get("has_ask_wall"):
+                ob_score = ob_deep.get("score", 0)
+                if ob_score >= 40:
+                    pts = min(ob_score // 2, 35)
+                    score += pts
+                    signals.append("🧱 BidWall {:.0f}% imb:{:.1f}×".format(
+                        ob_deep.get("bid_wall_pct", 0),
+                        ob_deep.get("imb", 1.0)
+                    ))
+        except Exception:
+            ob_deep = {}
+
+        # ── سيناريو 6: CVD صاعد ────────────────────────────────────
+        # ضغط شراء تراكمي مستمر = أموال حقيقية تدخل
+        try:
+            cvd = calc_cvd(sym, "15m", 24)
+            if cvd.get("trend") == "rising" and cvd.get("pct_change", 0) >= 8:
+                pts = min(int(cvd["pct_change"] * 0.8), 30)
+                score += pts
+                signals.append("📊 CVD↑ +{:.0f}%".format(cvd["pct_change"]))
+        except Exception:
+            pass
 
 
         if score >= LH_SCORE_MIN and len(signals) >= 2:
@@ -8656,6 +8814,199 @@ def liquidity_hunter_small_caps(price_map=None, vol_now=None, changes_map=None):
 
 
 
+
+
+
+# ══════════════════════════════════════════════════════════════════
+#  MULTI-TIMEFRAME LIQUIDITY SCANNER  — V17
+# ══════════════════════════════════════════════════════════════════
+
+mtf_liq_alerted   = {}   # type: Dict[str, float]  {sym: last_alert_time}
+last_mtf_liq_scan = 0.0
+
+
+def _check_tf_liquidity(sym, interval, limit):
+    # type: (str, str, int) -> dict
+    """
+    يفحص سيولة عملة في إطار زمني واحد.
+    يعيد: confirmed (bool), vol_ratio, price_chg, wick_count, cvd_rising
+    """
+    kd = get_klines(sym, interval, limit)
+    if not kd or len(kd.get("closes", [])) < limit // 2:
+        return {"confirmed": False, "vol_ratio": 0.0, "price_chg": 99.0,
+                "wick_count": 0, "cvd_rising": False}
+
+    closes = kd["closes"]
+    opens  = kd["opens"]
+    vols   = kd["vols"]
+    lows   = kd["lows"]
+    n      = len(closes)
+
+    avg_vol = sum(vols) / n if n > 0 else 1
+    if avg_vol <= 0:
+        return {"confirmed": False, "vol_ratio": 0.0, "price_chg": 99.0,
+                "wick_count": 0, "cvd_rising": False}
+
+    vol_last  = sum(vols[-3:]) / 3
+    vol_ratio = vol_last / avg_vol
+
+    price_chg = abs((closes[-1] - closes[-4]) / closes[-4] * 100) if len(closes) >= 4 and closes[-4] > 0 else 99
+
+    wick_count = 0
+    for i in range(-4, 0):
+        body       = abs(closes[i] - opens[i])
+        lower_wick = min(opens[i], closes[i]) - lows[i]
+        if body > 0 and lower_wick > body * 1.5:
+            wick_count += 1
+
+    cumul = 0.0
+    cvd_vals = []
+    for i in range(n):
+        vol = vols[i] if i < len(vols) else 0
+        cumul += vol if closes[i] >= opens[i] else -vol
+        cvd_vals.append(cumul)
+
+    cvd_rising = False
+    if len(cvd_vals) >= 6:
+        first3 = sum(cvd_vals[:3]) / 3
+        last3  = sum(cvd_vals[-3:]) / 3
+        if first3 != 0 and last3 > first3 * 1.05:
+            cvd_rising = True
+
+    confirmed = (
+        vol_ratio >= MTF_VOL_SPIKE
+        and price_chg <= MTF_PRICE_MAX
+        and (wick_count >= 2 or cvd_rising)
+    )
+
+    return {
+        "confirmed":  confirmed,
+        "vol_ratio":  round(vol_ratio, 2),
+        "price_chg":  round(price_chg, 2),
+        "wick_count": wick_count,
+        "cvd_rising": cvd_rising,
+    }
+
+
+def scan_multi_timeframe_liquidity(price_map=None, vol_now=None, changes_map=None):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🕐 MULTI-TIMEFRAME LIQUIDITY — V17
+    يفحص 3 أطر زمنية دفعة واحدة: 15m + 1h + 4h
+    يرسل تنبيه فقط عند توافق ≥ MTF_LIQ_MIN_TF إطارات
+
+    ● إطار واحد = ضجيج عادي
+    ● إطارين   = سيولة حقيقية 🔥
+    ● ثلاثة     = إشارة ذهبية 🐋
+    """
+    global mtf_liq_alerted, last_mtf_liq_scan
+    now = time.time()
+
+    if now - last_mtf_liq_scan < MTF_LIQ_EVERY:
+        return
+    last_mtf_liq_scan = now
+
+    if not all_tickers:
+        return
+
+    price_map   = price_map   or {}
+    vol_now     = vol_now     or {}
+    changes_map = changes_map or {}
+
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in all_syms
+         if vol_now.get(s, 0) >= 150_000
+         and now - mtf_liq_alerted.get(s, 0) >= MTF_LIQ_COOLDOWN
+         and now - coin_alerted.get(s, 0) >= MTF_LIQ_COOLDOWN // 2],
+        key=lambda x: -x[1]
+    )[:80]
+
+    results = []
+
+    for sym, vol in ranked:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS:
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        tf15 = _check_tf_liquidity(sym, "15m", 20)
+        tf1h = _check_tf_liquidity(sym, "1h",  12)
+        tf4h = _check_tf_liquidity(sym, "4h",  10)
+
+        confirmed_tfs = []
+        if tf15.get("confirmed"):
+            confirmed_tfs.append(("15m", tf15))
+        if tf1h.get("confirmed"):
+            confirmed_tfs.append(("1h",  tf1h))
+        if tf4h.get("confirmed"):
+            confirmed_tfs.append(("4h",  tf4h))
+
+        if len(confirmed_tfs) < MTF_LIQ_MIN_TF:
+            continue
+
+        score     = len(confirmed_tfs) * 30
+        max_vol_r = max(tf["vol_ratio"] for _, tf in confirmed_tfs)
+        score    += min(int(max_vol_r * 10), 25)
+
+        cvd1h  = calc_cvd(sym, "1h", 12)
+        ob_imb = calc_ob_imbalance(sym)
+        ob_buy = ob_imb.get("signal") in ("buy", "strong_buy")
+        if ob_buy:
+            score += 10
+        if cvd1h.get("trend") == "rising":
+            score += 10
+
+        if score < MTF_LIQ_SCORE:
+            continue
+
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+        chg    = changes_map.get(sym, 0)
+
+        tf_lines = []
+        for tf_name, tf_data in confirmed_tfs:
+            wick_tag = " 🕯️×{}".format(tf_data["wick_count"]) if tf_data["wick_count"] >= 2 else ""
+            cvd_tag  = " CVD↑" if tf_data["cvd_rising"] else ""
+            tf_lines.append("  ✅ `{}` حجم `{:.1f}×`{}{}".format(
+                tf_name, tf_data["vol_ratio"], wick_tag, cvd_tag
+            ))
+
+        stars   = "🐋🔥" if len(confirmed_tfs) == 3 else "🔥"
+        triple  = " — ثلاثي 🏆" if len(confirmed_tfs) == 3 else ""
+        ob_line = "  📒 OB: `{}`".format(ob_imb.get("signal", "—")) if ob_buy else ""
+
+        msg = (
+            "{} *MTF LIQUIDITY{}*\n".format(stars, triple)
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "🎯 *{}* — سيولة متعددة الأطر!\n".format(base)
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "📡 *الأطر المؤكدة ({}/3)* :\n".format(len(confirmed_tfs))
+            + "\n".join(tf_lines) + "\n"
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "💵 السعر: `{}`  |  24h: `{:+.1f}%`\n".format(fmt_price(price), chg)
+            + (ob_line + "\n" if ob_line else "")
+            + "🏷️ القطاع: `{}`\n".format(sector)
+            + "━━━━━━━━━━━━━━━━━━\n"
+            + "⚡ _{} إطارات تؤكد — سيولة حقيقية_ 🌊".format(len(confirmed_tfs))
+        )
+
+        results.append((score, sym, msg, price))
+
+    if not results:
+        return
+
+    results.sort(key=lambda x: -x[0])
+    for score, sym, msg, price in results[:3]:
+        send(msg)
+        mtf_liq_alerted[sym] = now
+        coin_alerted[sym]    = now
+        perf_register(sym, price, "mtf_liq", score, "MTF_confirmed")
+        log.info(" MTF Liq | %s | score=%d", sym, score)
 
 
 def detect_hidden_accumulation(kd, ob=None):
@@ -8971,13 +9322,22 @@ def detect_pre_breakout(symbol):
 
 def get_order_book(symbol):
     # type: (str) -> Optional[Dict]
-    data = safe_get(MEXC_DEPTH, {"symbol": symbol, "limit": 20})
+    data = safe_get(MEXC_DEPTH, {"symbol": symbol, "limit": OB_DEPTH_LIMIT})
     if not data: return None
     try:
-        bid = sum(float(b[0])*float(b[1]) for b in data.get("bids",[]))
-        ask = sum(float(a[0])*float(a[1]) for a in data.get("asks",[]))
-        return {"bid": bid, "ask": ask, "imb": bid/ask if ask>0 else 99}
-    except: return None
+        raw_bids = data.get("bids", [])
+        raw_asks = data.get("asks", [])
+        bid = sum(float(b[0]) * float(b[1]) for b in raw_bids)
+        ask = sum(float(a[0]) * float(a[1]) for a in raw_asks)
+        return {
+            "bid":      bid,
+            "ask":      ask,
+            "imb":      bid / ask if ask > 0 else 99,
+            "raw_bids": raw_bids,
+            "raw_asks": raw_asks,
+        }
+    except:
+        return None
 
 
 
@@ -12282,6 +12642,7 @@ def run():
     global sc_alerted
     global last_sr_alert
     global perf_signals, perf_id_counter
+    global mtf_liq_alerted, last_mtf_liq_scan
 
     log.info(" MAFIO-BOT ...")
 
@@ -12337,9 +12698,10 @@ def run():
 
 
     global last_lh_scan, last_sc_refresh, last_sr_alert
-    last_lh_scan    = 0.0
-    last_sc_refresh = 0.0
-    last_sr_alert   = 0.0
+    last_lh_scan      = 0.0
+    last_sc_refresh   = 0.0
+    last_sr_alert     = 0.0
+    last_mtf_liq_scan = 0.0
 
     send(
         "💀 *MAFIO-BOT* 💀\n"
@@ -12356,6 +12718,10 @@ def run():
         "🆕 V16: 🌊 Liquidity Zones يومية\n"
         "🆕 V16: Sigma تلقائي من التاريخ\n"
         "🆕 V16: إشارة عند الإغلاق فوق Zone\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🆕 V17: 🧱 OB Deep — كشف جدران الشراء/البيع\n"
+        "🆕 V17: 📊 CVD Signal — ضغط الشراء التراكمي\n"
+        "🆕 V17: 🕐 MTF Liquidity — تأكيد 15m+1h+4h\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "⚡ إشارات سريعة: 15m/1h (مستمر)\n"
         "📅 إشارات يومية: 1D (00:00 UTC)\n"
@@ -12557,6 +12923,9 @@ def run():
 
             if now - last_lh_scan < 10 and small_caps:
                 liquidity_hunter_small_caps(price_map, vol_now, changes_map)
+
+            # MTF Liquidity — تأكيد متعدد الأطر الزمنية
+            scan_multi_timeframe_liquidity(price_map, vol_now, changes_map)
 
             # Deep Scan
             if now - last_deep_scan >= DEEP_SCAN_EVERY:
