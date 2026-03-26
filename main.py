@@ -8168,6 +8168,170 @@ def get_tier_settings(vol_24h):
 
 
 
+# ══════════════════════════════════════════════════════════════════
+#   VOLUME SURGE SCANNER — يصطاد COS/TOWNS/micro-cap قبل الانفجار
+# ══════════════════════════════════════════════════════════════════
+
+_vol_surge_seen     = {}    # {sym: timestamp}
+VOL_SURGE_EVERY     = 300   # فحص كل 5 دقائق
+VOL_SURGE_COOLDOWN  = 7200  # cooldown ساعتان لكل عملة
+VOL_SURGE_RATIO     = 3.5   # الحجم ارتفع 3.5× المعدل الطبيعي
+VOL_SURGE_GOLD      = 7.0   # 7× = إشارة ذهبية نادرة
+VOL_SURGE_MAX_CHG   = 8.0   # السعر لم يرتفع أكثر من 8% بعد (الفرصة لم تفت)
+VOL_SURGE_MIN_USDT  = 3_000  # حجم الساعة الأخيرة بـ USDT (خفيف لالتقاط micro-cap)
+last_vol_surge_scan = 0.0
+
+
+def _fmt_vol_k(v):
+    # type: (float) -> str
+    """تنسيق حجم USDT: 1500000 → 1.5M | 500000 → 500K | 3000 → 3K"""
+    if v >= 1_000_000_000:
+        return "{:.2f}B".format(v / 1_000_000_000)
+    if v >= 1_000_000:
+        return "{:.1f}M".format(v / 1_000_000)
+    if v >= 1_000:
+        return "{:.0f}K".format(v / 1_000)
+    return "{:.0f}".format(v)
+
+
+def scan_volume_surge(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    🌊 VOLUME SURGE SCANNER — يكتشف انفجار الحجم قبل ارتفاع السعر
+
+    الهدف: اصطياد COS (+70%) / TOWNS (+36%) في مرحلة التجميع الصامت
+
+    المنطق:
+    - حجم آخر ساعة > 3.5× متوسط الـ 4 ساعات السابقة
+    - السعر لم يرتفع أكثر من 8% بعد (الفرصة لا تزال موجودة)
+    - اتجاه الحجم شراء وليس بيع (CVD بسيط)
+    - بدون حد أدنى للـ ATS — يعمل حتى لـ micro-cap بـ $0.001
+    """
+    global _vol_surge_seen, last_vol_surge_scan
+    now = time.time()
+
+    if now - last_vol_surge_scan < VOL_SURGE_EVERY:
+        return
+    last_vol_surge_scan = now
+
+    # نفحص أكبر عدد ممكن — الهدف micro-cap أيضاً
+    all_syms = list(set(list(candidates) + EXTRA_COINS))
+    ranked = sorted(
+        [(s, vol_now.get(s, 0)) for s in all_syms],
+        key=lambda x: -x[1]
+    )[:120]
+
+    results = []
+    for sym, vol_24h in ranked:
+        base = sym.replace("USDT", "")
+        if base in STABLECOINS:
+            continue
+        if vol_24h < 3_000:
+            continue
+        if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
+            continue
+        if now - _vol_surge_seen.get(sym, 0) < VOL_SURGE_COOLDOWN:
+            continue
+        if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
+            continue
+
+        chg24 = changes_map.get(sym, 0)
+        if chg24 >= VOL_SURGE_MAX_CHG or chg24 <= -15.0:
+            continue
+
+        # ── جلب 1h klines — 6 شمعات (آخر + 5 سابقة) ─────────────
+        kd = get_klines(sym, "1h", 6)
+        if not kd or len(kd["vols"]) < 5:
+            continue
+
+        vols   = kd["vols"]
+        closes = kd["closes"]
+        opens  = kd["opens"]
+
+        last_vol = vols[-1]                    # حجم الساعة الأخيرة (بالعملة)
+        prev_avg = sum(vols[-5:-1]) / 4.0      # متوسط 4 ساعات سابقة
+
+        if prev_avg <= 0 or last_vol <= 0:
+            continue
+
+        ratio = last_vol / prev_avg
+        if ratio < VOL_SURGE_RATIO:
+            continue
+
+        # ── تحويل لـ USDT ─────────────────────────────────────────
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+        last_vol_usdt = last_vol * price
+        if last_vol_usdt < VOL_SURGE_MIN_USDT:
+            continue
+
+        # ── اتجاه الحجم (CVD بسيط من آخر 6 شمعات) ───────────────
+        n = len(closes)
+        buy_vol  = sum(vols[i] for i in range(n) if closes[i] >= opens[i])
+        tot_vol  = sum(vols) if sum(vols) > 0 else 1
+        cvd_ratio = buy_vol / tot_vol
+
+        # نرفض إذا كان الارتفاع بيع بحت
+        if cvd_ratio < 0.40:
+            continue
+
+        # ── OB — لا نرسل إذا ضغط بيع حاد ──────────────────────────
+        _ob = calc_ob_imbalance(sym)
+        if _ob.get("signal") == "strong_sell":
+            continue
+
+        results.append((ratio, sym, last_vol_usdt, cvd_ratio, chg24, vol_24h))
+
+    if not results:
+        return
+
+    results.sort(key=lambda x: -x[0])
+    for ratio, sym, last_vol_usdt, cvd_ratio, chg24, vol_24h in results[:4]:
+        price  = price_map.get(sym, 0)
+        sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+        is_gold = ratio >= VOL_SURGE_GOLD
+
+        _cvd_tag = (
+            "🟢 شراء قوي"  if cvd_ratio >= 0.60 else
+            "↗️ شراء خفيف" if cvd_ratio >= 0.50 else
+            "↔️ مختلط"
+        )
+
+        _header = (
+            "🌊🥇 *VOLUME SURGE GOLD* 🥇🌊\n"
+            if is_gold else
+            "🌊 *VOLUME SURGE*\n"
+        )
+
+        msg = (
+            _header +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💥 *{sym}* — الحجم انفجر فجأة!\n".format(sym=sym.replace("USDT","")) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 ارتفاع الحجم: `{:.1f}×` المعدل الطبيعي 🔥\n".format(ratio) +
+            "💧 حجم آخر ساعة: `{}` USDT\n".format(_fmt_vol_k(last_vol_usdt)) +
+            "📈 اتجاه: {} (`{:.0f}%` شراء)\n".format(_cvd_tag, cvd_ratio * 100) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💵 السعر: `{}`\n".format(fmt_price(price)) +
+            "📉 24h: `{:+.1f}%` | حجم كلي: `{}`\n".format(chg24, _fmt_vol_k(vol_24h)) +
+            "🏷️ القطاع: `{}`\n".format(sector) +
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⏳ _الحجم يرتفع والسعر لم يتحرك بعد — انتظر الجوكر_ 🃏"
+        )
+
+        send(msg)
+        _vol_surge_seen[sym] = now
+        coin_alerted[sym]    = now
+        # أضف للـ watchlist بـ vdelta مشتق من CVD
+        whale_watch_add(sym, 0, max(cvd_ratio, 0.56), price)
+        perf_register(sym, price, "vol_surge", int(min(ratio * 10, 100)),
+                      "Vol×{:.1f} cvd={:.0f}%".format(ratio, cvd_ratio * 100))
+        log.info(" VOL_SURGE: %s | ×%.1f | usdt=%s | cvd=%.0f%% | 24h=%.1f%%",
+                 sym, ratio, _fmt_vol_k(last_vol_usdt), cvd_ratio * 100, chg24)
+
+
+# ══════════════════════════════════════════════════════════════════
 _early_accum_seen    = {}  # {sym: timestamp} آخر اضافة للقائمة من المسح المبكر
 EARLY_ACCUM_EVERY    = 300   # فحص كل 5 دقائق
 EARLY_ACCUM_COOLDOWN = 3600  # لا تعيد الاضافة قبل ساعة
@@ -10176,136 +10340,6 @@ bottom_fisher_alerted = {}  # type: dict
 
 
 
-_vol_surge_baseline = {}   # {sym: avg_vol}
-_coin_first_seen    = {}   # {sym: timestamp} اول مرة يراها البوت
-NEW_COIN_MIN_DAYS   = 3    # تجاهل العملات الجديدة اقل من 3 أيام
-_vol_surge_alerted  = {}   # {sym: ts}
-VOL_SURGE_SPIKE     = 2.5  # خفضنا من 3× إلى 2.5× للكشف المبكر
-VOL_SURGE_ATS_MIN   = 50
-VOL_SURGE_MIN       = 50_000
-VOL_SURGE_COOLDOWN  = 7200
-
-def scan_volume_surge(price_map, vol_now, changes_map):
-    # type: (dict, dict, dict) -> None
-    now = time.time()
-
-    if not all_tickers:
-        return
-
-    for t in all_tickers:
-        try:
-            sym   = t.get("symbol", "")
-            if not sym.endswith("USDT"):
-                continue
-            base = sym.replace("USDT", "")
-            if base in STABLECOINS:
-                continue
-            if any(k in sym for k in LEVERAGE_KEYWORDS):
-                continue
-
-            vol   = float(t.get("quoteVolume", 0))
-            price = float(t.get("lastPrice", 0))
-            chg   = float(t.get("priceChangePercent", 0))
-
-            if vol < VOL_SURGE_MIN or price <= 0:
-                continue
-
-            # تتبع اول مرة نرى العملة
-            if sym not in _coin_first_seen:
-                _coin_first_seen[sym] = now
-                continue
-
-            # تجاهل العملات الجديدة اقل من 3 أيام
-            days_known = (now - _coin_first_seen[sym]) / 86400
-            if days_known < NEW_COIN_MIN_DAYS:
-                continue
-
-
-            prev_vol = _vol_surge_baseline.get(sym, 0)
-            if prev_vol <= 0:
-                _vol_surge_baseline[sym] = vol
-                continue
-
-
-            _vol_surge_baseline[sym] = prev_vol * 0.85 + vol * 0.15
-
-
-            spike = vol / prev_vol if prev_vol > 0 else 1.0
-
-            # Cooldown
-            if now - _vol_surge_alerted.get(sym, 0) < VOL_SURGE_COOLDOWN:
-                continue
-            if now - coin_alerted.get(sym, 0) < TPS_COOLDOWN:
-                continue
-
-
-            if spike < VOL_SURGE_SPIKE:
-                continue
-
-
-            if chg > 8.0:
-                continue
-
-
-            kd_check = get_klines(sym, "1h", 168)
-            if kd_check and len(kd_check["lows"]) >= 24:
-                low_7d  = min(kd_check["lows"])
-                high_7d = max(kd_check["highs"]) if kd_check.get("highs") else price
-                if low_7d > 0:
-                    rise_from_low = (price - low_7d) / low_7d * 100
-
-                    if rise_from_low > 40.0:
-                        log.info(" VOL_SURGE SKIP: %s    +%.0f%%", sym, rise_from_low)
-                        continue
-
-
-            stats = analyze_tps_ats(sym)
-            if not stats:
-                continue
-
-            vdelta = stats.get("vdelta", 0.5)
-            ats    = stats.get("ats", 0)
-            if ats < VOL_SURGE_ATS_MIN:
-                continue
-
-
-            tier = get_tier_settings(vol)
-            if vdelta < tier["vdelta_min"]:
-                continue
-
-            sector = next((s for s,syms in SECTORS.items() if sym in syms), "غير محدد")
-
-            msg = (
-                "📡 *VOLUME SURGE* — حجم غير طبيعي!\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "💥 *{}* — حجم ارتفع {:.1f}× 🔥\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "📊 VDelta: `{:.0f}%` | ATS: `{:.0f}$`\n"
-                "💰 السعر: `{}` | 24h: `{:+.1f}%`\n"
-                "📦 الحجم: `{:.0f}K USDT`\n"
-                "🏷️ القطاع: `{}`\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "⚡ _السعر لم يتحرك بعد — فرصة دخول مبكر_ 🎯"
-            ).format(
-                sym.replace("USDT",""), spike,
-                vdelta*100, ats,
-                fmt_price(price), chg,
-                vol/1000,
-                sector
-            )
-
-
-            _vs_score = int(spike * 10 + vdelta * 100)
-            queue_signal(sym, msg, _vs_score, "VOL_SURGE")
-            _vol_surge_alerted[sym] = now
-            coin_alerted[sym] = now
-            whale_watch_add(sym, ats, vdelta, price)
-
-            log.info(" VOL_SURGE QUEUED | %s | spike=%.1fx | score=%d",
-                     sym, spike, _vs_score)
-
-        except (ValueError, TypeError, ZeroDivisionError):
-            continue
 
 
 
