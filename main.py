@@ -6468,6 +6468,12 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
     global lz_tps_alerted
     now = time.time()
 
+    # ── فلتر DANGER: لا إشارات في سوق هابط إلا إذا حيتان يشترون ──────
+    _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+    if market_state == "DANGER" and _btc_vd < 0.55:
+        log.info("scan_lz_tps_fusion: skipped — DANGER market (BTC VDelta=%.0f%%)", _btc_vd * 100)
+        return
+
 
     all_syms = list(set(list(candidates) + EXTRA_COINS))
     ranked = sorted(
@@ -8569,6 +8575,12 @@ def scan_tps_ats(price_map, vol_now, changes_map):
     """
     global tps_alerted, tps_baseline
     now = time.time()
+
+    # ── فلتر DANGER: لا إشارات في سوق هابط إلا إذا حيتان يشترون ──────
+    _btc_vd = btc_tps_stats.get("vdelta", 0.5) if btc_tps_stats else 0.5
+    if market_state == "DANGER" and _btc_vd < 0.55:
+        log.info("scan_tps_ats: skipped — DANGER market (BTC VDelta=%.0f%%)", _btc_vd * 100)
+        return
 
 
     all_syms = list(set(list(candidates) + EXTRA_COINS))
@@ -13379,6 +13391,10 @@ def run():
     last_4h_report       = 0.0
     last_early_accum_scan = 0.0
     _early_accum_seen    = {}
+
+    # تأخير أول مسح TPS/LZ بعد إعادة التشغيل — يمنع إرسال تنبيهات مكررة
+    # بسبب reset ذاكرة cooldowns عند الإعادة
+    last_tps_scan = time.time()
 
     send(
         "💀 *MAFIO-BOT* 💀\n"
