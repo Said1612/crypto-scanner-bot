@@ -11361,32 +11361,44 @@ def send_4h_market_report():
         btc_tps   = btc_stats.get("tps",   0.0) if btc_stats else 0.0
         btc_ats   = btc_stats.get("ats",   0.0) if btc_stats else 0.0
         btc_vd    = btc_stats.get("vdelta", 0.5) if btc_stats else 0.5
-        btc_bvol  = btc_stats.get("buy_vol",  0.0) if btc_stats else 0.0
-        btc_svol  = btc_stats.get("sell_vol", 0.0) if btc_stats else 0.0
+        # buy_vol/sell_vol من klines هي بالعملة الأساسية (BTC/ETH) — نحوّلها لـ USDT
+        _btc_price = float(next((t.get("lastPrice", 0) for t in all_tickers
+                                 if t.get("symbol") == "BTCUSDT"), 0))
+        _eth_price = float(next((t.get("lastPrice", 0) for t in all_tickers
+                                 if t.get("symbol") == "ETHUSDT"), 0))
+        btc_bvol  = btc_stats.get("buy_vol",  0.0) * (_btc_price if _btc_price > 0 else 1) if btc_stats else 0.0
+        btc_svol  = btc_stats.get("sell_vol", 0.0) * (_btc_price if _btc_price > 0 else 1) if btc_stats else 0.0
 
         eth_tps   = eth_stats.get("tps",   0.0) if eth_stats else 0.0
         eth_ats   = eth_stats.get("ats",   0.0) if eth_stats else 0.0
         eth_vd    = eth_stats.get("vdelta", 0.5) if eth_stats else 0.5
-        eth_bvol  = eth_stats.get("buy_vol",  0.0) if eth_stats else 0.0
-        eth_svol  = eth_stats.get("sell_vol", 0.0) if eth_stats else 0.0
+        eth_bvol  = eth_stats.get("buy_vol",  0.0) * (_eth_price if _eth_price > 0 else 1) if eth_stats else 0.0
+        eth_svol  = eth_stats.get("sell_vol", 0.0) * (_eth_price if _eth_price > 0 else 1) if eth_stats else 0.0
 
-        # ── حجم السوق الكلي buy/sell من all_tickers ────────────────
+        # ── حجم السوق الكلي buy/sell — باستخدام موقع السعر (Price Position)
+        # الطريقة: buy_ratio = (lastPrice - lowPrice) / (highPrice - lowPrice)
+        # أدق بكثير من اتجاه 24h لأنها تعكس أين أغلق السعر في نطاق اليوم
         mkt_buy = 0.0
         mkt_sell = 0.0
         for _t in all_tickers:
             try:
-                _v = float(_t.get("quoteVolume", 0))
-                _c = float(_t.get("priceChangePercent", 0))
+                _v    = float(_t.get("quoteVolume", 0))
+                _high = float(_t.get("highPrice",   0))
+                _low  = float(_t.get("lowPrice",    0))
+                _last = float(_t.get("lastPrice",   0))
                 if _v < 50_000:
                     continue
-                _sym = _t.get("symbol", "")
-                if not _sym.endswith("USDT"):
+                if not _t.get("symbol", "").endswith("USDT"):
                     continue
-                if _c > 0:
-                    mkt_buy += _v
+                if _high > _low:
+                    # موقع الإغلاق في نطاق High-Low: 1.0 = أغلق عند الأعلى (شراء)، 0.0 = أغلق عند الأدنى (بيع)
+                    _buy_ratio = max(0.0, min(1.0, (_last - _low) / (_high - _low)))
                 else:
-                    mkt_sell += _v
-            except (ValueError, TypeError):
+                    # نطاق = صفر (عملة ثابتة جداً) — استخدم 0.5 محايد
+                    _buy_ratio = 0.5
+                mkt_buy  += _v * _buy_ratio
+                mkt_sell += _v * (1.0 - _buy_ratio)
+            except (ValueError, TypeError, ZeroDivisionError):
                 pass
 
         mkt_total = mkt_buy + mkt_sell
@@ -11432,13 +11444,15 @@ def send_4h_market_report():
                 return "🐋🔥 حيتان يشترون"
             if ats >= ATS_WHALE and vd < 0.40:
                 return "🐋🔴 حيتان يبيعون"
-            if vd >= 0.60:
-                return "⬆️ شراء قوي"
-            if vd >= 0.50:
-                return "↗️ شراء متوسط"
-            if vd <= 0.40:
-                return "⬇️ بيع"
-            return "➡️ محايد"
+            if vd >= 0.70:
+                return "⬆️ شراء قوي 🔥"
+            if vd >= 0.58:
+                return "↗️ شراء خفيف"
+            if vd >= 0.52:
+                return "➡️ محايد"
+            if vd >= 0.42:
+                return "↘️ بيع خفيف"
+            return "⬇️ بيع قوي 🔴"
 
         btc_bvol_str  = _fmt_vol(btc_bvol)  if btc_bvol  > 0 else "—"
         btc_svol_str  = _fmt_vol(btc_svol)  if btc_svol  > 0 else "—"
@@ -13261,8 +13275,8 @@ def run():
 
             send_daily_report()
 
-            # تقرير 4 ساعات — معطّل
-            # send_4h_market_report()
+            # تقرير 4 ساعات — BTC+ETH ATS/TPS/VDelta + SAFE/CAUTION/DANGER
+            send_4h_market_report()
 
             if now - last_expand      >= EXPAND_EVERY:
 
