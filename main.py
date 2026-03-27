@@ -8504,35 +8504,13 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             "↔️ مختلط"
         )
 
-        _header = (
-            "🌊🥇 *VOLUME SURGE GOLD* 🥇🌊\n"
-            if is_gold else
-            "🌊 *VOLUME SURGE*\n"
-        )
-
-        msg = (
-            _header +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "💥 *{sym}* — الحجم انفجر فجأة!\n".format(sym=sym.replace("USDT","")) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "📊 ارتفاع الحجم: `{:.1f}×` المعدل الطبيعي 🔥\n".format(ratio) +
-            "💧 حجم آخر ساعة: `{}` USDT\n".format(_fmt_vol_k(last_vol_usdt)) +
-            "📈 اتجاه: {} (`{:.0f}%` شراء)\n".format(_cvd_tag, cvd_ratio * 100) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "💵 السعر: `{}`\n".format(fmt_price(price)) +
-            "📉 24h: `{:+.1f}%` | حجم كلي: `{}`\n".format(chg24, _fmt_vol_k(vol_24h)) +
-            "🏷️ القطاع: `{}`\n".format(sector) +
-            "━━━━━━━━━━━━━━━━━━\n"
-            "⏳ _الحجم يرتفع والسعر لم يتحرك بعد — انتظر الجوكر_ 🃏"
-        )
-
-        send(msg)
+        # صامت — يضيف للـ watchlist، WATCH ALERT يأتي من scan_tps_ats / scan_lz
         _vol_surge_seen[sym] = now
-        coin_alerted[sym]    = now
-        # أضف للـ watchlist بـ vdelta مشتق من CVD
         whale_watch_add(sym, 0, max(cvd_ratio, 0.56), price)
         perf_register(sym, price, "vol_surge", int(min(ratio * 10, 100)),
                       "Vol×{:.1f} cvd={:.0f}%".format(ratio, cvd_ratio * 100))
+        log.info(" VOL SURGE (silent) | %s | ratio=%.1fx | cvd=%.0f%%",
+                 sym, ratio, cvd_ratio * 100)
         log.info(" VOL_SURGE: %s | ×%.1f | usdt=%s | cvd=%.0f%% | 24h=%.1f%%",
                  sym, ratio, _fmt_vol_k(last_vol_usdt), cvd_ratio * 100, chg24)
 
@@ -8987,9 +8965,9 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
                 strength = "⚡ ضعيف"
 
             msg = (
-                "⏰ *PRE-PUMP WATCH*\n"
+                "👁️ *WATCH ALERT* ⏰\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "👁️ *{}* — تجميع هادئ قبل الانفجار!\n"
+                "🔍 *{}* — تجميع هادئ قبل الانفجار 👀\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 "📊 النقاط: `{}/100` {}\n"
                 "💵 السعر: `{}`\n"
@@ -8997,14 +8975,12 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
                 "📦 الحجم: `{}`\n"
                 "🏷️ القطاع: `{}`\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "🔍 *المؤشرات:*\n"
-                "  📏 النطاق: `{:.1f}%` (ضيق)\n"
+                "  📏 النطاق: `{:.1f}%` ضيق\n"
                 "  📈 الحجم: `×{:.1f}` يرتفع\n"
                 "  💚 VDelta: `{:.0f}%`\n"
-                "  📌 الإشارات: `{}`\n"
+                "  📌 `{}`\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⚠️ _تنبيه مبكر — انتظر تأكيد TPS+ATS_\n"
-                "⏳ _الإشارة الكاملة ستصل عند بدء الحركة_"
+                "⏳ _انتظر تأكيد الجوكر قبل الدخول_ 🃏"
             ).format(
                 coin,
                 score, strength,
@@ -10100,29 +10076,11 @@ def scan_hidden_accumulation(price_map, vol_now, changes_map):
         if acc_score >= 80:
             rarity = "🐋🔥 نادر جداً"
 
-        lines_msg = [
-            "👁️ *HIDDEN ACCUMULATION*",
-            "━━━━━━━━━━━━━━━━━━",
-            "🔇 *{}* — تجميع خفي مكتشف!".format(sym.replace("USDT","")),
-            "━━━━━━━━━━━━━━━━━━",
-            "📊 *المؤشرات:*",
-            "  {}".format(acc_desc),
-            "━━━━━━━━━━━━━━━━━━",
-            "💪 قوة التجميع: `{}/100` {}".format(acc_score, rarity),
-            "💵 السعر الحالي: `{}`".format(round(price, 8)),
-            "📉 24h: `{:+.2f}%` _(السوق نازل لكن الحيتان يشترون!)_".format(change_24h),
-            "📦 الحجم: `{:.0f}K USDT`".format(vol / 1000),
-            "🏷️ القطاع: `{}`".format(sector),
-            "━━━━━━━━━━━━━━━━━━",
-            "⚠️ _تنبيه مبكر — ليس إشارة دخول بعد_",
-            "⏳ _انتظر تأكيد الاتجاه قبل الدخول_",
-        ]
-        msg = "\n".join(lines_msg)
-        send(msg)
+        # صامت — يضيف للقائمة الداخلية فقط، الجوكر يؤكد لاحقاً
         hidden_accum_alerted[sym] = now
-        coin_alerted[sym] = now
+        whale_watch_add(sym, 0, max(acc_score / 100.0, 0.56), price)
         perf_register(sym, price, "hidden", acc_score, acc_desc)
-        log.info(" Hidden Accum | %s | score=%d | %s", sym, acc_score, acc_desc)
+        log.info(" Hidden Accum (silent) | %s | score=%d | %s", sym, acc_score, acc_desc)
 
 
 def detect_pump_dump(kd):
@@ -11021,10 +10979,11 @@ def scan_bottom_fisher(price_map, vol_now, changes_map):
 
 
             _bf_score = score + int(vdelta_ma * 50)
-            queue_signal(sym, msg, _bf_score, "BOTTOM_FISHER")
+            # صامت — يضيف للـ watchlist فقط، الجوكر يؤكد
             bottom_fisher_alerted[sym] = now
-            coin_alerted[sym] = now
             whale_watch_add(sym, vol_now.get(sym,0)/10000, vdelta_ma, price)
+            log.info(" BOTTOM FISHER (silent) | %s | score=%d | vdelta=%.0f%%",
+                     sym, _bf_score, vdelta_ma * 100)
 
             log.info(" BOTTOM FISHER QUEUED | %s | score=%d",
                      sym, _bf_score)
