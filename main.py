@@ -95,7 +95,7 @@ EXTRA_COINS = [
 
     "COSUSDT", "CUSDT", "MBOXUSDT", "TOWNSUSDT",
     "DEXEUSDT", "SPELLUSDT", "PSGUSDT", "INTUSDT",
-    "HAEDALUSDT", "PHBUSDT",
+    "HAEDALUSDT", "PHBUSDT", "HOOKUSDT",
 
 
     "FETUSDT", "AGIXUSDT", "OCEANUSDT", "GRTUSDT",
@@ -8506,15 +8506,39 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             "↔️ مختلط"
         )
 
-        # صامت — يضيف للـ watchlist، WATCH ALERT يأتي من scan_tps_ats / scan_lz
+        # WATCH ALERT — انفجار حجم سريع (COS/TOWNS نوع)
+        _surge_label = "🥇 انفجار ضخم جداً!" if is_gold else "🔥 انفجار حجم!"
+        msg = (
+            "👁️ *WATCH ALERT* 🌊\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💥 *{}* — الحجم انفجر فجأة! 👀\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 ارتفاع الحجم: `{:.1f}×` المعدل الطبيعي {}\n"
+            "💧 حجم آخر ساعة: `{}` USDT\n"
+            "📈 الاتجاه: {} (`{:.0f}%` شراء)\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💵 السعر: `{}`\n"
+            "📉 24h: `{:+.1f}%` | حجم كلي: `{}`\n"
+            "🏷️ القطاع: `{}`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⏳ _انتظر الجوكر للدخول_ 🃏"
+        ).format(
+            sym.replace("USDT", ""),
+            ratio, _surge_label,
+            _fmt_vol_k(last_vol_usdt),
+            _cvd_tag, cvd_ratio * 100,
+            fmt_price(price),
+            chg24, _fmt_vol_k(vol_24h),
+            sector,
+        )
+        send(msg)
         _vol_surge_seen[sym] = now
+        coin_alerted[sym]    = now
         whale_watch_add(sym, 0, max(cvd_ratio, 0.56), price)
         perf_register(sym, price, "vol_surge", int(min(ratio * 10, 100)),
                       "Vol×{:.1f} cvd={:.0f}%".format(ratio, cvd_ratio * 100))
-        log.info(" VOL SURGE (silent) | %s | ratio=%.1fx | cvd=%.0f%%",
-                 sym, ratio, cvd_ratio * 100)
-        log.info(" VOL_SURGE: %s | ×%.1f | usdt=%s | cvd=%.0f%% | 24h=%.1f%%",
-                 sym, ratio, _fmt_vol_k(last_vol_usdt), cvd_ratio * 100, chg24)
+        log.info(" VOL_SURGE WATCH | %s | ×%.1f | cvd=%.0f%% | 24h=%.1f%%",
+                 sym, ratio, cvd_ratio * 100, chg24)
 
 
 # ══════════════════════════════════════════════════════════════════
