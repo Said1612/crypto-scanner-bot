@@ -2861,21 +2861,8 @@ def analyze_sectors():
     exited  = old_hot - new_hot_set
 
     if entered or exited:
-        msg = "🔄 *SECTOR ROTATION*\n━━━━━━━━━━━━━━━━━━\n"
-        if entered:
-            msg += "💰 *سيولة تدخل:*\n"
-            for s in entered:
-                st = stats.get(s, {})
-                coins_txt = " | ".join(
-                    "{} +{:.0f}%".format(c, p) for c, p in st.get("top", [])
-                )
-                msg += "  🔥 *{}* avg:`+{:.1f}%`\n  {}\n".format(
-                    s, st.get("avg", 0), coins_txt)
-        if exited:
-            msg += "📤 *سيولة خرجت:* `{}`\n".format(", ".join(exited))
-        msg += "\n₿ BTC: `{:+.2f}%` | `{}`".format(btc_change_24h, market_state)
-        send(msg)
-        log.info(" Sectors: %s  %s", list(old_hot), new_hot)
+        # لا نرسل — scan_sector_rotation يرسل تقريراً أكثر تفصيلاً
+        log.info(" Sectors changed | entered=%s | exited=%s", list(entered), list(exited))
 
     if hot_sectors:
         log.info(" Hot: %s", ", ".join(hot_sectors))
@@ -3254,12 +3241,18 @@ def detect_sector_rotation():
     top_coins.sort(key=lambda x: -x[2])
 
     for name, ch, vol, pr in top_coins[:SR_TOP_COINS]:
-        chg_icon = "🟢" if ch > 0 else "⚪"
-
         sym_full = name + "USDT"
         _s = analyze_tps_ats(sym_full)
-        vd_txt  = " | VD:`{:.0f}%`".format(_s["vdelta"]*100) if _s else ""
-        ats_txt = " ATS:`{:.0f}$`".format(_s["ats"]) if _s else ""
+        if not _s:
+            continue
+        vd = _s.get("vdelta", 0)
+        ats = _s.get("ats", 0)
+        # تجاهل العملات التي فيها ضغط بيعي
+        if vd < 0.52:
+            continue
+        chg_icon = "🟢" if ch > 0 else "⚪"
+        vd_txt  = " | VD:`{:.0f}%`".format(vd * 100)
+        ats_txt = " ATS:`{:.0f}$`".format(ats)
         opp_lines += "  {} *{}* `{:+.1f}%`{}{}\n".format(
             chg_icon, name, ch, vd_txt, ats_txt)
 
@@ -8422,20 +8415,33 @@ def scan_volume_surge(price_map, vol_now, changes_map):
         return
     last_vol_surge_scan = now
 
-    # نفحص أكبر عدد ممكن — الهدف micro-cap أيضاً
-    all_syms = list(set(list(candidates) + EXTRA_COINS))
-    ranked = sorted(
-        [(s, vol_now.get(s, 0)) for s in all_syms],
-        key=lambda x: -x[1]
-    )[:120]
+    # فحص جميع العملات من all_tickers — يشمل الميكرو كاب والعملات غير المعروفة
+    _all_scan = []
+    for _t in all_tickers:
+        _sym = _t.get("symbol", "")
+        if not _sym.endswith("USDT"):
+            continue
+        if any(k in _sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if _sym.replace("USDT", "") in STABLECOINS:
+            continue
+        try:
+            _v24 = float(_t.get("quoteVolume", 0))
+            _chg = float(_t.get("priceChangePercent", 0))
+        except (ValueError, TypeError):
+            continue
+        if _v24 < 3_000:
+            continue
+        if _chg >= VOL_SURGE_MAX_CHG or _chg <= -15.0:
+            continue
+        _all_scan.append((_sym, _v24))
+
+    # فرز بالحجم تنازلياً — أفضل 250 عملة
+    _all_scan.sort(key=lambda x: -x[1])
+    ranked = _all_scan[:250]
 
     results = []
     for sym, vol_24h in ranked:
-        base = sym.replace("USDT", "")
-        if base in STABLECOINS:
-            continue
-        if vol_24h < 3_000:
-            continue
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
         if now - _vol_surge_seen.get(sym, 0) < VOL_SURGE_COOLDOWN:
@@ -8444,8 +8450,6 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             continue
 
         chg24 = changes_map.get(sym, 0)
-        if chg24 >= VOL_SURGE_MAX_CHG or chg24 <= -15.0:
-            continue
 
         # ── جلب 1h klines — 6 شمعات (آخر + 5 سابقة) ─────────────
         kd = get_klines(sym, "1h", 6)
@@ -14088,7 +14092,7 @@ def run():
 
             smart_market_scan()
             scan_defi_llama()
-            scan_funding_rates()
+            # scan_funding_rates()  # محذوف — غير مفيد ومتكرر
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
             scan_pre_pump_watch(price_map, vol_now, changes_map)
