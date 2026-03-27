@@ -8543,6 +8543,12 @@ EARLY_ACCUM_EVERY    = 300   # فحص كل 5 دقائق
 EARLY_ACCUM_COOLDOWN = 3600  # لا تعيد الاضافة قبل ساعة
 last_early_accum_scan = 0.0
 
+# ══ Pre-Pump Watch ══════════════════════════════════════════════════
+_pre_pump_alerted   = {}   # {sym: timestamp}
+last_pre_pump_scan  = 0.0
+PRE_PUMP_SCAN_EVERY = 600  # فحص كل 10 دقائق
+PRE_PUMP_COOLDOWN   = 21600  # كولداون 6 ساعات لنفس العملة
+
 
 def detect_cvd_divergence(sym):
     # type: (str) -> dict
@@ -8791,6 +8797,240 @@ def scan_early_accumulation(price_map, vol_now, changes_map):
 
     if added > 0:
         log.info(" scan_early_accumulation: added %d coins to whale_watchlist", added)
+
+
+def scan_pre_pump_watch(price_map, vol_now, changes_map):
+    # type: (Dict, Dict, Dict) -> None
+    """
+    ⏰ PRE-PUMP WATCH — يكتشف التجميع الهادئ قبل الانفجار بساعات
+    يشبه Wolf Flow: يرصد التوطيد الضيق + VDelta يرتفع بهدوء
+
+    الشروط:
+    - تغيير 24h بين -8% و +8% (لم يتحرك بعد)
+    - نطاق سعر 4H < 6% (توطيد ضيق)
+    - VDelta اتجاه تصاعدي (0.52+ → 0.58+)
+    - حجم يرتفع هادئاً (آخر 2h > متوسط 6h × 1.2)
+    - يفحص جميع العملات بحجم 80K+ (ليس فقط candidates)
+    """
+    global _pre_pump_alerted, last_pre_pump_scan
+    now = time.time()
+
+    if now - last_pre_pump_scan < PRE_PUMP_SCAN_EVERY:
+        return
+    last_pre_pump_scan = now
+
+    # فحص جميع العملات بما فيها الميكرو كاب
+    scan_list = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if sym in tracked:
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        try:
+            vol = float(t.get("quoteVolume", 0))
+            chg = float(t.get("priceChangePercent", 0))
+        except (ValueError, TypeError):
+            continue
+        if vol < 80_000:
+            continue
+        if chg > 12.0 or chg < -12.0:
+            continue
+        scan_list.append((sym, vol, chg))
+
+    # فرز بالحجم تنازلياً وأخذ أفضل 300
+    scan_list.sort(key=lambda x: -x[1])
+    scan_list = scan_list[:300]
+
+    found = []
+
+    for sym, vol, chg24 in scan_list:
+        if now - _pre_pump_alerted.get(sym, 0) < PRE_PUMP_COOLDOWN:
+            continue
+        if now - coin_alerted.get(sym, 0) < 3600:
+            continue
+
+        price = price_map.get(sym, 0)
+        if price <= 0:
+            continue
+
+        try:
+            # ── 1. كاندلز 1h آخر 8 ساعات ─────────────────────────────
+            kd1h = get_klines(sym, "1h", 8)
+            if not kd1h or len(kd1h["closes"]) < 6:
+                continue
+            closes = kd1h["closes"]
+            vols   = kd1h["vols"]
+            highs  = kd1h["highs"]
+            lows   = kd1h["lows"]
+
+            # ── 2. نطاق سعر ضيق < 6% ─────────────────────────────────
+            rng_high = max(highs)
+            rng_low  = min(lows)
+            if rng_low <= 0:
+                continue
+            range_pct = (rng_high - rng_low) / rng_low * 100
+            if range_pct > 6.0:
+                continue
+
+            # ── 3. حجم يرتفع هادئاً ──────────────────────────────────
+            if len(vols) < 6:
+                continue
+            avg_vol_old = sum(vols[:4]) / 4  # أول 4 ساعات
+            avg_vol_new = sum(vols[-2:]) / 2  # آخر ساعتين
+            if avg_vol_old <= 0:
+                continue
+            vol_ratio = avg_vol_new / avg_vol_old
+            # يجب أن يرتفع قليلاً (1.2x) لكن ليس pump بعد (< 4x)
+            if vol_ratio < 1.2 or vol_ratio > 4.0:
+                continue
+
+            # ── 4. VDelta اتجاه تصاعدي ───────────────────────────────
+            vdelta_now = calc_vdelta_ma(sym, period=4, interval="1h")
+            if vdelta_now < 0.52:
+                continue
+
+            # VDelta قبل 4 ساعات للمقارنة
+            vdelta_old = 0.0
+            kd_old = get_klines(sym, "1h", 12)
+            if kd_old and len(kd_old["closes"]) >= 12:
+                _old_closes = kd_old["closes"][:8]
+                _old_vols   = kd_old["vols"][:8]
+                _buy_old = sum(max(0.0, (c - o) / (h - l)) * v
+                               for c, o, h, l, v
+                               in zip(_old_closes,
+                                      kd_old["opens"][:8],
+                                      kd_old["highs"][:8],
+                                      kd_old["lows"][:8],
+                                      _old_vols)
+                               if (h - l) > 0)
+                _total_old = sum(_old_vols)
+                if _total_old > 0:
+                    vdelta_old = _buy_old / _total_old
+
+            # VDelta يجب أن يكون في ارتفاع أو محايد-صاعد
+            vd_rising = vdelta_now >= 0.55 or (vdelta_old > 0 and vdelta_now > vdelta_old + 0.03)
+            if not vd_rising:
+                continue
+
+            # ── 5. السعر لم يتحرك كثيراً (ضمن النطاق الضيق) ─────────
+            price_pos = (price - rng_low) / (rng_high - rng_low) if rng_high > rng_low else 0.5
+            # قريب من المنتصف أو الأسفل (لم ينفجر بعد)
+            if price_pos > 0.85:
+                continue
+
+            # ── 6. حساب النقاط ────────────────────────────────────────
+            score = 0
+            signals = []
+
+            if range_pct < 3.0:
+                score += 30
+                signals.append("نطاق ضيق {:.1f}%".format(range_pct))
+            elif range_pct < 5.0:
+                score += 20
+                signals.append("توطيد {:.1f}%".format(range_pct))
+            else:
+                score += 10
+
+            if vol_ratio >= 2.0:
+                score += 25
+                signals.append("حجم ×{:.1f}".format(vol_ratio))
+            elif vol_ratio >= 1.5:
+                score += 15
+                signals.append("حجم ×{:.1f}".format(vol_ratio))
+            else:
+                score += 8
+
+            if vdelta_now >= 0.65:
+                score += 30
+                signals.append("VDelta {:.0f}%🔥".format(vdelta_now * 100))
+            elif vdelta_now >= 0.58:
+                score += 20
+                signals.append("VDelta {:.0f}%".format(vdelta_now * 100))
+            elif vdelta_now >= 0.52:
+                score += 10
+                signals.append("VDelta {:.0f}%".format(vdelta_now * 100))
+
+            if vdelta_old > 0 and vdelta_now > vdelta_old + 0.05:
+                score += 15
+                signals.append("VD↑ +{:.0f}%".format((vdelta_now - vdelta_old) * 100))
+
+            # CVD divergence إضافي
+            _cvd = detect_cvd_divergence(sym)
+            if _cvd.get("bullish_div"):
+                score += 20
+                signals.append("CVD Div!")
+
+            # Higher Lows
+            if len(lows) >= 5:
+                hl = sum(1 for i in range(1, len(lows)) if lows[i] >= lows[i-1] * 0.999)
+                if hl >= len(lows) - 2:
+                    score += 15
+                    signals.append("Higher Lows")
+
+            if score < 35:
+                continue
+
+            # ── 7. إرسال التنبيه ─────────────────────────────────────
+            sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
+            coin   = sym.replace("USDT", "")
+
+            if score >= 70:
+                strength = "🔥🔥 قوي جداً"
+            elif score >= 50:
+                strength = "🔥 متوسط"
+            else:
+                strength = "⚡ ضعيف"
+
+            msg = (
+                "⏰ *PRE-PUMP WATCH*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "👁️ *{}* — تجميع هادئ قبل الانفجار!\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📊 النقاط: `{}/100` {}\n"
+                "💵 السعر: `{}`\n"
+                "📉 24h: `{:+.2f}%`\n"
+                "📦 الحجم: `{}`\n"
+                "🏷️ القطاع: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "🔍 *المؤشرات:*\n"
+                "  📏 النطاق: `{:.1f}%` (ضيق)\n"
+                "  📈 الحجم: `×{:.1f}` يرتفع\n"
+                "  💚 VDelta: `{:.0f}%`\n"
+                "  📌 الإشارات: `{}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⚠️ _تنبيه مبكر — انتظر تأكيد TPS+ATS_\n"
+                "⏳ _الإشارة الكاملة ستصل عند بدء الحركة_"
+            ).format(
+                coin,
+                score, strength,
+                round(price, 8),
+                chg24,
+                _fmt_vol(vol),
+                sector,
+                range_pct,
+                vol_ratio,
+                vdelta_now * 100,
+                " | ".join(signals),
+            )
+
+            found.append((score, sym, msg, price))
+
+        except Exception as _e:
+            log.debug("pre_pump_watch %s: %s", sym, _e)
+            continue
+
+    # أرسل أقوى 3 فقط لتجنب الفيضان
+    found.sort(key=lambda x: -x[0])
+    for score, sym, msg, price in found[:3]:
+        send(msg)
+        _pre_pump_alerted[sym] = now
+        perf_register(sym, price, "pre_pump_watch", score, "")
+        log.info(" PRE_PUMP_WATCH | %s | score=%d", sym, score)
 
 
 def scan_tps_ats(price_map, vol_now, changes_map):
@@ -13674,6 +13914,8 @@ def run():
     last_4h_report       = 0.0
     last_early_accum_scan = 0.0
     _early_accum_seen    = {}
+    last_pre_pump_scan   = 0.0
+    _pre_pump_alerted    = {}
 
     # تأخير أول مسح TPS/LZ بعد إعادة التشغيل — يمنع إرسال تنبيهات مكررة
     # بسبب reset ذاكرة cooldowns عند الإعادة
@@ -13864,6 +14106,7 @@ def run():
             scan_funding_rates()
             scan_volume_surge(price_map, vol_now, changes_map)
             scan_bottom_fisher(price_map, vol_now, changes_map)
+            scan_pre_pump_watch(price_map, vol_now, changes_map)
 
 
             flush_signal_queue(max_send=5)
