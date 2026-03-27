@@ -8419,13 +8419,15 @@ def scan_volume_surge(price_map, vol_now, changes_map):
     """
     🌊 VOLUME SURGE SCANNER — يكتشف انفجار الحجم قبل ارتفاع السعر
 
-    الهدف: اصطياد COS (+70%) / TOWNS (+36%) في مرحلة التجميع الصامت
+    الهدف: اصطياد SHAPE (+61%) / AEROBUD (+24%) / COS (+70%) / TOWNS (+36%)
 
     المنطق:
     - حجم آخر ساعة > 3.5× متوسط الـ 4 ساعات السابقة
     - السعر لم يرتفع أكثر من 8% بعد (الفرصة لا تزال موجودة)
     - اتجاه الحجم شراء وليس بيع (CVD بسيط)
-    - بدون حد أدنى للـ ATS — يعمل حتى لـ micro-cap بـ $0.001
+    - يفحص من مسارين:
+      أ) أكبر 200 عملة بالحجم المطلق (big/mid caps)
+      ب) أكبر 300 عملة بالتغيير% 24h (micro-cap pumping)
     """
     global _vol_surge_seen, last_vol_surge_scan
     now = time.time()
@@ -8434,8 +8436,11 @@ def scan_volume_surge(price_map, vol_now, changes_map):
         return
     last_vol_surge_scan = now
 
-    # فحص جميع العملات من all_tickers — يشمل الميكرو كاب والعملات غير المعروفة
-    _all_scan = []
+    # ── مسار 1: أكبر بالحجم (big/mid cap) ────────────────────────
+    _by_vol  = []
+    # ── مسار 2: الأكثر تحركاً بالتغيير% (micro-cap pumping) ──────
+    _by_chg  = []
+
     for _t in all_tickers:
         _sym = _t.get("symbol", "")
         if not _sym.endswith("USDT"):
@@ -8453,11 +8458,23 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             continue
         if _chg >= VOL_SURGE_MAX_CHG or _chg <= -15.0:
             continue
-        _all_scan.append((_sym, _v24))
+        _by_vol.append((_sym, _v24, _chg))
+        # مسار الميكرو كاب: حجم 5K-500K مع تحرك إيجابي > 3%
+        if 5_000 <= _v24 <= 500_000 and _chg >= 3.0:
+            _by_chg.append((_sym, _v24, _chg))
 
-    # فرز بالحجم تنازلياً — أفضل 250 عملة
-    _all_scan.sort(key=lambda x: -x[1])
-    ranked = _all_scan[:250]
+    # دمج المسارين بدون تكرار
+    _by_vol.sort(key=lambda x: -x[1])
+    _by_chg.sort(key=lambda x: -x[2])   # ترتيب بالتغيير%
+
+    _seen_syms = set()
+    ranked = []
+    for _sym, _v24, _chg in _by_vol[:200]:
+        _seen_syms.add(_sym)
+        ranked.append((_sym, _v24))
+    for _sym, _v24, _chg in _by_chg[:150]:
+        if _sym not in _seen_syms:
+            ranked.append((_sym, _v24))
 
     results = []
     for sym, vol_24h in ranked:
