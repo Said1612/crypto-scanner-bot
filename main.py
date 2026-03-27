@@ -201,7 +201,7 @@ WL_ENTRY_COOL    = 14400
 WL_CHECK_EVERY   = 60
 
 
-TS_TRAIL_PCT     = 15.0
+TS_TRAIL_PCT     = 15.0   # trail افتراضي (يُستبدل بالتكيّفي أدناه)
 TS_MIN_PROFIT    = 10.0
 TS_BREAKEVEN     = 10.0
 TS_LOCK_20       = 20.0
@@ -209,6 +209,21 @@ TS_LOCK_50       = 50.0
 TS_SCAN_EVERY    = 300
 TS_DANGER_VOL    = 0.5
 TS_DANGER_CLOSE  = -3.0
+
+# ── Adaptive Trailing — أوسع عند البداية، أضيق عند القمم ─────────
+# peak_pct → trail_pct (كلما ارتفع الربح كلما ضاق الـ trail لحماية الأرباح)
+TS_ADAPTIVE_TRAIL = [
+    (200.0, 10.0),   # > 200%  → trail -10% من القمة
+    (100.0, 12.0),   # > 100%  → trail -12%
+    ( 50.0, 15.0),   # >  50%  → trail -15%
+    ( 30.0, 20.0),   # >  30%  → trail -20% (مساحة تنفس)
+    (  0.0, 25.0),   # >   0%  → trail -25% (لا تخرج مبكراً)
+]
+
+# ── Whale Sell Detection — لا تخرج بسبب تذبذب عادي ────────────────
+WHALE_SELL_VDELTA   = 0.33   # VDelta < 33% = بيع قوي (كان 35%)
+WHALE_SELL_ATS_MULT = 2.5    # ATS >= tier_min × 2.5 = بيع كبير
+WHALE_EXIT_MIN_PROF = 15.0   # لا تُرسل إشارة خروج إلا بعد 15% ربح
 
 TS_SELL_COOL     = 3600
 
@@ -3964,23 +3979,27 @@ def check_trailing_stops():
             peak_pct = (peak / entry - 1) * 100
 
 
-            new_stop = stop
+            new_stop   = stop
+            new_locked = locked
 
+            # ── Lock levels ──────────────────────────────────────────
             if peak_pct >= TS_LOCK_50:
-
-                new_stop  = entry * 1.35
+                new_stop   = max(new_stop, entry * 1.35)
                 new_locked = 35.0
             elif peak_pct >= TS_LOCK_20:
-
-                new_stop  = entry * 1.10
+                new_stop   = max(new_stop, entry * 1.10)
                 new_locked = 10.0
             elif peak_pct >= TS_BREAKEVEN:
-
-                new_stop  = entry * 1.001
+                new_stop   = max(new_stop, entry * 1.001)
                 new_locked = 0.0
 
-
-            trail_stop = peak * (1 - TS_TRAIL_PCT / 100)
+            # ── Adaptive Trail — أوسع في البداية أضيق عند القمم ─────
+            _trail_pct = TS_TRAIL_PCT
+            for _threshold, _pct in TS_ADAPTIVE_TRAIL:
+                if peak_pct >= _threshold:
+                    _trail_pct = _pct
+                    break
+            trail_stop = peak * (1 - _trail_pct / 100)
             new_stop   = max(new_stop, trail_stop)
 
             if new_stop > stop:
@@ -13115,27 +13134,31 @@ def check_coin_liquidity_exit(sym, entry_price, current_price, vdelta, ats):
     exit_reason = ""
     urgent = False
 
+    # ── حجم الصفقة لتحديد عتبة "حيتان" نسبية ─────────────────────
+    _vol_sym = next((float(t.get("quoteVolume", 0))
+                     for t in all_tickers if t.get("symbol") == sym), 0)
+    _tier    = get_tier_settings(_vol_sym)
+    _ats_min = _tier.get("ats_min", 150)
+    _whale_ats = _ats_min * WHALE_SELL_ATS_MULT   # عتبة بيع الحيتان النسبية
 
-    if vdelta < 0.35 and ats >= 500:
-        exit_reason = "VDelta انهار {:.0f}% + حيتان يبيعون".format(vdelta * 100)
+    # 🚨 أولوية 1: حيتان يبيعون بقوة (VDelta منهار + ATS كبير)
+    if vdelta < WHALE_SELL_VDELTA and ats >= _whale_ats:
+        exit_reason = "🐋 حيتان يبيعون! VDelta {:.0f}% ATS {:.0f}$".format(vdelta * 100, ats)
         urgent = True
-    elif vdelta < 0.35:
+
+    # 🚨 أولوية 2: انهيار VDelta حاد بغض النظر عن ATS
+    elif vdelta < WHALE_SELL_VDELTA:
         exit_reason = "VDelta انهار {:.0f}%".format(vdelta * 100)
-        urgent = False
-
-
-    elif ats >= 2000 and vdelta < 0.40:
-        exit_reason = "حيتان يبيعون! ATS {:.0f}$".format(ats)
         urgent = True
 
-
+    # ⚠️ Stop Loss
     elif pnl <= -5.0:
         exit_reason = "Stop Loss -5% مكسور"
         urgent = True
 
-
-    elif vdelta < 0.50 and pnl > 3.0 and ats >= 200:
-        exit_reason = "VDelta يضعف {:.0f}% — احمِ أرباحك".format(vdelta * 100)
+    # ⚠️ تحذير ضعف — فقط إذا كان الربح > WHALE_EXIT_MIN_PROF ولا تُزعج برسائل مبكرة
+    elif vdelta < 0.45 and pnl >= WHALE_EXIT_MIN_PROF and ats >= _ats_min:
+        exit_reason = "VDelta يضعف {:.0f}% — فكر في جني الأرباح".format(vdelta * 100)
         urgent = False
 
     if not exit_reason:
@@ -13431,28 +13454,29 @@ def scan_exit_signals(price_map, vol_now, changes_map):
         exit_reason = ""
         exit_urgent = False
 
+        # حجم الصفقة لتحديد عتبة "حيتان" نسبية
+        _tier_ex   = get_tier_settings(vol_now.get(sym, 0))
+        _ats_min_x = _tier_ex.get("ats_min", 150)
+        _whale_x   = _ats_min_x * WHALE_SELL_ATS_MULT
 
-        if vdelta < 0.40 and ats >= 200:
-            exit_reason = "VDelta انقلب للبيع {:.0f}%".format(vdelta*100)
-            exit_urgent = True
-        elif vdelta < 0.40:
-            exit_reason = "VDelta ضعيف {:.0f}%".format(vdelta*100)
-            exit_urgent = False
-
-
-        elif ats >= 500 and vdelta < 0.45:
-            exit_reason = "حيتان يبيعون! ATS {:.0f}$ VDelta {:.0f}%".format(
-                ats, vdelta*100)
+        # 🚨 أولوية 1 — حيتان يبيعون بقوة
+        if vdelta < WHALE_SELL_VDELTA and ats >= _whale_x:
+            exit_reason = "🐋 حيتان يبيعون! VDelta {:.0f}% ATS {:.0f}$".format(vdelta*100, ats)
             exit_urgent = True
 
+        # 🚨 أولوية 2 — انهيار VDelta حاد
+        elif vdelta < WHALE_SELL_VDELTA:
+            exit_reason = "VDelta انهار {:.0f}%".format(vdelta*100)
+            exit_urgent = True
 
+        # 🚨 Stop Loss
         elif pnl_pct <= -4.0:
             exit_reason = "Stop Loss -4% مكسور!"
             exit_urgent = True
 
-
-        elif vdelta < 0.50 and pnl_pct > 0:
-            exit_reason = "VDelta يضعف {:.0f}% — احمِ أرباحك".format(vdelta*100)
+        # ⚠️ تحذير ضعف — فقط إذا تجاوز الحد الأدنى للربح (لا تُزعج مبكراً)
+        elif vdelta < 0.45 and pnl_pct >= WHALE_EXIT_MIN_PROF and ats >= _ats_min_x:
+            exit_reason = "VDelta يضعف {:.0f}% — فكر في جني الأرباح".format(vdelta*100)
             exit_urgent = False
 
         if not exit_reason:
