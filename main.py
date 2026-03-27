@@ -1027,6 +1027,12 @@ def poll_commands():
                 daily_report_sent_date = ""
                 lz_daily_sent_date     = ""
                 send_daily_report(force=True)
+            elif text_lower in ("/4h", "/report4h", "/تقرير4"):
+                log.info(" /4h   chat_id=%s", chat_id)
+                send("📡 جاري إعداد تقرير 4 ساعات...")
+                global last_4h_report
+                last_4h_report = 0.0
+                send_4h_market_report()
             elif text_lower in ("/status", "/حالة"):
                 send("\u2705 البوت يعمل | " + str(len(candidates)) + " عملة تحت المراقبة" +
                      " | جواهر: " + str(len(gem_watchlist)))
@@ -1147,6 +1153,7 @@ def poll_commands():
                     "🏆 /sectors     — أفضل القطاعات\n"
                     "👁️ /watchlist   — قائمة المراقبة\n"
                     "📅 /report      — التقرير اليومي\n"
+                    "📡 /4h          — تقرير السوق 4 ساعات\n"
                     "📈 /performance — نسبة نجاح الإشارات\n"
                     "🔥 /hunter      — آخر إشارات Hunter\n"
                     "⏸️ /stop        — إيقاف التنبيهات\n"
