@@ -11663,7 +11663,7 @@ def _market_state_from_metrics(btc_vd, eth_vd, mkt_vd, btc_1h, btc_24h, ats_btc,
         reasons.append("✅ السوق: شراء كلي `{:.0f}%`".format(mkt_vd * 100))
     elif mkt_vd <= 0.40:
         score -= 10
-        reasons.append("🔴 السوق: بيع كلي `{:.0f}%`".format(mkt_vd * 100))
+        reasons.append("🔴 السوق: بيع كلي `{:.0f}%`".format((1.0 - mkt_vd) * 100))
 
     score = max(0, min(100, score))
 
