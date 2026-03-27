@@ -8422,20 +8422,33 @@ def scan_volume_surge(price_map, vol_now, changes_map):
         return
     last_vol_surge_scan = now
 
-    # نفحص أكبر عدد ممكن — الهدف micro-cap أيضاً
-    all_syms = list(set(list(candidates) + EXTRA_COINS))
-    ranked = sorted(
-        [(s, vol_now.get(s, 0)) for s in all_syms],
-        key=lambda x: -x[1]
-    )[:120]
+    # فحص جميع العملات من all_tickers — يشمل الميكرو كاب والعملات غير المعروفة
+    _all_scan = []
+    for _t in all_tickers:
+        _sym = _t.get("symbol", "")
+        if not _sym.endswith("USDT"):
+            continue
+        if any(k in _sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if _sym.replace("USDT", "") in STABLECOINS:
+            continue
+        try:
+            _v24 = float(_t.get("quoteVolume", 0))
+            _chg = float(_t.get("priceChangePercent", 0))
+        except (ValueError, TypeError):
+            continue
+        if _v24 < 3_000:
+            continue
+        if _chg >= VOL_SURGE_MAX_CHG or _chg <= -15.0:
+            continue
+        _all_scan.append((_sym, _v24))
+
+    # فرز بالحجم تنازلياً — أفضل 250 عملة
+    _all_scan.sort(key=lambda x: -x[1])
+    ranked = _all_scan[:250]
 
     results = []
     for sym, vol_24h in ranked:
-        base = sym.replace("USDT", "")
-        if base in STABLECOINS:
-            continue
-        if vol_24h < 3_000:
-            continue
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
         if now - _vol_surge_seen.get(sym, 0) < VOL_SURGE_COOLDOWN:
@@ -8444,8 +8457,6 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             continue
 
         chg24 = changes_map.get(sym, 0)
-        if chg24 >= VOL_SURGE_MAX_CHG or chg24 <= -15.0:
-            continue
 
         # ── جلب 1h klines — 6 شمعات (آخر + 5 سابقة) ─────────────
         kd = get_klines(sym, "1h", 6)
