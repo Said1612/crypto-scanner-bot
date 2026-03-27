@@ -11744,11 +11744,10 @@ def send_4h_market_report():
                 if not _t.get("symbol", "").endswith("USDT"):
                     continue
                 if _high > _low:
-                    # موقع الإغلاق: 1.0 = أعلى النطاق (شراء)، 0.0 = أدنى النطاق (بيع)
                     _pp = max(0.0, min(1.0, (_last - _low) / (_high - _low)))
-                    # تعزيز: إذا أغلق فوق الفتح (شمعة خضراء) نُعطي وزناً إضافياً
                     _green = 1 if _last >= _open else 0
-                    _buy_ratio = (_pp * 0.7) + (_green * 0.3)
+                    _buy_ratio = (_pp * 0.65) + (_green * 0.35)
+                    _buy_ratio = max(0.15, min(0.85, _buy_ratio))  # حد منطقي 15%-85%
                 else:
                     _buy_ratio = 0.5
                 mkt_buy  += _v * _buy_ratio
@@ -11836,16 +11835,16 @@ def send_4h_market_report():
             "━━━━━━━━━━━━━━━━━━\n"
             "₿ *BTC — التحليل الكامل:*\n"
             "  TPS: `{:.1f}` صفقة/ثانية\n"
-            "  ATS: `{:.0f} USDT` — {}\n"
-            "  VDelta: `{:.0f}%` {}\n"
-            "  🟢 شراء: `{}` | 🔴 بيع: `{}`\n"
+            "  ATS: `{:.0f} USDT`\n"
+            "  VDelta: `{:.0f}%` {} — {}\n"
+            "  💚 داخل: `{}` | 🔴 خارج: `{}`\n"
             "  24h: `{:+.2f}%` | 1h: `{:+.2f}%`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "Ξ *ETH — التحليل الكامل:*\n"
             "  TPS: `{:.1f}` صفقة/ثانية\n"
-            "  ATS: `{:.0f} USDT` — {}\n"
-            "  VDelta: `{:.0f}%` {}\n"
-            "  🟢 شراء: `{}` | 🔴 بيع: `{}`\n"
+            "  ATS: `{:.0f} USDT`\n"
+            "  VDelta: `{:.0f}%` {} — {}\n"
+            "  💚 داخل: `{}` | 🔴 خارج: `{}`\n"
             "  24h: `{:+.2f}%`\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "📊 *السوق الكلي:*\n"
@@ -11860,13 +11859,13 @@ def send_4h_market_report():
             icon_s, state_emojis.get(state, state),
             score,
             btc_tps,
-            btc_ats, _vd_label(btc_vd, btc_ats),
-            btc_vd * 100, _vd_bar(btc_vd),
+            btc_ats,
+            btc_vd * 100, _vd_bar(btc_vd), _vd_label(btc_vd, btc_ats),
             btc_bvol_str, btc_svol_str,
             btc_change_24h, _btc_1h_now,
             eth_tps,
-            eth_ats, _vd_label(eth_vd, eth_ats),
-            eth_vd * 100, _vd_bar(eth_vd),
+            eth_ats,
+            eth_vd * 100, _vd_bar(eth_vd), _vd_label(eth_vd, eth_ats),
             eth_bvol_str, eth_svol_str,
             eth_change_24h,
             mkt_buy_pct, _fmt_vol(mkt_buy),
