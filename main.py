@@ -6164,6 +6164,8 @@ WHALE_VDELTA_MIN   = 0.58    # VDelta 65%+
 
 whale_watchlist    = {}   # type: Dict[str, Dict]
 whale_confirmed    = {}   # type: Dict[str, float]  {sym: last_confirm_time}
+_coin_first_seen   = {}   # {sym: first_seen_timestamp}
+NEW_COIN_MIN_DAYS  = 3    # تجاهل العملات الجديدة أقل من 3 أيام
 
 
 def whale_watch_add(sym, ats, vdelta, price):
@@ -6424,7 +6426,7 @@ def scan_whale_confirmation(price_map):
     يفحص كل العملات في قائمة المراقبة
     إذا ATS ارتفع لـ WHALE_ATS_MIN+ → تنبيه Whale Confirmation
     """
-    global whale_watchlist, whale_confirmed
+    global whale_watchlist, whale_confirmed, _coin_first_seen
     now     = time.time()
     to_del  = []
 
