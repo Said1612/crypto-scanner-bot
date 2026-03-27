@@ -6177,7 +6177,7 @@ WHALE_VDELTA_MIN   = 0.58    # VDelta 65%+
 whale_watchlist    = {}   # type: Dict[str, Dict]
 whale_confirmed    = {}   # type: Dict[str, float]  {sym: last_confirm_time}
 _coin_first_seen   = {}   # {sym: first_seen_timestamp}
-NEW_COIN_MIN_DAYS  = 3    # تجاهل العملات الجديدة أقل من 3 أيام
+NEW_COIN_MIN_DAYS  = 7    # تجاهل العملات الجديدة أقل من 7 أيام (أسبوع)
 
 
 def whale_watch_add(sym, ats, vdelta, price):
@@ -8414,6 +8414,55 @@ def _fmt_vol_k(v):
     return "{:.0f}".format(v)
 
 
+def _is_real_liquidity(vol_24h, chg_24h, t_dict=None):
+    # type: (float, float, dict) -> tuple
+    """
+    فحص السيولة الحقيقية مقابل الوهمية (Wash Trading / Fake Volume)
+
+    علامات الحجم الوهمي:
+    1. حجم ضخم + تغيير سعري ضئيل جداً (< 0.5%)
+    2. نطاق 24h ضيق جداً مع حجم عالٍ
+    3. متوسط حجم الصفقة أقل من $5 (صفقات مجهرية = wash bots)
+    4. فارق bid/ask كبير جداً (> 8%) = عمق وهمي
+
+    يعيد: (is_real: bool, reason: str)
+    """
+    # 1. حجم ضخم + سعر يكاد لا يتحرك = وهمي تقريباً
+    if vol_24h > 2_000_000 and abs(chg_24h) < 0.3:
+        return False, "حجم ضخم بدون تحرك سعري"
+
+    if t_dict:
+        try:
+            high  = float(t_dict.get("highPrice",  0) or 0)
+            low   = float(t_dict.get("lowPrice",   0) or 0)
+            bid   = float(t_dict.get("bidPrice",   0) or 0)
+            ask   = float(t_dict.get("askPrice",   0) or 0)
+            count = int(float(t_dict.get("count",  0) or 0))
+
+            # 2. نطاق 24h مقابل الحجم
+            if low > 0 and vol_24h > 1_000_000:
+                range_24h = (high - low) / low * 100
+                if range_24h < 0.8:
+                    return False, "نطاق 24h ضيق مع حجم عالٍ"
+
+            # 3. متوسط حجم الصفقة الواحدة
+            if count > 200:
+                avg_trade = vol_24h / count
+                if avg_trade < 5.0:
+                    return False, "صفقات مجهرية (wash trading)"
+
+            # 4. فارق bid/ask كبير جداً = سيولة وهمية في الدفتر
+            if bid > 0 and ask > 0 and bid > 0:
+                spread_pct = (ask - bid) / bid * 100
+                if spread_pct > 8.0:
+                    return False, "spread واسع جداً = سيولة وهمية"
+
+        except (ValueError, TypeError):
+            pass
+
+    return True, ""
+
+
 def scan_volume_surge(price_map, vol_now, changes_map):
     # type: (Dict, Dict, Dict) -> None
     """
@@ -8429,7 +8478,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
       أ) أكبر 200 عملة بالحجم المطلق (big/mid caps)
       ب) أكبر 300 عملة بالتغيير% 24h (micro-cap pumping)
     """
-    global _vol_surge_seen, last_vol_surge_scan
+    global _vol_surge_seen, last_vol_surge_scan, _coin_first_seen
     now = time.time()
 
     if now - last_vol_surge_scan < VOL_SURGE_EVERY:
@@ -8440,6 +8489,9 @@ def scan_volume_surge(price_map, vol_now, changes_map):
     _by_vol  = []
     # ── مسار 2: الأكثر تحركاً بالتغيير% (micro-cap pumping) ──────
     _by_chg  = []
+
+    # خريطة سريعة للوصول لبيانات ticker بالسيمبول
+    _ticker_map = {_t.get("symbol", ""): _t for _t in all_tickers}
 
     for _t in all_tickers:
         _sym = _t.get("symbol", "")
@@ -8457,6 +8509,10 @@ def scan_volume_surge(price_map, vol_now, changes_map):
         if _v24 < 3_000:
             continue
         if _chg >= VOL_SURGE_MAX_CHG or _chg <= -15.0:
+            continue
+        # فلتر السيولة الحقيقية مبكراً (بدون API إضافية)
+        _liq_ok, _ = _is_real_liquidity(_v24, _chg, _t)
+        if not _liq_ok:
             continue
         _by_vol.append((_sym, _v24, _chg))
         # مسار الميكرو كاب: حجم 5K-500K مع تحرك إيجابي > 3%
@@ -8483,6 +8539,14 @@ def scan_volume_surge(price_map, vol_now, changes_map):
         if now - _vol_surge_seen.get(sym, 0) < VOL_SURGE_COOLDOWN:
             continue
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
+            continue
+
+        # فلتر العملات الجديدة (أقل من 7 أيام)
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+            continue
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            log.debug(" VOL_SURGE skip new coin: %s", sym)
             continue
 
         chg24 = changes_map.get(sym, 0)
@@ -8856,7 +8920,7 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
     - حجم يرتفع هادئاً (آخر 2h > متوسط 6h × 1.2)
     - يفحص جميع العملات بحجم 80K+ (ليس فقط candidates)
     """
-    global _pre_pump_alerted, last_pre_pump_scan
+    global _pre_pump_alerted, last_pre_pump_scan, _coin_first_seen
     now = time.time()
 
     if now - last_pre_pump_scan < PRE_PUMP_SCAN_EVERY:
@@ -8884,7 +8948,11 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
             continue
         if chg > 12.0 or chg < -12.0:
             continue
-        scan_list.append((sym, vol, chg))
+        # فلتر السيولة الحقيقية — يمنع الحجم الوهمي
+        _liq_ok, _ = _is_real_liquidity(vol, chg, t)
+        if not _liq_ok:
+            continue
+        scan_list.append((sym, vol, chg, t))
 
     # فرز بالحجم تنازلياً وأخذ أفضل 300
     scan_list.sort(key=lambda x: -x[1])
@@ -8892,10 +8960,18 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
 
     found = []
 
-    for sym, vol, chg24 in scan_list:
+    for sym, vol, chg24, _t_dict in scan_list:
         if now - _pre_pump_alerted.get(sym, 0) < PRE_PUMP_COOLDOWN:
             continue
         if now - coin_alerted.get(sym, 0) < 3600:
+            continue
+
+        # فلتر العملات الجديدة (أقل من 7 أيام)
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+            continue
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            log.debug(" PRE_PUMP skip new coin: %s", sym)
             continue
 
         price = price_map.get(sym, 0)
