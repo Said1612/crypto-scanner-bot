@@ -192,6 +192,12 @@ RT_VOL_SPIKE     = 2.0
 RT_MIN_VOL       = 1_000_000
 RT_COOLDOWN      = 21600
 
+BREAKOUT5M_SCAN_EVERY = 180    # كل 3 دقائق
+BREAKOUT5M_COOLDOWN   = 14400  # 4 ساعات بين تنبيهين للعملة نفسها
+BREAKOUT5M_MIN_VOL    = 300_000
+BREAKOUT5M_VOL_SPIKE  = 2.5    # حجم الشمعة الأخيرة > 2.5x المتوسط
+BREAKOUT5M_MAX_COINS  = 25     # أقصى عدد يُفحص بـ klines
+
 
 WL_ENTRY_MOVE    = 3.0
 WL_ENTRY_VOL     = 1.5
@@ -1000,8 +1006,10 @@ ts_positions     = {}  # type: Dict[str, Dict]  {sym: {entry, peak, stop, locked
 ts_sell_alerted  = {}  # type: Dict[str, float] {sym: last_sell_time}
 last_ts_scan     = 0.0
 daily_signals    = {"date": "", "count": 0}
-last_rt_scan     = 0.0
+last_rt_scan         = 0.0
 last_bottom_scan     = 0.0
+last_breakout5m_scan = 0.0
+_breakout5m_alerted  = {}   # type: Dict[str, float]  {sym: last_alert_time}
 
 
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
@@ -4373,6 +4381,148 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
                  sym, m["change"], vol_str, m["score"])
 
     log.info(" Instant Scan | movers=%d", len(movers))
+
+
+def scan_5m_breakout(price_map=None, vol_now=None):
+    # type: () -> None
+    """
+    5m Breakout Scanner — يكتشف الاختراق لحظة بدايته
+    يشبه Wolf Flow: EMA5>EMA10>EMA20 + volume spike على 5m + اختراق المقاومة
+
+    الخطوات:
+    1. فلترة سريعة من all_tickers: عملات SECTORS بتغيير +2%→+30% وحجم 300K+
+    2. لأفضل 25 عملة: يسحب 5m klines (25 شمعة)
+    3. يتحقق: EMA5>EMA10>EMA20 + حجم آخر شمعة 2.5x+ + اختراق أعلى 20 شمعة
+    """
+    global _breakout5m_alerted, last_breakout5m_scan, _coin_first_seen, hot_alerted
+
+    now = time.time()
+    if now - last_breakout5m_scan < BREAKOUT5M_SCAN_EVERY:
+        return
+    last_breakout5m_scan = now
+
+    if not all_tickers:
+        return
+
+    all_sector_coins = set()
+    for sc in SECTORS.values():
+        all_sector_coins.update(sc)
+
+    # المرحلة 1: فلترة سريعة بدون API calls إضافية
+    pool = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if sym not in all_sector_coins:
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        try:
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+            price  = float(t["lastPrice"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < BREAKOUT5M_MIN_VOL:
+            continue
+        # تغيير إيجابي يدل على بداية حركة (ليست ساكنة ولا متأخرة جداً)
+        if change < 2.0 or change > 30.0:
+            continue
+
+        # فلتر العمر
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # cooldown
+        if now - _breakout5m_alerted.get(sym, 0) < BREAKOUT5M_COOLDOWN:
+            continue
+
+        # cooldown مع hot_alerted لمنع التكرار مع scan_instant_movers
+        if now - hot_alerted.get(sym, 0) < 3600:
+            continue
+
+        pool.append((sym, vol, change, price))
+
+    if not pool:
+        return
+
+    # أفضل 25 عملة بالحجم
+    pool.sort(key=lambda x: -x[1])
+    pool = pool[:BREAKOUT5M_MAX_COINS]
+
+    def _ema_calc(values, period):
+        if len(values) < period:
+            return values[-1] if values else 0.0
+        k = 2.0 / (period + 1)
+        e = sum(values[:period]) / period
+        for v in values[period:]:
+            e = v * k + e * (1 - k)
+        return e
+
+    for sym, vol_24h, change, price in pool:
+        try:
+            kd = get_klines(sym, "5m", 25)
+        except Exception:
+            continue
+
+        if not kd or len(kd) < 20:
+            continue
+
+        closes  = [float(c[4]) for c in kd]
+        volumes = [float(c[5]) for c in kd]
+
+        # EMA alignment: EMA5 > EMA10 > EMA20
+        e5  = _ema_calc(closes, 5)
+        e10 = _ema_calc(closes, 10)
+        e20 = _ema_calc(closes, 20)
+        if not (e5 > e10 > e20):
+            continue
+
+        # حجم آخر شمعة > BREAKOUT5M_VOL_SPIKE × متوسط الشمعات السابقة
+        prev_vols = volumes[-20:-1]
+        if not prev_vols:
+            continue
+        avg_vol = sum(prev_vols) / len(prev_vols)
+        if avg_vol <= 0:
+            continue
+        vol_spike = volumes[-1] / avg_vol
+        if vol_spike < BREAKOUT5M_VOL_SPIKE:
+            continue
+
+        # اختراق أعلى نقطة من 20 شمعة سابقة (مقاومة)
+        if len(closes) < 21:
+            continue
+        resistance = max(closes[-21:-1])
+        if closes[-1] < resistance * 1.001:
+            continue
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "Unknown")
+        base   = sym.replace("USDT", "")
+
+        msg = (
+            "🚀 *5m BREAKOUT* 🚀\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📈 تغيير 24h: `+" + str(round(change, 1)) + "%`\n"
+            + "  📦 حجم 24h: `" + str(round(vol_24h / 1e6, 2)) + "M USDT`\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "  ⚡ EMA5>EMA10>EMA20 | حجم 5m: `" + str(round(vol_spike, 1)) + "x`\n"
+            + "━" * 18 + "\n"
+            + "🎯 *اختراق لحظي* — ادخل الآن أو انتظر retest"
+        )
+
+        send(msg)
+        _breakout5m_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "5m_breakout+" + str(round(change, 0)) + "%",
+                                   vol_24h, price, sector)
+        log.info("5m BREAKOUT | %s | +%.1f%% | EMA(5/10/20)=%.6f/%.6f/%.6f | vol_spike=%.1fx",
+                 sym, change, e5, e10, e20, vol_spike)
 
 
 def scan_realtime_liquidity(price_map=None, vol_now=None):
@@ -14178,6 +14328,8 @@ def run():
             if now - last_rt_scan >= RT_SCAN_EVERY:
                 scan_realtime_liquidity()
                 last_rt_scan = now
+            # 5m breakout — يعمل كل 3 دقائق
+            scan_5m_breakout()
             poll_commands()
 
 
