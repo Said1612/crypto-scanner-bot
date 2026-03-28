@@ -4277,7 +4277,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
     - حجم >= 500K
     - في SECTORS فقط
     """
-    global hot_alerted
+    global hot_alerted, _coin_first_seen
 
     if not all_tickers: return
     now = time.time()
@@ -4301,6 +4301,17 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
         if change < 8.0:    continue
         if change > 60.0:   continue
 
+        # فلتر العملات الجديدة
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # فلتر السيولة الحقيقية
+        _liq_ok, _liq_reason = _is_real_liquidity(vol, change, t)
+        if not _liq_ok:
+            log.debug("INSTANT skip %s: %s", sym, _liq_reason)
+            continue
 
         if now - hot_alerted.get(sym, 0) < 21600: continue
 
@@ -4375,7 +4386,7 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
     3. على كل السوق مباشرة
     = لا يحتاج تاريخ — يعمل من الدقيقة الأولى 🎯
     """
-    global rt_vol_baseline, rt_alerted
+    global rt_vol_baseline, rt_alerted, _coin_first_seen
 
     if not all_tickers:
         return
@@ -4403,6 +4414,17 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
 
         if vol < RT_MIN_VOL: continue
 
+        # فلتر العملات الجديدة
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # فلتر السيولة الحقيقية
+        _liq_ok, _liq_reason = _is_real_liquidity(vol, change, t)
+        if not _liq_ok:
+            log.debug("RT skip %s: %s", sym, _liq_reason)
+            continue
 
         if sym not in rt_vol_baseline:
             rt_vol_baseline[sym] = vol
