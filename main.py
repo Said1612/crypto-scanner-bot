@@ -6474,7 +6474,16 @@ def scan_whale_confirmation(price_map):
             data.get("vdelta", 0) >= 0.85
         )
 
-        if _block_danger and not _in_hot_sector and not _oversold_bounce:
+        # عملة مستقلة عن السوق — تتماسك أو ترتفع رغم نزول BTC
+        # هذه هي الفرص الحقيقية في السوق الهابط
+        _decoupled = (
+            _coin_chg_j > -5.0 and           # لا تنزل مع السوق
+            data.get("vdelta", 0) >= 0.70     # شراء حقيقي
+        )
+        # عملة ترتفع فعلاً في سوق هابط = فرصة استثنائية بلا شروط
+        _rising_in_bear = _coin_chg_j > 2.0
+
+        if _block_danger and not _in_hot_sector and not _oversold_bounce and not _decoupled and not _rising_in_bear:
             continue
 
         # تخفيف شروط VDelta للقطاعات الساخنة
