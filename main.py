@@ -1776,8 +1776,8 @@ def calc_cvd(sym, interval="1h", period=24):
         return {"trend": "flat", "slope": 0.0, "latest": 0.0, "pct_change": 0.0}
 
 
-def check_cvd_filter(sym, signal_type="JOKER"):
-    # type: (str, str) -> tuple
+def check_cvd_filter(sym, signal_type="JOKER", vdelta=0.0):
+    # type: (str, str, float) -> tuple
     """
     فلتر CVD — يرفض الإشارات عند CVD هابط
     يعيد: (passed, reason)
@@ -1789,6 +1789,12 @@ def check_cvd_filter(sym, signal_type="JOKER"):
     if signal_type == "JOKER":
 
         if trend == "falling" and pct < -10:
+            # استثناء: VDelta قوي جداً → فحص CVD القصير (4h) بدلاً من 12h
+            # السبب: بعد دمبات السوق، CVD 12h يبقى سلبياً رغم بدء التعافي
+            if vdelta >= 0.80:
+                cvd_short = calc_cvd(sym, "1h", 4)
+                if cvd_short.get("trend") in ("rising", "flat"):
+                    return True, "CVD قصير يتعافى (VDelta {:.0f}%)".format(vdelta * 100)
             return False, "CVD هابط {:.0f}%".format(pct)
     elif signal_type == "BOTTOM_FISHER":
 
@@ -6551,7 +6557,7 @@ def scan_whale_confirmation(price_map):
             log.info(" MACD soft pass: %s | %.8f (%.4f%%)", sym, _macd_hist, _macd_pct_of_price)
 
 
-        _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER")
+        _cvd_ok, _cvd_trend = check_cvd_filter(sym, "JOKER", vdelta=vdelta)
         if not _cvd_ok:
             log.info(" CVD FILTER: %s | %s", sym, _cvd_trend)
             continue
