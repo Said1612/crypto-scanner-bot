@@ -1011,6 +1011,7 @@ api_calls_minute   = 0
 api_minute_reset   = time.time()
 
 session = requests.Session()
+_sent_dedup = {}   # {msg_hash: timestamp} — يمنع إرسال نفس الرسالة مرتين
 session.headers.update({"User-Agent": "MafioBot/11.0"})
 
 
@@ -1100,6 +1101,19 @@ def send(msg, personal_only=False):
     if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
         log.info("[TELEGRAM] %s", msg[:80])
         return
+
+    # ── dedup: منع إرسال نفس الرسالة مرتين خلال 90 ثانية ──────────
+    _now_s = time.time()
+    _msg_hash = hash(msg[:150])
+    if _now_s - _sent_dedup.get(_msg_hash, 0) < 90:
+        log.debug("send() DEDUP blocked duplicate message")
+        return
+    _sent_dedup[_msg_hash] = _now_s
+    # تنظيف الـ dedup القديم
+    if len(_sent_dedup) > 200:
+        _cutoff = _now_s - 300
+        for _k in [k for k, v in list(_sent_dedup.items()) if v < _cutoff]:
+            _sent_dedup.pop(_k, None)
 
     targets = [CHAT_ID]
     if GROUP_ID and not personal_only:
@@ -4503,7 +4517,7 @@ def scan_hot_market(price_map=None, vol_now=None):
     - موجودة في SECTORS
     = يرسل تنبيه فوري 🔥
     """
-    global hot_alerted
+    global hot_alerted, _coin_first_seen
 
     if not all_tickers:
         return
@@ -4534,6 +4548,17 @@ def scan_hot_market(price_map=None, vol_now=None):
         if change < HOT_MIN_CHANGE: continue
         if change > HOT_MAX_CHANGE: continue
 
+        # فلتر العملات الجديدة
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # فلتر السيولة الحقيقية
+        _liq_ok, _liq_reason = _is_real_liquidity(vol, change, t)
+        if not _liq_ok:
+            log.debug("HOT skip %s: %s", sym, _liq_reason)
+            continue
 
         last_alert = hot_alerted.get(sym, 0)
         if now - last_alert < HOT_COOLDOWN: continue
@@ -6755,6 +6780,10 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
 
+        # منع التكرار: لا ترسل WATCH ALERT 💎 للعملة مرتين من هذا الماسح
+        if now - lz_tps_alerted.get(sym, 0) < LZ_TPS_COOLDOWN:
+            continue
+
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
             continue
 
@@ -8446,9 +8475,10 @@ def _is_real_liquidity(vol_24h, chg_24h, t_dict=None):
 
     علامات الحجم الوهمي:
     1. حجم ضخم + تغيير سعري ضئيل جداً (< 0.5%)
-    2. نطاق 24h ضيق جداً مع حجم عالٍ
-    3. متوسط حجم الصفقة أقل من $5 (صفقات مجهرية = wash bots)
-    4. فارق bid/ask كبير جداً (> 8%) = عمق وهمي
+    2. نطاق 24h واسع جداً (> 200%) = عملة مدرجة حديثاً
+    3. نطاق 24h ضيق جداً مع حجم عالٍ = wash trading
+    4. متوسط حجم الصفقة أقل من $5 (صفقات مجهرية = wash bots)
+    5. فارق bid/ask كبير جداً (> 8%) = عمق وهمي
 
     يعيد: (is_real: bool, reason: str)
     """
@@ -8464,19 +8494,25 @@ def _is_real_liquidity(vol_24h, chg_24h, t_dict=None):
             ask   = float(t_dict.get("askPrice",   0) or 0)
             count = int(float(t_dict.get("count",  0) or 0))
 
-            # 2. نطاق 24h مقابل الحجم
-            if low > 0 and vol_24h > 1_000_000:
+            if low > 0:
                 range_24h = (high - low) / low * 100
-                if range_24h < 0.8:
+
+                # 2. نطاق 24h واسع جداً = عملة مدرجة حديثاً (مثل +4100%)
+                # العملات المستقرة نادراً تتجاوز 100% نطاق يومي
+                if range_24h > 200.0:
+                    return False, "نطاق 24h واسع جداً = عملة جديدة أو خطرة"
+
+                # 3. نطاق 24h ضيق مع حجم عالٍ = wash trading
+                if vol_24h > 1_000_000 and range_24h < 0.8:
                     return False, "نطاق 24h ضيق مع حجم عالٍ"
 
-            # 3. متوسط حجم الصفقة الواحدة
+            # 4. متوسط حجم الصفقة الواحدة
             if count > 200:
                 avg_trade = vol_24h / count
                 if avg_trade < 5.0:
                     return False, "صفقات مجهرية (wash trading)"
 
-            # 4. فارق bid/ask كبير جداً = سيولة وهمية في الدفتر
+            # 5. فارق bid/ask كبير جداً = سيولة وهمية في الدفتر
             if bid > 0 and ask > 0 and bid > 0:
                 spread_pct = (ask - bid) / bid * 100
                 if spread_pct > 8.0:
