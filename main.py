@@ -1417,7 +1417,7 @@ def safe_get(url, params=None, retries=3):
 
 def get_klines(symbol, interval="15m", limit=50):
     # type: (str, str, int) -> Optional[Dict]
-    cache_ttl = {"15m": CACHE_15M, "1h": CACHE_1H, "4h": CACHE_4H}.get(interval, CACHE_15M)
+    cache_ttl = {"5m": 60, "15m": CACHE_15M, "1h": CACHE_1H, "4h": CACHE_4H}.get(interval, CACHE_15M)
     key = "{}_{}".format(symbol, interval)
     now = time.time()
 
@@ -1728,6 +1728,32 @@ def calc_atr_stop_loss(sym, price, interval="1h", period=14):
 
 _cvd_cache = {}   # {sym: [cvd_values]}
 CVD_PERIOD  = 24
+
+def calc_money_flow_1h(sym):
+    # type: (str) -> dict
+    """
+    تدفق الأموال الحقيقية (آخر 2 شمعة 1h) بالدولار — مثل Wolf Flow
+    يستخدم: buy_ratio = (close - low) / (high - low) لتقدير ضغط الشراء/البيع
+    يعيد: in, out, net, ratio
+    """
+    kd = get_klines(sym, "1h", 4)
+    if not kd:
+        return {"in": 0.0, "out": 0.0, "net": 0.0, "ratio": 1.0}
+    highs  = kd["highs"]
+    lows   = kd["lows"]
+    closes = kd["closes"]
+    vols   = kd["vols"]
+    total_in  = 0.0
+    total_out = 0.0
+    for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
+        rng = h - l
+        buy_ratio = (c - l) / rng if rng > 0 else 0.5
+        vol_usdt   = v * c
+        total_in  += vol_usdt * buy_ratio
+        total_out += vol_usdt * (1.0 - buy_ratio)
+    net   = total_in - total_out
+    ratio = total_in / total_out if total_out > 0 else 99.0
+    return {"in": total_in, "out": total_out, "net": net, "ratio": ratio}
 
 def calc_cvd(sym, interval="1h", period=24):
     # type: (str, str, int) -> dict
@@ -4462,16 +4488,14 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         return e
 
     for sym, vol_24h, change, price in pool:
-        try:
-            kd = get_klines(sym, "5m", 25)
-        except Exception:
+        kd = get_klines(sym, "5m", 25)
+        if not kd or len(kd.get("closes", [])) < 20:
             continue
 
-        if not kd or len(kd) < 20:
-            continue
-
-        closes  = [float(c[4]) for c in kd]
-        volumes = [float(c[5]) for c in kd]
+        closes  = kd["closes"]
+        volumes = kd["vols"]
+        highs   = kd["highs"]
+        lows    = kd["lows"]
 
         # EMA alignment: EMA5 > EMA10 > EMA20
         e5  = _ema_calc(closes, 5)
@@ -4498,8 +4522,35 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         if closes[-1] < resistance * 1.001:
             continue
 
+        # حساب تدفق الأموال (5m) — IN/OUT بالدولار
+        _in_5m = 0.0; _out_5m = 0.0
+        for h, l, c, v in zip(highs[-5:], lows[-5:], closes[-5:], volumes[-5:]):
+            rng = h - l
+            br  = (c - l) / rng if rng > 0 else 0.5
+            vu  = v * c
+            _in_5m  += vu * br
+            _out_5m += vu * (1.0 - br)
+        _net_5m   = _in_5m - _out_5m
+        _ratio_5m = _in_5m / _out_5m if _out_5m > 0 else 99.0
+
+        # فلتر: يجب أن يكون تدفق الشراء أكبر (flow إيجابي)
+        if _net_5m < 0:
+            continue
+
+        # تدفق 1h من calc_money_flow_1h
+        _flow1h = calc_money_flow_1h(sym)
+
+        def _fmt_usd(v):
+            if v >= 1_000_000: return "{:.1f}M".format(v / 1e6)
+            if v >= 1_000:     return "{:.1f}K".format(v / 1e3)
+            return "{:.0f}$".format(v)
+
         sector = next((s for s, c in SECTORS.items() if sym in c), "Unknown")
         base   = sym.replace("USDT", "")
+
+        _flow_quality = ("💹 استثنائي" if _ratio_5m >= 10 else
+                         "🔥 قوي"       if _ratio_5m >= 3  else
+                         "📈 جيد")
 
         msg = (
             "🚀 *5m BREAKOUT* 🚀\n"
@@ -4509,7 +4560,10 @@ def scan_5m_breakout(price_map=None, vol_now=None):
             + "  📈 تغيير 24h: `+" + str(round(change, 1)) + "%`\n"
             + "  📦 حجم 24h: `" + str(round(vol_24h / 1e6, 2)) + "M USDT`\n"
             + "  🏷️ قطاع: `" + sector + "`\n"
-            + "  ⚡ EMA5>EMA10>EMA20 | حجم 5m: `" + str(round(vol_spike, 1)) + "x`\n"
+            + "━" * 18 + "\n"
+            + "⚡ EMA5>EMA10>EMA20 | حجم 5m: `" + str(round(vol_spike, 1)) + "x`\n"
+            + "💹 *Flow 5m:* IN `" + _fmt_usd(_in_5m) + "` / OUT `" + _fmt_usd(_out_5m) + "` — " + _flow_quality + "\n"
+            + "💰 *Flow 1h:* IN `" + _fmt_usd(_flow1h["in"]) + "` / OUT `" + _fmt_usd(_flow1h["out"]) + "` / Net `" + _fmt_usd(abs(_flow1h["net"])) + ("↑`\n" if _flow1h["net"] >= 0 else "↓`\n")
             + "━" * 18 + "\n"
             + "🎯 *اختراق لحظي* — ادخل الآن أو انتظر retest"
         )
@@ -4521,8 +4575,8 @@ def scan_5m_breakout(price_map=None, vol_now=None):
             candidates.append(sym)
         add_to_liquidity_watchlist(sym, "5m_breakout+" + str(round(change, 0)) + "%",
                                    vol_24h, price, sector)
-        log.info("5m BREAKOUT | %s | +%.1f%% | EMA(5/10/20)=%.6f/%.6f/%.6f | vol_spike=%.1fx",
-                 sym, change, e5, e10, e20, vol_spike)
+        log.info("5m BREAKOUT | %s | +%.1f%% | EMA(5/10/20)=%.6f/%.6f/%.6f | vol_spike=%.1fx | flow5m=%.0f$",
+                 sym, change, e5, e10, e20, vol_spike, _net_5m)
 
 
 def scan_realtime_liquidity(price_map=None, vol_now=None):
@@ -6847,6 +6901,25 @@ def scan_whale_confirmation(price_map):
                      "🔥 نشاط قوي"        if tps < 5.0 else
                      "💥 نشاط انفجاري")
 
+        # تدفق الأموال الحقيقية — Wolf Flow style
+        _jflow = calc_money_flow_1h(sym)
+        def _jfmt(v):
+            if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+            if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+            return "{:.0f}$".format(v)
+        _jflow_quality = ("💹 استثنائي" if _jflow["ratio"] >= 10 else
+                          "🔥 قوي"       if _jflow["ratio"] >= 3  else
+                          "📈 إيجابي"    if _jflow["net"] > 0    else
+                          "⚠️ ضعيف")
+        _jflow_line = (
+            "💹 *Flow 1h:* IN `{i}` / OUT `{o}` / Net `{n}` — {q}\n".format(
+                i=_jfmt(_jflow["in"]),
+                o=_jfmt(_jflow["out"]),
+                n=_jfmt(abs(_jflow["net"])) + ("↑" if _jflow["net"] >= 0 else "↓"),
+                q=_jflow_quality,
+            )
+        )
+
         msg = (
             header +
             "💥 *{sym}* — حيتان دخلوا! ادخل الآن!\n".format(sym=sym.replace("USDT","")) +
@@ -6855,6 +6928,7 @@ def scan_whale_confirmation(price_map):
             "{}\n".format(_activity) +
             "📡 TPS: `{tps:.2f}` | ATS: `{ats:.0f}$`\n".format(tps=tps, ats=ats) +
             "📊 VDelta: `{vd:.0f}%` شراء حقيقي 🔥\n".format(vd=vdelta*100) +
+            _jflow_line +
             "💰 السعر:  `{pr}` {chg_txt}\n".format(
                 pr=fmt_price(price),
                 chg_txt=("◼️ لم يتحرك بعد" if abs(price_chg) < 0.01
