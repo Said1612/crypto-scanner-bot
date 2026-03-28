@@ -1011,6 +1011,7 @@ api_calls_minute   = 0
 api_minute_reset   = time.time()
 
 session = requests.Session()
+_sent_dedup = {}   # {msg_hash: timestamp} — يمنع إرسال نفس الرسالة مرتين
 session.headers.update({"User-Agent": "MafioBot/11.0"})
 
 
@@ -1100,6 +1101,19 @@ def send(msg, personal_only=False):
     if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 10:
         log.info("[TELEGRAM] %s", msg[:80])
         return
+
+    # ── dedup: منع إرسال نفس الرسالة مرتين خلال 90 ثانية ──────────
+    _now_s = time.time()
+    _msg_hash = hash(msg[:150])
+    if _now_s - _sent_dedup.get(_msg_hash, 0) < 90:
+        log.debug("send() DEDUP blocked duplicate message")
+        return
+    _sent_dedup[_msg_hash] = _now_s
+    # تنظيف الـ dedup القديم
+    if len(_sent_dedup) > 200:
+        _cutoff = _now_s - 300
+        for _k in [k for k, v in list(_sent_dedup.items()) if v < _cutoff]:
+            _sent_dedup.pop(_k, None)
 
     targets = [CHAT_ID]
     if GROUP_ID and not personal_only:
@@ -6753,6 +6767,10 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             continue
 
         if now - coin_whale_done.get(sym, 0) < LZ_TPS_COOLDOWN:
+            continue
+
+        # منع التكرار: لا ترسل WATCH ALERT 💎 للعملة مرتين من هذا الماسح
+        if now - lz_tps_alerted.get(sym, 0) < LZ_TPS_COOLDOWN:
             continue
 
         if coin_signal_count.get(sym, 0) >= MAX_COIN_SIGNALS:
