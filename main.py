@@ -4517,7 +4517,7 @@ def scan_hot_market(price_map=None, vol_now=None):
     - موجودة في SECTORS
     = يرسل تنبيه فوري 🔥
     """
-    global hot_alerted
+    global hot_alerted, _coin_first_seen
 
     if not all_tickers:
         return
@@ -4548,6 +4548,17 @@ def scan_hot_market(price_map=None, vol_now=None):
         if change < HOT_MIN_CHANGE: continue
         if change > HOT_MAX_CHANGE: continue
 
+        # فلتر العملات الجديدة
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # فلتر السيولة الحقيقية
+        _liq_ok, _liq_reason = _is_real_liquidity(vol, change, t)
+        if not _liq_ok:
+            log.debug("HOT skip %s: %s", sym, _liq_reason)
+            continue
 
         last_alert = hot_alerted.get(sym, 0)
         if now - last_alert < HOT_COOLDOWN: continue
