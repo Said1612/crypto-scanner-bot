@@ -566,6 +566,7 @@ SECTORS = {
         "DEAIUSDT","SEKAIUSDT","BUZZUSDT","ALTERUSDT","COGNIUSDT",
         "EZAIUSDT","NAUAUSDT","TAOUSSDT","AGENTUSDT","AIGENUSDT",
         "BRAINUSDT","THINKUSDT","SMARTAIUSDT","FAIUSDT","DAINUSDT",
+        "TONIXAIUSDT",
     ],
     "RWA": [
 
@@ -610,7 +611,7 @@ SECTORS = {
         "SNXUSDT","KNCUSDT","BALUSDT","BIFIUSDT","PERPUSDT",
         "JOEUSDT","SPIRITUSDT","VELODROMEUSDT","AERODROMEUSDT","THENAUSDT",
         "KYBERUSDT","BANCORUSDT","QUICKUSDT","SOLARUSDT","CAMELOTUSDT",
-        "RAMSESUSDT","STERLINGUSDT","DODOUSDT","WIGOUSDT","APESWAPUSDT",
+        "HYPEUSDT","RAMSESUSDT","STERLINGUSDT","DODOUSDT","WIGOUSDT","APESWAPUSDT",
     ],
     "Layer1": [
 
@@ -831,6 +832,7 @@ SECTORS = {
         "NFTPLUSDT","BITFOREXUSDT","BKEXUSDT","LBKUSDT","COINWUSDT",
         "ZFMUSDT","WOOUSUSDT","OPHUSDT","DEXUSDT","DYDXUSUSDT",
         "PERPUSDT","SYNTUSUSDT","GNSUSDT","KWENTAUSDT","CAMELOTUSDT2",
+        "WXTUSDT",
     ],
 
     "Metaverse": [
@@ -6452,13 +6454,21 @@ def scan_whale_confirmation(price_map):
         _in_hot_sector = _sym_sector and (time.time() - _sector_hot_time < 14400)  # 4 ساعات
 
         # ── فلتر DANGER بناءً على بيانات العملة نفسها ──────────────────
-        _coin_vol_j = float(next((t.get("quoteVolume", 0) for t in all_tickers
-                                   if t.get("symbol") == sym), 0)) if all_tickers else 0
+        _coin_t_j   = next((t for t in all_tickers if t.get("symbol") == sym), {}) if all_tickers else {}
+        _coin_vol_j = float(_coin_t_j.get("quoteVolume", 0) or 0)
+        _coin_chg_j = float(_coin_t_j.get("priceChangePercent", 0) or 0)
         _coin_ats_j = data.get("ats", 0)
         _mth_j      = get_adaptive_thresholds(coin_vol=_coin_vol_j, coin_ats=_coin_ats_j)
         _block_danger = market_state == "DANGER" and _mth_j.get("cvd_required", True)
 
-        if _block_danger and not _in_hot_sector:
+        # استثناء: ارتداد من قاع (هبوط > 20% + شراء استثنائي > 85%)
+        # هذه الفرص تضيع عند حجب DANGER للعملات غير المصنّفة
+        _oversold_bounce = (
+            _coin_chg_j < -20.0 and
+            data.get("vdelta", 0) >= 0.85
+        )
+
+        if _block_danger and not _in_hot_sector and not _oversold_bounce:
             continue
 
         # تخفيف شروط VDelta للقطاعات الساخنة
