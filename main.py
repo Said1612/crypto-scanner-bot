@@ -8464,9 +8464,10 @@ def _is_real_liquidity(vol_24h, chg_24h, t_dict=None):
 
     علامات الحجم الوهمي:
     1. حجم ضخم + تغيير سعري ضئيل جداً (< 0.5%)
-    2. نطاق 24h ضيق جداً مع حجم عالٍ
-    3. متوسط حجم الصفقة أقل من $5 (صفقات مجهرية = wash bots)
-    4. فارق bid/ask كبير جداً (> 8%) = عمق وهمي
+    2. نطاق 24h واسع جداً (> 200%) = عملة مدرجة حديثاً
+    3. نطاق 24h ضيق جداً مع حجم عالٍ = wash trading
+    4. متوسط حجم الصفقة أقل من $5 (صفقات مجهرية = wash bots)
+    5. فارق bid/ask كبير جداً (> 8%) = عمق وهمي
 
     يعيد: (is_real: bool, reason: str)
     """
@@ -8482,19 +8483,25 @@ def _is_real_liquidity(vol_24h, chg_24h, t_dict=None):
             ask   = float(t_dict.get("askPrice",   0) or 0)
             count = int(float(t_dict.get("count",  0) or 0))
 
-            # 2. نطاق 24h مقابل الحجم
-            if low > 0 and vol_24h > 1_000_000:
+            if low > 0:
                 range_24h = (high - low) / low * 100
-                if range_24h < 0.8:
+
+                # 2. نطاق 24h واسع جداً = عملة مدرجة حديثاً (مثل +4100%)
+                # العملات المستقرة نادراً تتجاوز 100% نطاق يومي
+                if range_24h > 200.0:
+                    return False, "نطاق 24h واسع جداً = عملة جديدة أو خطرة"
+
+                # 3. نطاق 24h ضيق مع حجم عالٍ = wash trading
+                if vol_24h > 1_000_000 and range_24h < 0.8:
                     return False, "نطاق 24h ضيق مع حجم عالٍ"
 
-            # 3. متوسط حجم الصفقة الواحدة
+            # 4. متوسط حجم الصفقة الواحدة
             if count > 200:
                 avg_trade = vol_24h / count
                 if avg_trade < 5.0:
                     return False, "صفقات مجهرية (wash trading)"
 
-            # 4. فارق bid/ask كبير جداً = سيولة وهمية في الدفتر
+            # 5. فارق bid/ask كبير جداً = سيولة وهمية في الدفتر
             if bid > 0 and ask > 0 and bid > 0:
                 spread_pct = (ask - bid) / bid * 100
                 if spread_pct > 8.0:
