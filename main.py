@@ -11584,6 +11584,9 @@ def scan_multi_timeframe_liquidity(price_map=None, vol_now=None, changes_map=Non
 
     results = []
 
+    # بناء ticker_map للفحص السريع
+    _mtf_ticker = {t["symbol"]: t for t in all_tickers} if all_tickers else {}
+
     for sym, vol in ranked:
         base = sym.replace("USDT", "")
         if base in STABLECOINS:
@@ -11594,6 +11597,24 @@ def scan_multi_timeframe_liquidity(price_map=None, vol_now=None, changes_map=Non
         price = price_map.get(sym, 0)
         if price <= 0:
             continue
+
+        # فلتر الاتجاه: لا إشارة على عملة في هبوط قوي
+        _chg_early = changes_map.get(sym, 0)
+        if _chg_early < -3.0:
+            log.debug("MTF skip %s: downtrend %.1f%%", sym, _chg_early)
+            continue
+
+        # فلتر الدخول المتأخر
+        _t_mtf = _mtf_ticker.get(sym)
+        if _t_mtf:
+            try:
+                _h24 = float(_t_mtf.get("highPrice", price))
+                _l24 = float(_t_mtf.get("lowPrice",  price))
+                if _is_late_entry(price, _h24, _l24):
+                    log.debug("MTF late_entry skip %s", sym)
+                    continue
+            except (ValueError, TypeError):
+                pass
 
         tf15 = _check_tf_liquidity(sym, "15m", 20)
         tf1h = _check_tf_liquidity(sym, "1h",  12)
@@ -11625,8 +11646,15 @@ def scan_multi_timeframe_liquidity(price_map=None, vol_now=None, changes_map=Non
         if score < MTF_LIQ_SCORE:
             continue
 
+        # فلتر Flow 1h: يجب أن يكون المال يدخل لا يخرج
+        _mtf_flow = calc_money_flow_1h(sym)
+        if _mtf_flow["net"] < 0:
+            log.debug("MTF skip %s: flow negative net=%.0f$", sym, _mtf_flow["net"])
+            continue
+
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
         chg    = changes_map.get(sym, 0)
+        _confirm_count_mtf, _badge_mtf = _register_confirm(sym, "mtf")
 
         tf_lines = []
         for tf_name, tf_data in confirmed_tfs:
@@ -11640,8 +11668,13 @@ def scan_multi_timeframe_liquidity(price_map=None, vol_now=None, changes_map=Non
         triple  = " — ثلاثي 🏆" if len(confirmed_tfs) == 3 else ""
         ob_line = "  📒 OB: `{}`".format(ob_imb.get("signal", "—")) if ob_buy else ""
 
+        def _mtf_fmt(v):
+            if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+            if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+            return "{:.2f}$".format(v)
+
         msg = (
-            "{} *MTF LIQUIDITY{}*\n".format(stars, triple)
+            "{} *MTF LIQUIDITY{}* {}\n".format(stars, triple, _badge_mtf)
             + "━━━━━━━━━━━━━━━━━━\n"
             + "🎯 *{}* — سيولة متعددة الأطر!\n".format(base)
             + "━━━━━━━━━━━━━━━━━━\n"
@@ -11649,10 +11682,13 @@ def scan_multi_timeframe_liquidity(price_map=None, vol_now=None, changes_map=Non
             + "\n".join(tf_lines) + "\n"
             + "━━━━━━━━━━━━━━━━━━\n"
             + "💵 السعر: `{}`  |  24h: `{:+.1f}%`\n".format(fmt_price(price), chg)
+            + "💹 *Flow 1h:* IN `{}` / OUT `{}` / Net `+{}`\n".format(
+                _mtf_fmt(_mtf_flow["in"]), _mtf_fmt(_mtf_flow["out"]),
+                _mtf_fmt(_mtf_flow["net"]))
             + (ob_line + "\n" if ob_line else "")
             + "🏷️ القطاع: `{}`\n".format(sector)
             + "━━━━━━━━━━━━━━━━━━\n"
-            + "⚡ _{} إطارات تؤكد — سيولة حقيقية_ 🌊".format(len(confirmed_tfs))
+            + "✅ *ادخل الآن* — {} إطارات + Flow إيجابي 🌊".format(len(confirmed_tfs))
         )
 
         results.append((score, sym, msg, price))
