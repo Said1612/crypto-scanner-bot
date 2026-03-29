@@ -7728,22 +7728,9 @@ def scan_whale_confirmation(price_map):
             )
 
 
-        _btcd_vol  = {t["symbol"]: float(t.get("quoteVolume",0)) for t in all_tickers} if all_tickers else {}
-        _btcd_val  = get_btc_dominance(_btcd_vol) if _btcd_vol else 0.0
-        _btcd_fall = (len(btcd_history) >= 2 and _btcd_val > 0 and
-                      _btcd_val < btcd_history[0] - 1.0)
-        _alt_now   = _btcd_val > 0 and _btcd_val < BTCD_ALT_THRESHOLD
-        _golden    = _btcd_fall or _alt_now
-
-        if _golden:
-            _g_tag   = "🚀 Alt Season!" if _alt_now else "📉 BTC.D ينزل"
-            header   = "🃏💎🃏💎🃏💎🃏💎🃏\n💎 *الجوكر الذهبي* 💎\n🃏💎🃏💎🃏💎🃏💎🃏\n"
-            btcd_line = "📊 BTC.D: {} — {}\n".format("📉 ينزل" if _btcd_fall else "🔵 منخفض", _g_tag)
-            footer   = "🃏 _BTC.D ينزل + حيتان = الجوكر يلعب!_ 💎"
-        else:
-            header   = "🃏🐋🃏🐋🃏🐋🃏🐋🃏\n🃏 *الجوكر يلعب* 🃏\n🃏🐋🃏🐋🃏🐋🃏🐋🃏\n"
-            btcd_line = ""
-            footer   = "🃏 _المال الكبير دخل — الجوكر يلعب!_ 🎴"
+        header   = "🃏🐋🃏🐋🃏🐋🃏🐋🃏\n🃏 *الجوكر يلعب* 🃏\n🃏🐋🃏🐋🃏🐋🃏🐋🃏\n"
+        btcd_line = ""
+        footer   = "🃏 _المال الكبير دخل — الجوكر يلعب!_ 🎴"
 
         # ── CVD Divergence + Consolidation إضافية للرسالة ─────────
         _cvd_div_j = detect_cvd_divergence(sym)
@@ -7843,8 +7830,7 @@ def scan_whale_confirmation(price_map):
         send(msg)
         _tgts = calc_smart_targets(sym, price)
         add_to_exit_watchlist(sym, price, _tgts.get("targets", []))
-        if _golden:
-            log.info(" GOLDEN ENTRY! %s | BTC.D=%.2f%% | ATS=%.0f$", sym, _btcd_val, ats)
+        log.info("JOKER | %s | ATS=%.0f$ | flow_ratio=%.1fx", sym, ats, _jflow.get("ratio",1.0))
         whale_confirmed[sym]  = now
         coin_whale_done[sym]  = now
         coin_alerted[sym]     = now
