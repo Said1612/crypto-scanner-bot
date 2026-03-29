@@ -198,6 +198,14 @@ BREAKOUT5M_MIN_VOL    = 150_000
 BREAKOUT5M_VOL_SPIKE  = 2.5    # حجم الشمعة الأخيرة > 2.5x المتوسط
 BREAKOUT5M_MAX_COINS  = 25     # أقصى عدد يُفحص بـ klines
 
+# Bounce Reversal Scanner
+BOUNCE_SCAN_EVERY   = 120      # كل دقيقتين
+BOUNCE_COOLDOWN     = 7200     # ساعتان بين تنبيهين للعملة
+BOUNCE_MIN_VOL      = 150_000
+BOUNCE_DROP_MIN     = 3.0      # نزل على الأقل 3%
+BOUNCE_DROP_MAX     = 20.0     # لم ينهار أكثر من 20%
+BOUNCE_OUTSELL_MAX  = 1.8      # نسبة OUT/IN أقل من 1.8x — البيع يخف
+
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
 FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
@@ -1025,6 +1033,8 @@ _breakout5m_alerted  = {}   # type: Dict[str, float]  {sym: last_alert_time}
 last_fast_scan       = 0.0
 _fast_alerted        = {}   # type: Dict[str, float]  {sym: last_alert_time}
 _fast_price_snap     = {}   # type: Dict[str, float]  {sym: price_30s_ago}
+last_bounce_scan     = 0.0
+_bounce_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
 
 
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
@@ -4548,6 +4558,181 @@ def scan_fast_breakout():
     stale = [k for k in _fast_price_snap if k not in new_snap]
     for k in stale:
         _fast_price_snap.pop(k, None)
+
+
+def scan_bounce_reversal():
+    # type: () -> None
+    """
+    Bounce Reversal Scanner — يكتشف الارتداد بعد النزول
+    مثل إشارة PYRUSDT في Wolf Flow: نزل -3.72% لكن البيع يخف
+
+    الشروط:
+    1. نزل 3-20% في 24h (oversold)
+    2. حجم High (بيع قوي سبق)
+    3. Flow OUT/IN < 1.8x — البيع يضعف
+    4. آخر 3 شمعات 5m: شمعة واحدة على الأقل خضراء (بداية الارتداد)
+    5. حجم آخر شمعة > المتوسط (مشترون يدخلون)
+    """
+    global _bounce_alerted, last_bounce_scan, _coin_first_seen, hot_alerted
+
+    now = time.time()
+    if now - last_bounce_scan < BOUNCE_SCAN_EVERY:
+        return
+    last_bounce_scan = now
+
+    if not all_tickers:
+        return
+
+    # المرحلة 1: فلترة سريعة من ticker
+    pool = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        if "(" in sym or ")" in sym:
+            continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < BOUNCE_MIN_VOL:
+            continue
+        # نزول حقيقي — ليس انهياراً
+        if change > -BOUNCE_DROP_MIN or change < -BOUNCE_DROP_MAX:
+            continue
+
+        # فلتر العمر
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # cooldowns
+        if now - _bounce_alerted.get(sym, 0) < BOUNCE_COOLDOWN:
+            continue
+        if now - hot_alerted.get(sym, 0) < 1800:
+            continue
+
+        pool.append((sym, vol, change, price))
+
+    if not pool:
+        return
+
+    # أفضل 30 عملة بالحجم
+    pool.sort(key=lambda x: -x[1])
+    pool = pool[:30]
+
+    def _ema_b(values, period):
+        if len(values) < period:
+            return values[-1] if values else 0.0
+        k = 2.0 / (period + 1)
+        e = sum(values[:period]) / period
+        for v in values[period:]:
+            e = v * k + e * (1 - k)
+        return e
+
+    def _fmt(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.0f}$".format(v)
+
+    for sym, vol_24h, change, price in pool:
+        # المرحلة 2: تدفق الأموال 1h
+        flow1h = calc_money_flow_1h(sym)
+        if flow1h["out"] <= 0:
+            continue
+
+        out_in_ratio = flow1h["out"] / flow1h["in"] if flow1h["in"] > 0 else 99.0
+
+        # البيع يجب أن يكون يخف (ليس هجوماً ضخماً)
+        if out_in_ratio > BOUNCE_OUTSELL_MAX:
+            continue
+
+        # المرحلة 3: فحص 5m klines
+        kd = get_klines(sym, "5m", 20)
+        if not kd or len(kd.get("closes", [])) < 10:
+            continue
+
+        closes  = kd["closes"]
+        opens   = kd["opens"]
+        volumes = kd["vols"]
+        highs   = kd["highs"]
+        lows    = kd["lows"]
+
+        # آخر 3 شمعات: شمعة خضراء واحدة على الأقل (بداية الارتداد)
+        last3_green = sum(1 for i in range(-3, 0) if closes[i] > opens[i])
+        if last3_green == 0:
+            continue
+
+        # حجم آخر شمعة > متوسط الشمعات السابقة (مشترون يدخلون)
+        avg_vol = sum(volumes[-15:-1]) / 14 if len(volumes) >= 15 else 0
+        if avg_vol <= 0 or volumes[-1] < avg_vol * 1.2:
+            continue
+
+        # EMA5 يبدأ يقترب من EMA10 (الزخم يتحول)
+        e5  = _ema_b(closes, 5)
+        e10 = _ema_b(closes, 10)
+        # e5 يجب أن يكون أعلى من أدنى نقطة (ليس في قاع الانهيار)
+        recent_low = min(lows[-5:])
+        if e5 < recent_low * 0.99:
+            continue
+
+        # حساب قوة الارتداد
+        _in_5m = 0.0; _out_5m = 0.0
+        for h, l, c, v in zip(highs[-3:], lows[-3:], closes[-3:], volumes[-3:]):
+            rng = h - l
+            br  = (c - l) / rng if rng > 0 else 0.5
+            vu  = v * c
+            _in_5m  += vu * br
+            _out_5m += vu * (1.0 - br)
+
+        # الشمعات الأخيرة يجب أن تُظهر شراءً
+        if _in_5m <= _out_5m:
+            continue
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+
+        _sell_pressure = ("💚 بيع خفيف" if out_in_ratio < 1.2 else
+                          "🟡 بيع يخف"   if out_in_ratio < 1.5 else
+                          "🟠 بيع يتراجع")
+
+        _vol_level = ("📊 عالٍ جداً" if vol_24h >= 5_000_000 else
+                      "📊 عالٍ"       if vol_24h >= 1_000_000  else
+                      "📊 جيد")
+
+        msg = (
+            "🔄 *BOUNCE REVERSAL* 🔄\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📉 نزل: `" + str(round(change, 1)) + "%`\n"
+            + "  " + _vol_level + " | " + _sell_pressure + "\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "💹 *Flow 1h:* IN `" + _fmt(flow1h["in"]) + "` / OUT `" + _fmt(flow1h["out"]) + "` (نسبة `" + str(round(out_in_ratio, 1)) + "x`)\n"
+            + "🕯️ آخر 3 شمعات 5m: `" + str(last3_green) + "/3` خضراء\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — البيع ينتهي، الارتداد بدأ 🎯"
+        )
+
+        send(msg)
+        _bounce_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "bounce_" + str(round(change, 1)) + "%",
+                                   vol_24h, price, sector)
+        log.info("BOUNCE REVERSAL | %s | %.1f%% | flow_ratio=%.1fx | green=%d/3",
+                 sym, change, out_in_ratio, last3_green)
 
 
 def scan_5m_breakout(price_map=None, vol_now=None):
@@ -14567,6 +14752,8 @@ def run():
             scan_fast_breakout()
             # 5m breakout — كل 90 ثانية (Tier 1/2 — klines + EMA + Flow)
             scan_5m_breakout()
+            # Bounce Reversal — كل دقيقتين (نزول + بيع يخف + شمعات خضراء)
+            scan_bounce_reversal()
             poll_commands()
 
 
