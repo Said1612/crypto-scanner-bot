@@ -372,6 +372,9 @@ EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
             "BDXUSDT","POLXUSDT","MBGUSDT","L3USDT","VERMUSDT",
 
             "XMRUSDT","DASHUSDT","ZCASHUSDT","SCRTUSDT",
+
+            # رموز بأقواس — تسبب أخطاء في API ولا توجد كزوج تداول حقيقي
+            "GOLD(XAUT)USDT","GOLD(PAXG)USDT",
 }
 
 
@@ -2628,6 +2631,7 @@ def pre_filter(sym, change, vol, price=0.0):
     """
     if not sym.endswith("USDT"): return False
     if sym in EXCLUDED: return False
+    if "(" in sym or ")" in sym: return False   # رموز بأقواس = أزواج غير صالحة
     if any(k in sym for k in LEVERAGE_KEYWORDS): return False
     if is_stablecoin(sym, price, change): return False
     if vol < PRE_MIN_VOL or vol > PRE_MAX_VOL: return False
