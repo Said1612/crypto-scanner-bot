@@ -8606,7 +8606,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
             )
         else:
             msg = (
-                "👁️ *WATCH ALERT* 💎\n"
+                "✅ *ادخل الآن* 💎\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 "🔍 *{}* — منطقة سيولة + نشاط! 👀\n".format(sym.replace("USDT","")) +
                 "💵 السعر: `{}`\n".format(fmt_price(price)) +
@@ -8626,7 +8626,7 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                 "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol_now.get(sym,0)/1_000_000) +
                 "🏷️ القطاع: `{}`\n".format(sector) +
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⏳ _انتظر الجوكر للدخول_ 🃏"
+                "✅ *ادخل الآن* — سيولة + نشاط مؤكد 🎯"
             )
 
         send(msg)
@@ -10237,7 +10237,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
         # WATCH ALERT — انفجار حجم سريع (COS/TOWNS نوع)
         _surge_label = "🥇 انفجار ضخم جداً!" if is_gold else "🔥 انفجار حجم!"
         msg = (
-            "👁️ *WATCH ALERT* 🌊\n"
+            "✅ *ادخل الآن* 🌊\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "💥 *{}* — الحجم انفجر فجأة! 👀\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -10249,7 +10249,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             "📉 24h: `{:+.1f}%` | حجم كلي: `{}`\n"
             "🏷️ القطاع: `{}`\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "⏳ _انتظر الجوكر للدخول_ 🃏"
+            "✅ *ادخل الآن* — انفجار حجم مؤكد 🌊🎯"
         ).format(
             sym.replace("USDT", ""),
             ratio, _surge_label,
@@ -10731,7 +10731,7 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
                 strength = "⚡ ضعيف"
 
             msg = (
-                "👁️ *WATCH ALERT* ⏰\n"
+                "✅ *ادخل الآن* ⏰\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 "🔍 *{}* — تجميع هادئ قبل الانفجار 👀\n"
                 "━━━━━━━━━━━━━━━━━━\n"
@@ -10746,7 +10746,7 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
                 "  💚 VDelta: `{:.0f}%`\n"
                 "  📌 `{}`\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⏳ _انتظر تأكيد الجوكر قبل الدخول_ 🃏"
+                "✅ *ادخل الآن* — تجميع + انفجار قريب 🎯"
             ).format(
                 coin,
                 score, strength,
@@ -11027,7 +11027,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
         else:
 
             msg = (
-                "👁️ *WATCH ALERT*\n" +
+                "✅ *ادخل الآن*\n" +
                 "━━━━━━━━━━━━━━━━━━\n"
                 "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
                 "💵 السعر: `{}`\n".format(fmt_price(_price_now)) +
@@ -11041,7 +11041,7 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol/1_000_000) +
                 "🏷️ القطاع: `{}`\n".format(sector) +
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⏳ _انتظر الجوكر للدخول_ 🃏"
+                "✅ *ادخل الآن* — نشاط مؤكد 🎯"
             )
         send(msg)
         tps_alerted[sym]  = now
