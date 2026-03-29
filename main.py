@@ -1046,6 +1046,8 @@ _bounce_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
 last_bb_squeeze_scan = 0.0
 _bb_squeeze_alerted  = {}   # type: Dict[str, float]  {sym: last_alert_time}
 _market_bias_score   = 0    # type: int  — آخر نقطة محسوبة (-100 إلى +100)
+_multi_confirm       = {}   # type: Dict[str, dict]  {sym: {"count":N,"scanners":[],"last_time":ts}}
+MULTI_CONFIRM_WINDOW = 1800  # 30 دقيقة — نافذة التأكيد المتعدد
 
 
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
@@ -4384,6 +4386,16 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
             log.debug("INSTANT skip %s: %s", sym, _liq_reason)
             continue
 
+        # فلتر الدخول المتأخر — السعر في أعلى 8% من نطاق 24h
+        try:
+            _h24 = float(t.get("highPrice", price))
+            _l24 = float(t.get("lowPrice",  price))
+            if _is_late_entry(price, _h24, _l24):
+                log.debug("INSTANT late_entry skip %s", sym)
+                continue
+        except (ValueError, TypeError):
+            pass
+
         if now - hot_alerted.get(sym, 0) < 21600: continue
 
         sector = next((s for s,c in SECTORS.items() if sym in c), "Unknown")
@@ -4418,6 +4430,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
             gem_tag = "  💎 مرصودة من المرحلة "+str(gem_watchlist[sym].get("stage",1))+"\n"
 
         vol_str = str(round(m["vol"]/1e6,2))+"M" if m["vol"]>=1e6 else str(round(m["vol"]/1e3,0))+"K"
+        _confirm_count, _badge = _register_confirm(sym, "instant")
 
         msg = (
             icon+" *"+lvl+"* "+icon+"\n"
@@ -4429,7 +4442,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
             +"  🏷️ قطاع: `"+m["sector"]+"`\n"
             +gem_tag
             +"━"*18+"\n"
-            +"🎯 *"+lvl+"* | قوة: `"+str(m["score"])+"/9`\n"
+            +"🎯 *"+lvl+"* " + _badge + " | قوة: `"+str(m["score"])+"/9`\n"
             +"👁️ _إشارة مراقبة — انتظر الجوكر للدخول_ 🃏"
         )
         if not can_send_signal(): break
@@ -4444,6 +4457,41 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
                  sym, m["change"], vol_str, m["score"])
 
     log.info(" Instant Scan | movers=%d", len(movers))
+
+
+def _is_late_entry(price, high_24h, low_24h):
+    # type: (float, float, float) -> bool
+    """
+    True إذا كان السعر في أعلى 8% من نطاق 24h = دخول متأخر
+    يمنع إشارات SIGNUSDT-type (ذروة 0% ثم -13%)
+    """
+    rng = high_24h - low_24h
+    if rng <= 0:
+        return False
+    pos = (price - low_24h) / rng
+    return pos >= 0.92
+
+
+def _register_confirm(sym, scanner_name):
+    # type: (str, str) -> tuple
+    """
+    يسجّل تأكيداً من ماسح معين لعملة معينة خلال MULTI_CONFIRM_WINDOW (30 دقيقة).
+    يعيد (count, badge) لإضافته في رسالة الإشارة.
+    count=1 → 🔔1 | count=2 → 🔔🔔2 | count=3+ → 🔔🔔🔔3+
+    """
+    global _multi_confirm
+    now = time.time()
+    entry = _multi_confirm.get(sym)
+    if not entry or (now - entry["last_time"]) > MULTI_CONFIRM_WINDOW:
+        _multi_confirm[sym] = {"count": 0, "scanners": [], "last_time": now}
+        entry = _multi_confirm[sym]
+    if scanner_name not in entry["scanners"]:
+        entry["count"]    += 1
+        entry["scanners"].append(scanner_name)
+        entry["last_time"] = now
+    c     = entry["count"]
+    badge = "🔔" * min(c, 3) + str(c)
+    return c, badge
 
 
 def scan_fast_breakout():
@@ -4527,10 +4575,21 @@ def scan_fast_breakout():
         except (ValueError, ZeroDivisionError):
             pass
 
+        # فلتر الدخول المتأخر — السعر في أعلى 8% من نطاق 24h
+        try:
+            _h24 = float(t.get("highPrice", price))
+            _l24 = float(t.get("lowPrice",  price))
+            if _is_late_entry(price, _h24, _l24):
+                log.debug("FAST late_entry skip %s pos>=92%%", sym)
+                continue
+        except (ValueError, TypeError):
+            pass
+
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
         base   = sym.replace("USDT", "")
         in_sector = sym in all_sector_coins
         _tier = "" if in_sector else " 🌐"
+        _confirm_count, _badge = _register_confirm(sym, "fast")
 
         def _fp(v):
             if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
@@ -4538,7 +4597,7 @@ def scan_fast_breakout():
             return "{:.0f}$".format(v)
 
         msg = (
-            "⚡⚡ *FAST BREAKOUT* ⚡⚡" + _tier + "\n"
+            "⚡⚡ *FAST BREAKOUT* ⚡⚡" + _tier + " " + _badge + "\n"
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
@@ -4767,11 +4826,24 @@ def scan_bb_squeeze():
         if flow1h["net"] < 0:
             continue
 
+        # فلتر الدخول المتأخر — السعر في أعلى 8% من نطاق 24h
+        try:
+            _t_bb = next((x for x in all_tickers if x.get("symbol") == sym), None)
+            if _t_bb:
+                _h24 = float(_t_bb.get("highPrice", price))
+                _l24 = float(_t_bb.get("lowPrice",  price))
+                if _is_late_entry(price, _h24, _l24):
+                    log.debug("BB_SQ late_entry skip %s", sym)
+                    continue
+        except (ValueError, TypeError):
+            pass
+
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
         base   = sym.replace("USDT", "")
+        _confirm_count, _badge = _register_confirm(sym, "bb_squeeze")
 
         msg = (
-            "💥 *BB SQUEEZE BREAKOUT* 💥\n"
+            "💥 *BB SQUEEZE BREAKOUT* 💥 " + _badge + "\n"
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
@@ -4940,6 +5012,7 @@ def scan_bounce_reversal():
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
         base   = sym.replace("USDT", "")
+        _confirm_count, _badge = _register_confirm(sym, "bounce")
 
         _sell_pressure = ("💚 بيع خفيف" if out_in_ratio < 1.2 else
                           "🟡 بيع يخف"   if out_in_ratio < 1.5 else
@@ -4950,7 +5023,7 @@ def scan_bounce_reversal():
                       "📊 جيد")
 
         msg = (
-            "🔄 *BOUNCE REVERSAL* 🔄\n"
+            "🔄 *BOUNCE REVERSAL* 🔄 " + _badge + "\n"
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
@@ -5115,6 +5188,18 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         if _net_5m < 0:
             continue
 
+        # فلتر الدخول المتأخر — السعر في أعلى 8% من نطاق 24h
+        try:
+            _t5 = next((x for x in all_tickers if x.get("symbol") == sym), None)
+            if _t5:
+                _h24 = float(_t5.get("highPrice", price))
+                _l24 = float(_t5.get("lowPrice",  price))
+                if _is_late_entry(price, _h24, _l24):
+                    log.debug("5m late_entry skip %s", sym)
+                    continue
+        except (ValueError, TypeError):
+            pass
+
         # تدفق 1h
         _flow1h = calc_money_flow_1h(sym)
 
@@ -5137,9 +5222,10 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
         base   = sym.replace("USDT", "")
         _tier_tag = "" if in_sector else " 🌐"
+        _confirm_count, _badge = _register_confirm(sym, "5m")
 
         msg = (
-            "🚀 *5m BREAKOUT* 🚀" + _tier_tag + "\n"
+            "🚀 *5m BREAKOUT* 🚀" + _tier_tag + " " + _badge + "\n"
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
@@ -15006,6 +15092,13 @@ def run():
             # BB Squeeze — كل 5 دقائق (Bollinger Band compression breakout)
             scan_bb_squeeze()
             poll_commands()
+
+            # تنظيف _multi_confirm من الإدخالات القديمة كل ساعة
+            if int(now) % 3600 < 35:
+                _old_mc = [k for k, v in list(_multi_confirm.items())
+                           if now - v.get("last_time", 0) > MULTI_CONFIRM_WINDOW]
+                for _k in _old_mc:
+                    _multi_confirm.pop(_k, None)
 
 
             if now - last_btc         >= BTC_EVERY:
