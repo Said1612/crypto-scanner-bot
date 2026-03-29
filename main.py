@@ -194,14 +194,14 @@ RT_COOLDOWN      = 21600
 
 BREAKOUT5M_SCAN_EVERY = 90     # كل 90 ثانية (klines محدودة بـ cache 60s)
 BREAKOUT5M_COOLDOWN   = 14400  # 4 ساعات بين تنبيهين للعملة نفسها
-BREAKOUT5M_MIN_VOL    = 300_000
+BREAKOUT5M_MIN_VOL    = 150_000  # 150K — يشمل micro-caps
 BREAKOUT5M_VOL_SPIKE  = 2.5    # حجم الشمعة الأخيرة > 2.5x المتوسط
 BREAKOUT5M_MAX_COINS  = 25     # أقصى عدد يُفحص بـ klines
 
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
 FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
-FAST_MIN_VOL       = 500_000
+FAST_MIN_VOL       = 150_000  # 150K — يشمل العملات الصغيرة مثل Wolf Flow
 FAST_MOVE_30S      = 1.5      # حركة % في 30 ثانية = انفجار
 FAST_MOVE_24H_MIN  = 2.0      # يجب أن يكون اتجاه 24h إيجابي
 
@@ -4597,7 +4597,7 @@ def scan_5m_breakout(price_map=None, vol_now=None):
             if vol < BREAKOUT5M_MIN_VOL: continue
             if change < 2.0 or change > 30.0: continue
         else:
-            if vol < 1_000_000: continue          # Tier 2: حجم أعلى
+            if vol < 300_000: continue             # Tier 2: حجم معقول
             if change < 3.0 or change > 25.0: continue
 
         # فلتر العمر
