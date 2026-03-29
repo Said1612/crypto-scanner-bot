@@ -192,11 +192,18 @@ RT_VOL_SPIKE     = 2.0
 RT_MIN_VOL       = 1_000_000
 RT_COOLDOWN      = 21600
 
-BREAKOUT5M_SCAN_EVERY = 180    # كل 3 دقائق
+BREAKOUT5M_SCAN_EVERY = 90     # كل 90 ثانية (klines محدودة بـ cache 60s)
 BREAKOUT5M_COOLDOWN   = 14400  # 4 ساعات بين تنبيهين للعملة نفسها
 BREAKOUT5M_MIN_VOL    = 300_000
 BREAKOUT5M_VOL_SPIKE  = 2.5    # حجم الشمعة الأخيرة > 2.5x المتوسط
 BREAKOUT5M_MAX_COINS  = 25     # أقصى عدد يُفحص بـ klines
+
+# Fast scanner — Tier 0 (30 ثانية، بدون klines)
+FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
+FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
+FAST_MIN_VOL       = 500_000
+FAST_MOVE_30S      = 1.5      # حركة % في 30 ثانية = انفجار
+FAST_MOVE_24H_MIN  = 2.0      # يجب أن يكون اتجاه 24h إيجابي
 
 
 WL_ENTRY_MOVE    = 3.0
@@ -1012,6 +1019,9 @@ last_rt_scan         = 0.0
 last_bottom_scan     = 0.0
 last_breakout5m_scan = 0.0
 _breakout5m_alerted  = {}   # type: Dict[str, float]  {sym: last_alert_time}
+last_fast_scan       = 0.0
+_fast_alerted        = {}   # type: Dict[str, float]  {sym: last_alert_time}
+_fast_price_snap     = {}   # type: Dict[str, float]  {sym: price_30s_ago}
 
 
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
@@ -4409,6 +4419,131 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
                  sym, m["change"], vol_str, m["score"])
 
     log.info(" Instant Scan | movers=%d", len(movers))
+
+
+def scan_fast_breakout():
+    # type: () -> None
+    """
+    Fast Scanner — Tier 0 — كل 30 ثانية مثل Wolf Flow
+    يعمل بدون klines: يقارن السعر الحالي بالسعر قبل 30 ثانية
+    إذا تحركت العملة 1.5%+ في 30 ثانية = انفجار لحظي → ادخل فوراً
+
+    بدون API calls إضافية — فقط all_tickers (محدّث كل 12 ثانية)
+    """
+    global _fast_alerted, _fast_price_snap, last_fast_scan, hot_alerted, _coin_first_seen
+
+    now = time.time()
+    if now - last_fast_scan < FAST_SCAN_EVERY:
+        return
+
+    if not all_tickers:
+        return
+
+    all_sector_coins = set()
+    for sc in SECTORS.values():
+        all_sector_coins.update(sc)
+
+    fired = 0
+    new_snap = {}
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        # حفظ السعر الحالي للمقارنة في الجولة القادمة
+        new_snap[sym] = price
+
+        if vol < FAST_MIN_VOL:
+            continue
+        if change < FAST_MOVE_24H_MIN or change > 40.0:
+            continue
+
+        # السعر قبل 30 ثانية
+        prev_price = _fast_price_snap.get(sym, 0.0)
+        if prev_price <= 0:
+            continue
+
+        # الحركة خلال 30 ثانية
+        move_30s = (price - prev_price) / prev_price * 100.0
+        if move_30s < FAST_MOVE_30S:
+            continue
+
+        # فلتر العمر
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # cooldowns
+        if now - _fast_alerted.get(sym, 0) < FAST_SCAN_COOLDOWN:
+            continue
+        if now - hot_alerted.get(sym, 0) < 1800:
+            continue
+
+        # تدفق الأموال السريع من ticker (bid/ask approximation)
+        try:
+            bid = float(t.get("bidPrice", 0) or 0)
+            ask = float(t.get("askPrice", 0) or 0)
+            _spread = (ask - bid) / bid * 100 if bid > 0 else 99
+            if _spread > 5.0:   # spread واسع = سيولة ضعيفة
+                continue
+        except (ValueError, ZeroDivisionError):
+            pass
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+        in_sector = sym in all_sector_coins
+        _tier = "" if in_sector else " 🌐"
+
+        def _fp(v):
+            if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+            if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+            return "{:.0f}$".format(v)
+
+        msg = (
+            "⚡⚡ *FAST BREAKOUT* ⚡⚡" + _tier + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  🚀 حركة 30s: `+" + str(round(move_30s, 2)) + "%`\n"
+            + "  📈 تغيير 24h: `+" + str(round(change, 1)) + "%`\n"
+            + "  📦 حجم: `" + _fp(vol) + "`\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — انفجار لحظي مكتشف 🎯"
+        )
+
+        send(msg)
+        _fast_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "fast_30s+" + str(round(move_30s, 1)) + "%",
+                                   vol, price, sector)
+        log.info("FAST BREAKOUT%s | %s | 30s=+%.2f%% | 24h=+%.1f%%",
+                 "(T2)" if not in_sector else "", sym, move_30s, change)
+        fired += 1
+
+    # تحديث snapshot للجولة القادمة
+    _fast_price_snap.update(new_snap)
+    last_fast_scan = now
+
+    # تنظيف الـ snapshot من العملات التي لم تظهر
+    stale = [k for k in _fast_price_snap if k not in new_snap]
+    for k in stale:
+        _fast_price_snap.pop(k, None)
 
 
 def scan_5m_breakout(price_map=None, vol_now=None):
@@ -14424,7 +14559,9 @@ def run():
             if now - last_rt_scan >= RT_SCAN_EVERY:
                 scan_realtime_liquidity()
                 last_rt_scan = now
-            # 5m breakout — يعمل كل 3 دقائق
+            # Fast breakout — كل 30 ثانية (Tier 0 — بدون klines)
+            scan_fast_breakout()
+            # 5m breakout — كل 90 ثانية (Tier 1/2 — klines + EMA + Flow)
             scan_5m_breakout()
             poll_commands()
 
