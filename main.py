@@ -4395,7 +4395,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
             +gem_tag
             +"━"*18+"\n"
             +"🎯 *"+lvl+"* | قوة: `"+str(m["score"])+"/9`\n"
-            +"⚡ _حركة قوية — ادرس فرصة الدخول_"
+            +"👁️ _إشارة مراقبة — انتظر الجوكر للدخول_ 🃏"
         )
         if not can_send_signal(): break
         send(msg)
@@ -4587,7 +4587,7 @@ def scan_5m_breakout(price_map=None, vol_now=None):
             + "💹 *Flow 5m:* IN `" + _fmt_usd(_in_5m) + "` / OUT `" + _fmt_usd(_out_5m) + "` — " + _flow_quality + "\n"
             + "💰 *Flow 1h:* IN `" + _fmt_usd(_flow1h["in"]) + "` / OUT `" + _fmt_usd(_flow1h["out"]) + "` / Net `" + _fmt_usd(abs(_flow1h["net"])) + ("↑`\n" if _flow1h["net"] >= 0 else "↓`\n")
             + "━" * 18 + "\n"
-            + "🎯 *اختراق لحظي* — ادخل الآن أو انتظر retest"
+            + "✅ *ادخل الآن* — EMA + حجم + Flow كلها مؤكدة 🎯"
         )
 
         send(msg)
@@ -4879,7 +4879,7 @@ def scan_hot_market(price_map=None, vol_now=None):
             + gem_tag + "\n"
             + "━" * 18 + "\n"
             + "🎯 *" + lvl + "* | قوة: `" + str(coin["strength"]) + "/9`\n"
-            + "⚡ _حركة قوية — ادرس فرصة الدخول_"
+            + "👁️ _إشارة مراقبة — انتظر الجوكر للدخول_ 🃏"
         )
 
         send(msg)
