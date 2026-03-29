@@ -182,27 +182,27 @@ ATH_SCAN_EVERY   = 7200
 
 
 HOT_MIN_CHANGE   = 12.0
-HOT_MIN_VOL      = 1_000_000
+HOT_MIN_VOL      = 500_000   # خُفِّض من 1M — يشمل عملات أصغر
 HOT_COOLDOWN     = 14400
-HOT_SCAN_EVERY   = 3600
+HOT_SCAN_EVERY   = 1800      # كل 30 دقيقة بدلاً من ساعة
 
 
-RT_SCAN_EVERY    = 900
+RT_SCAN_EVERY    = 300       # كل 5 دقائق بدلاً من 15
 RT_VOL_SPIKE     = 2.0
-RT_MIN_VOL       = 1_000_000
-RT_COOLDOWN      = 21600
+RT_MIN_VOL       = 500_000   # خُفِّض من 1M
+RT_COOLDOWN      = 7200      # ساعتان بدلاً من 6
 
 BREAKOUT5M_SCAN_EVERY = 90     # كل 90 ثانية (klines محدودة بـ cache 60s)
 BREAKOUT5M_COOLDOWN   = 14400  # 4 ساعات بين تنبيهين للعملة نفسها
-BREAKOUT5M_MIN_VOL    = 150_000  # 150K — يشمل micro-caps
+BREAKOUT5M_MIN_VOL    = 150_000
 BREAKOUT5M_VOL_SPIKE  = 2.5    # حجم الشمعة الأخيرة > 2.5x المتوسط
 BREAKOUT5M_MAX_COINS  = 25     # أقصى عدد يُفحص بـ klines
 
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
 FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
-FAST_MIN_VOL       = 150_000  # 150K — يشمل العملات الصغيرة مثل Wolf Flow
-FAST_MOVE_30S      = 1.5      # حركة % في 30 ثانية = انفجار
+FAST_MIN_VOL       = 150_000
+FAST_MOVE_30S      = 0.8      # خُفِّض من 1.5% — يلتقط بداية الحركة مبكراً
 FAST_MOVE_24H_MIN  = 2.0      # يجب أن يكون اتجاه 24h إيجابي
 
 
