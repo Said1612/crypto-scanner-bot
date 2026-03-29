@@ -224,6 +224,32 @@ MOVE1H_FLOW_RATIO  = 1.3      # نسبة IN/OUT (منخفضة مثل Wolf Flow)
 MOVE1H_VOL_SPIKE   = 1.5      # حجم آخر شمعة 1h > 1.5× المتوسط
 MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
 
+# Flow Accumulation Scanner — السعر ثابت + أموال تتراكم (NTRNUSDT type)
+FLOWACC_SCAN_EVERY  = 90      # كل 90 ثانية
+FLOWACC_COOLDOWN    = 5400    # 90 دقيقة
+FLOWACC_MIN_VOL     = 30_000  # حجم منخفض — يقبل micro-caps
+FLOWACC_FLOW_RATIO  = 6.0     # IN/OUT ≥ 6x — تجميع خفي قوي
+FLOWACC_PRICE_MAX   = 3.0     # حركة سعرية ≤ 3% (السعر شبه ثابت)
+FLOWACC_VOL_SPIKE   = 2.0     # حجم 1h > 2x المتوسط
+FLOWACC_MAX_COINS   = 60      # أقصى عملات
+
+# Volume Breakout Scanner — انفجار حجم × 5 بدون حركة سعرية (قبل الـ pump)
+VOLBR_SCAN_EVERY   = 60       # كل دقيقة
+VOLBR_COOLDOWN     = 5400     # 90 دقيقة
+VOLBR_MIN_VOL      = 20_000   # يقبل micro-caps
+VOLBR_SPIKE_MIN    = 5.0      # حجم > 5x المتوسط — انفجار حقيقي
+VOLBR_PRICE_MAX    = 5.0      # السعر لم يتحرك كثيراً بعد
+VOLBR_MAX_COINS    = 60
+
+# Micro Pump Scanner — حركة 1-4% + flow استثنائي 12x+ (مبكر جداً)
+MICROPUMP_SCAN_EVERY = 60     # كل دقيقة
+MICROPUMP_COOLDOWN   = 5400   # 90 دقيقة
+MICROPUMP_MIN_VOL    = 20_000
+MICROPUMP_MOVE_MIN   = 0.8    # حركة ≥ 0.8% فقط
+MICROPUMP_MOVE_MAX   = 5.0    # ≤ 5% — لم يتحرك كثيراً بعد
+MICROPUMP_FLOW_RATIO = 12.0   # flow استثنائي 12x+
+MICROPUMP_MAX_COINS  = 60
+
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
 FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
@@ -1058,6 +1084,12 @@ _bb_squeeze_alerted  = {}   # type: Dict[str, float]  {sym: last_alert_time}
 _market_bias_score   = 0    # type: int  — آخر نقطة محسوبة (-100 إلى +100)
 last_move1h_scan     = 0.0
 _move1h_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
+last_flowacc_scan    = 0.0
+_flowacc_alerted     = {}   # type: Dict[str, float]
+last_volbr_scan      = 0.0
+_volbr_alerted       = {}   # type: Dict[str, float]
+last_micropump_scan  = 0.0
+_micropump_alerted   = {}   # type: Dict[str, float]
 _multi_confirm       = {}   # type: Dict[str, dict]  {sym: {"count":N,"scanners":[],"last_time":ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 دقيقة — نافذة التأكيد المتعدد
 
@@ -4880,6 +4912,444 @@ def scan_1h_move():
                                    vol_24h, price, sector)
         log.info("1h MOVE | %s | 1h=+%.2f%% | vol_spike=%.1fx | flow_ratio=%.1fx | net=%.0f$",
                  sym, move_1h, vol_spike_1h, _ratio_1h, _in_1h - _out_1h)
+
+
+def scan_flow_accumulation():
+    # type: () -> None
+    """
+    Flow Accumulation Scanner — يرصد التجميع الخفي قبل الانفجار
+    مثل NTRNUSDT: 1h Move +0.00% + Flow IN/OUT = 10x → +2% في 57 ثانية
+
+    الشروط:
+    1. السعر ثابت أو يتحرك قليلاً (≤ 3% في 1h)
+    2. Flow ratio ≥ 6x (أموال تتراكم بهدوء)
+    3. حجم الشمعة الأخيرة > 2x المتوسط (نشاط غير عادي)
+    4. لا دخول متأخر
+    """
+    global _flowacc_alerted, last_flowacc_scan, _coin_first_seen, hot_alerted
+
+    now = time.time()
+    if now - last_flowacc_scan < FLOWACC_SCAN_EVERY:
+        return
+    last_flowacc_scan = now
+
+    if not all_tickers:
+        return
+
+    pool = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        if "(" in sym or ")" in sym:
+            continue
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < FLOWACC_MIN_VOL:
+            continue
+        # 24h تغيير إيجابي أو محايد — ليس هابطاً
+        if change < -2.0 or change > 20.0:
+            continue
+
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        if now - _flowacc_alerted.get(sym, 0) < FLOWACC_COOLDOWN:
+            continue
+        if now - hot_alerted.get(sym, 0) < 1800:
+            continue
+
+        try:
+            _h24 = float(t.get("highPrice", price))
+            _l24 = float(t.get("lowPrice",  price))
+            if _is_late_entry(price, _h24, _l24):
+                continue
+        except (ValueError, TypeError):
+            pass
+
+        pool.append((sym, vol, change, price))
+
+    if not pool:
+        return
+
+    pool.sort(key=lambda x: -x[1])
+    pool = pool[:FLOWACC_MAX_COINS]
+
+    def _fmt(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.2f}$".format(v)
+
+    for sym, vol_24h, change_24h, price in pool:
+        kd = get_klines(sym, "1h", 6)
+        if not kd or len(kd.get("closes", [])) < 3:
+            continue
+
+        closes  = kd["closes"]
+        highs   = kd["highs"]
+        lows    = kd["lows"]
+        vols    = kd["vols"]
+
+        # حركة الشمعة الأخيرة يجب أن تكون صغيرة (السعر ثابت)
+        if closes[-2] <= 0:
+            continue
+        move_1h = abs((closes[-1] - closes[-2]) / closes[-2] * 100)
+        if move_1h > FLOWACC_PRICE_MAX:
+            continue
+
+        # حجم الشمعة الأخيرة > 2x المتوسط
+        prev_vols = vols[-5:-1]
+        avg_vol = sum(prev_vols) / len(prev_vols) if prev_vols else 0
+        if avg_vol <= 0:
+            continue
+        vol_spike = vols[-1] / avg_vol
+        if vol_spike < FLOWACC_VOL_SPIKE:
+            continue
+
+        # Flow من آخر شمعتين
+        _in = 0.0; _out = 0.0
+        for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
+            rng = h - l
+            br  = (c - l) / rng if rng > 0 else 0.5
+            vu  = v * c
+            _in  += vu * br
+            _out += vu * (1.0 - br)
+
+        if _out <= 0:
+            continue
+        ratio = _in / _out
+        if ratio < FLOWACC_FLOW_RATIO:
+            continue
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+        _confirm_count, _badge = _register_confirm(sym, "flow_acc")
+
+        _strength = ("🔥🔥 استثنائي" if ratio >= 15 else
+                     "🔥 قوي جداً"    if ratio >= 10 else
+                     "⚡ قوي")
+
+        msg = (
+            "🧲 *FLOW ACCUMULATION* 🧲 " + _badge + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📊 حركة 1h: `" + ("{:+.2f}".format(closes[-1]/closes[-2]*100-100) if closes[-2] > 0 else "0") + "%` — السعر ثابت\n"
+            + "  📦 حجم الشمعة: `" + str(round(vol_spike, 1)) + "x` المتوسط\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "💹 *Flow 1h:* IN `" + _fmt(_in) + "` / OUT `" + _fmt(_out) + "` = `" + str(round(ratio, 1)) + "x` — " + _strength + "\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — تجميع خفي قبل الانفجار 🎯"
+        )
+
+        send(msg)
+        _flowacc_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "flow_acc_" + str(round(ratio, 1)) + "x",
+                                   vol_24h, price, sector)
+        log.info("FLOW ACCUMULATION | %s | move=%.2f%% | vol_spike=%.1fx | ratio=%.1fx",
+                 sym, move_1h, vol_spike, ratio)
+
+
+def scan_volume_breakout():
+    # type: () -> None
+    """
+    Volume Breakout Scanner — انفجار حجم × 5+ قبل تحرك السعر
+    يرصد: حجم الشمعة الحالية > 5x المتوسط + السعر لم يتحرك كثيراً
+    = شراء مؤسسي خفي قبل الـ pump
+
+    الفرق: يعتمد على الحجم أولاً، لا على السعر أو الـ flow
+    """
+    global _volbr_alerted, last_volbr_scan, _coin_first_seen, hot_alerted
+
+    now = time.time()
+    if now - last_volbr_scan < VOLBR_SCAN_EVERY:
+        return
+    last_volbr_scan = now
+
+    if not all_tickers:
+        return
+
+    pool = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        if "(" in sym or ")" in sym:
+            continue
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < VOLBR_MIN_VOL:
+            continue
+        if change < -3.0 or change > 25.0:
+            continue
+
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        if now - _volbr_alerted.get(sym, 0) < VOLBR_COOLDOWN:
+            continue
+        if now - hot_alerted.get(sym, 0) < 1800:
+            continue
+
+        try:
+            _h24 = float(t.get("highPrice", price))
+            _l24 = float(t.get("lowPrice",  price))
+            if _is_late_entry(price, _h24, _l24):
+                continue
+        except (ValueError, TypeError):
+            pass
+
+        pool.append((sym, vol, change, price))
+
+    if not pool:
+        return
+
+    pool.sort(key=lambda x: -x[1])
+    pool = pool[:VOLBR_MAX_COINS]
+
+    def _fmt(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.2f}$".format(v)
+
+    for sym, vol_24h, change_24h, price in pool:
+        kd = get_klines(sym, "15m", 20)
+        if not kd or len(kd.get("closes", [])) < 10:
+            continue
+
+        closes  = kd["closes"]
+        highs   = kd["highs"]
+        lows    = kd["lows"]
+        vols    = kd["vols"]
+
+        # حجم آخر شمعة > VOLBR_SPIKE_MIN × متوسط
+        prev_vols = vols[-15:-1]
+        avg_vol = sum(prev_vols) / len(prev_vols) if prev_vols else 0
+        if avg_vol <= 0:
+            continue
+        vol_spike = vols[-1] / avg_vol
+        if vol_spike < VOLBR_SPIKE_MIN:
+            continue
+
+        # السعر لم يتحرك كثيراً في آخر شمعة
+        if closes[-2] <= 0:
+            continue
+        candle_move = abs((closes[-1] - closes[-2]) / closes[-2] * 100)
+        if candle_move > VOLBR_PRICE_MAX:
+            continue
+
+        # Flow من آخر 3 شمعات
+        _in = 0.0; _out = 0.0
+        for h, l, c, v in zip(highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
+            rng = h - l
+            br  = (c - l) / rng if rng > 0 else 0.5
+            vu  = v * c
+            _in  += vu * br
+            _out += vu * (1.0 - br)
+
+        flow_ratio = _in / _out if _out > 0 else 1.0
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+        _confirm_count, _badge = _register_confirm(sym, "vol_br")
+
+        _vol_label = ("💥 انفجاري" if vol_spike >= 10 else
+                      "🔥 ضخم"      if vol_spike >= 7  else
+                      "⚡ قوي")
+
+        msg = (
+            "📊 *VOLUME BREAKOUT* 📊 " + _badge + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📈 تغيير 24h: `" + str(round(change_24h, 1)) + "%`\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "📦 *حجم 15m:* `" + str(round(vol_spike, 1)) + "x` المتوسط — " + _vol_label + "\n"
+            + "💹 *Flow:* IN `" + _fmt(_in) + "` / OUT `" + _fmt(_out) + "` = `" + str(round(flow_ratio, 1)) + "x`\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — حجم ضخم قبل تحرك السعر 🎯"
+        )
+
+        send(msg)
+        _volbr_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "vol_br_" + str(round(vol_spike, 1)) + "x",
+                                   vol_24h, price, sector)
+        log.info("VOLUME BREAKOUT | %s | spike=%.1fx | candle_move=%.2f%% | flow=%.1fx",
+                 sym, vol_spike, candle_move, flow_ratio)
+
+
+def scan_micro_pump():
+    # type: () -> None
+    """
+    Micro Pump Scanner — حركة صغيرة 0.8-5% مع flow استثنائي 12x+
+    يرصد لحظة بداية الـ pump قبل أن يُلاحظه الجميع
+
+    الفرق عن 5m breakout: يعمل بحركة أصغر بكثير + flow أقوى بكثير
+    الفرق عن flow_accumulation: السعر بدأ يتحرك فعلاً (ولو قليلاً)
+    """
+    global _micropump_alerted, last_micropump_scan, _coin_first_seen, hot_alerted
+
+    now = time.time()
+    if now - last_micropump_scan < MICROPUMP_SCAN_EVERY:
+        return
+    last_micropump_scan = now
+
+    if not all_tickers:
+        return
+
+    pool = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        if "(" in sym or ")" in sym:
+            continue
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < MICROPUMP_MIN_VOL:
+            continue
+        if change < 0.5 or change > 20.0:
+            continue
+
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        if now - _micropump_alerted.get(sym, 0) < MICROPUMP_COOLDOWN:
+            continue
+        if now - hot_alerted.get(sym, 0) < 1800:
+            continue
+
+        try:
+            _h24 = float(t.get("highPrice", price))
+            _l24 = float(t.get("lowPrice",  price))
+            if _is_late_entry(price, _h24, _l24):
+                continue
+        except (ValueError, TypeError):
+            pass
+
+        pool.append((sym, vol, change, price))
+
+    if not pool:
+        return
+
+    pool.sort(key=lambda x: -x[1])
+    pool = pool[:MICROPUMP_MAX_COINS]
+
+    def _fmt(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.2f}$".format(v)
+
+    for sym, vol_24h, change_24h, price in pool:
+        kd = get_klines(sym, "5m", 15)
+        if not kd or len(kd.get("closes", [])) < 8:
+            continue
+
+        closes  = kd["closes"]
+        highs   = kd["highs"]
+        lows    = kd["lows"]
+        vols    = kd["vols"]
+
+        # حركة آخر شمعة 5m: صغيرة لكن موجودة
+        if closes[-2] <= 0:
+            continue
+        move_5m = (closes[-1] - closes[-2]) / closes[-2] * 100
+        if move_5m < MICROPUMP_MOVE_MIN or move_5m > MICROPUMP_MOVE_MAX:
+            continue
+
+        # Flow من آخر 3 شمعات 5m — يجب أن يكون استثنائياً
+        _in = 0.0; _out = 0.0
+        for h, l, c, v in zip(highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
+            rng = h - l
+            br  = (c - l) / rng if rng > 0 else 0.5
+            vu  = v * c
+            _in  += vu * br
+            _out += vu * (1.0 - br)
+
+        if _out <= 0:
+            continue
+        ratio = _in / _out
+        if ratio < MICROPUMP_FLOW_RATIO:
+            continue
+
+        # حجم الشمعة الأخيرة > المتوسط
+        prev_vols = vols[-10:-1]
+        avg_vol = sum(prev_vols) / len(prev_vols) if prev_vols else 0
+        if avg_vol <= 0 or vols[-1] < avg_vol:
+            continue
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+        _confirm_count, _badge = _register_confirm(sym, "micro_pump")
+
+        _flow_label = ("💥 نادر جداً" if ratio >= 25 else
+                       "🔥🔥 استثنائي" if ratio >= 18 else
+                       "🔥 قوي جداً")
+
+        msg = (
+            "🚀 *MICRO PUMP* 🚀 " + _badge + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📈 حركة 5m: `+" + str(round(move_5m, 2)) + "%` — بداية الموجة\n"
+            + "  📈 تغيير 24h: `+" + str(round(change_24h, 1)) + "%`\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "💹 *Flow 5m:* IN `" + _fmt(_in) + "` / OUT `" + _fmt(_out) + "` = `" + str(round(ratio, 1)) + "x` — " + _flow_label + "\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — بداية الـ pump + flow استثنائي 🎯"
+        )
+
+        send(msg)
+        _micropump_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "micro_pump_" + str(round(ratio, 1)) + "x",
+                                   vol_24h, price, sector)
+        log.info("MICRO PUMP | %s | move_5m=+%.2f%% | ratio=%.1fx",
+                 sym, move_5m, ratio)
 
 
 def scan_bb_squeeze():
@@ -15264,8 +15734,14 @@ def run():
             scan_5m_breakout()
             # Bounce Reversal — كل دقيقتين (نزول + بيع يخف + شمعات خضراء)
             scan_bounce_reversal()
-            # 1h Move — Wolf Flow style — كل دقيقتين (حركة الساعة الأخيرة)
+            # 1h Move — Wolf Flow style — كل دقيقتين
             scan_1h_move()
+            # Flow Accumulation — السعر ثابت + أموال تتراكم (NTRNUSDT type)
+            scan_flow_accumulation()
+            # Volume Breakout — انفجار حجم × 5 قبل تحرك السعر
+            scan_volume_breakout()
+            # Micro Pump — حركة صغيرة + flow استثنائي 12x+
+            scan_micro_pump()
             # BB Squeeze — كل 5 دقائق (Bollinger Band compression breakout)
             scan_bb_squeeze()
             poll_commands()
