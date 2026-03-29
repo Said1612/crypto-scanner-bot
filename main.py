@@ -8605,29 +8605,10 @@ def scan_lz_tps_fusion(price_map, vol_now, changes_map):
                 "🛡️ Stop Loss تحت: `{}`".format(fmt_price(zone_low))
             )
         else:
-            msg = (
-                "✅ *ادخل الآن* 💎\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "🔍 *{}* — منطقة سيولة + نشاط! 👀\n".format(sym.replace("USDT","")) +
-                "💵 السعر: `{}`\n".format(fmt_price(price)) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "📍 {} | {} `{}×`\n".format(_prox_label, zone_tag, zone_sigma) +
-                "📊 المنطقة: `{}` ← `{}`\n".format(fmt_price(zone_low), fmt_price(zone_high)) +
-                "⚖️ R/R: `{:.1f}:1` | 🎯 `{}` (+{:.1f}%)\n".format(
-                    rr, fmt_price(target), (target-price)/price*100) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "{}\n".format(_tps_label) +
-                "📡 TPS: `{:.2f}` {} | ATS: `{:.0f}$` {}\n".format(tps, get_tps_label(tps), ats, get_ats_label(ats)) +
-                "📊 VDelta: `{:.0f}%` {}\n".format(
-                    vdelta * 100,
-                    "⚠️ _غير موثوق — TPS ضعيف جداً_" if _vd_warn else "شراء") +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "💪 القوة: `{}/100` {}\n".format(score, rarity) +
-                "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol_now.get(sym,0)/1_000_000) +
-                "🏷️ القطاع: `{}`\n".format(sector) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "✅ *ادخل الآن* — سيولة + نشاط مؤكد 🎯"
-            )
+            # إشارة ضعيفة — مراقبة صامتة بدون إرسال
+            log.debug("LZ_TPS watch-only (no send) | %s | rr=%.1f vdelta=%.0f%%", sym, rr, vdelta*100)
+            lz_tps_alerted[sym] = now
+            continue
 
         send(msg)
         lz_tps_alerted[sym] = now
@@ -10259,13 +10240,9 @@ def scan_volume_surge(price_map, vol_now, changes_map):
             chg24, _fmt_vol_k(vol_24h),
             sector,
         )
-        send(msg)
+        # vol_surge = مراقبة صامتة فقط — بدون إرسال لحين التأكيد
         _vol_surge_seen[sym] = now
-        coin_alerted[sym]    = now
-        whale_watch_add(sym, 0, max(cvd_ratio, 0.56), price)
-        perf_register(sym, price, "vol_surge", int(min(ratio * 10, 100)),
-                      "Vol×{:.1f} cvd={:.0f}%".format(ratio, cvd_ratio * 100))
-        log.info(" VOL_SURGE WATCH | %s | ×%.1f | cvd=%.0f%% | 24h=%.1f%%",
+        log.info(" VOL_SURGE watch-only (no send) | %s | ×%.1f | cvd=%.0f%% | 24h=%.1f%%",
                  sym, ratio, cvd_ratio * 100, chg24)
 
 
@@ -10760,19 +10737,13 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
                 " | ".join(signals),
             )
 
-            found.append((score, sym, msg, price))
+            # pre_pump_watch = مراقبة صامتة — بدون إرسال لحين التأكيد
+            _pre_pump_alerted[sym] = now
+            log.debug("PRE_PUMP_WATCH watch-only (no send) | %s | score=%d", sym, score)
 
         except Exception as _e:
             log.debug("pre_pump_watch %s: %s", sym, _e)
             continue
-
-    # أرسل أقوى 3 فقط لتجنب الفيضان
-    found.sort(key=lambda x: -x[0])
-    for score, sym, msg, price in found[:3]:
-        send(msg)
-        _pre_pump_alerted[sym] = now
-        perf_register(sym, price, "pre_pump_watch", score, "")
-        log.info(" PRE_PUMP_WATCH | %s | score=%d", sym, score)
 
 
 def scan_tps_ats(price_map, vol_now, changes_map):
@@ -11025,24 +10996,11 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 "🛡️ ضع Stop Loss تحت آخر قاع"
             )
         else:
+            # إشارة ضعيفة — مراقبة صامتة بدون إرسال
+            log.debug("TPS_ATS watch-only (no send) | %s | score=%d vdelta=%.0f%%", sym, score, vdelta*100)
+            tps_alerted[sym] = now
+            continue
 
-            msg = (
-                "✅ *ادخل الآن*\n" +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "🔍 *{}* — نشاط مشبوه! راقب 👀\n".format(sym.replace("USDT","")) +
-                "💵 السعر: `{}`\n".format(fmt_price(_price_now)) +
-                "━━━━━━━━━━━━━━━━━━\n" +
-                (_lz_block + "━━━━━━━━━━━━━━━━━━\n" if _lz_block else "") +
-                "{}\n".format(_tps_label) +
-                "📡 TPS:    `{:.2f}` | ATS: `{:.0f}$` 🦐 أفراد\n".format(stats["tps"], stats["ats"]) +
-                "📊 VDelta: `{:.0f}%` شراء\n".format(vdelta*100) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "💪 القوة: `{}/100` {}\n".format(score, rarity) +
-                "📉 24h: `{:+.2f}%` | حجم: `{:.2f}M`\n".format(chg, vol/1_000_000) +
-                "🏷️ القطاع: `{}`\n".format(sector) +
-                "━━━━━━━━━━━━━━━━━━\n"
-                "✅ *ادخل الآن* — نشاط مؤكد 🎯"
-            )
         send(msg)
         tps_alerted[sym]  = now
         coin_alerted[sym] = now
