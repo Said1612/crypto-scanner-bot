@@ -215,7 +215,7 @@ BB_PERIOD              = 20     # فترة Bollinger Bands
 BB_STD_MULT            = 2.0    # معامل الانحراف المعياري
 
 # 1h Move Scanner — Wolf Flow style (حركة الساعة الأخيرة)
-MOVE1H_SCAN_EVERY  = 120      # كل دقيقتين
+MOVE1H_SCAN_EVERY  = 60       # كل دقيقة
 MOVE1H_COOLDOWN    = 7200     # ساعتان بين تنبيهين للعملة
 MOVE1H_MIN_VOL     = 50_000   # حجم 24h أدنى (أقل من 5m لاصطياد micro-caps)
 MOVE1H_MOVE_MIN    = 4.0      # حركة 1h ≥ 4%
