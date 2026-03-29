@@ -206,6 +206,14 @@ BOUNCE_DROP_MIN     = 3.0      # نزل على الأقل 3%
 BOUNCE_DROP_MAX     = 20.0     # لم ينهار أكثر من 20%
 BOUNCE_OUTSELL_MAX  = 1.8      # نسبة OUT/IN أقل من 1.8x — البيع يخف
 
+# BB Squeeze Scanner
+BB_SQUEEZE_SCAN_EVERY  = 300    # كل 5 دقائق
+BB_SQUEEZE_COOLDOWN    = 10800  # 3 ساعات بين تنبيهين للعملة
+BB_SQUEEZE_MIN_VOL     = 150_000
+BB_SQUEEZE_MAX_COINS   = 50     # أقصى عدد يُفحص
+BB_PERIOD              = 20     # فترة Bollinger Bands
+BB_STD_MULT            = 2.0    # معامل الانحراف المعياري
+
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
 FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
@@ -1035,6 +1043,9 @@ _fast_alerted        = {}   # type: Dict[str, float]  {sym: last_alert_time}
 _fast_price_snap     = {}   # type: Dict[str, float]  {sym: price_30s_ago}
 last_bounce_scan     = 0.0
 _bounce_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
+last_bb_squeeze_scan = 0.0
+_bb_squeeze_alerted  = {}   # type: Dict[str, float]  {sym: last_alert_time}
+_market_bias_score   = 0    # type: int  — آخر نقطة محسوبة (-100 إلى +100)
 
 
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
@@ -4558,6 +4569,235 @@ def scan_fast_breakout():
     stale = [k for k in _fast_price_snap if k not in new_snap]
     for k in stale:
         _fast_price_snap.pop(k, None)
+
+
+def calc_market_bias_score():
+    # type: () -> tuple
+    """
+    Market Bias Score مثل Wolf Flow: -100 إلى +100
+    -100 = Strong Bear | 0 = محايد | +100 = Strong Bull
+
+    يحسب من all_tickers بدون API calls إضافية:
+    - نسبة العملات الصاعدة/النازلة (breadth)
+    - نسبة حجم الشراء/البيع (volume flow)
+    """
+    global _market_bias_score
+    if not all_tickers:
+        return 0, "محايد 🟡"
+
+    up_count = 0; down_count = 0; total = 0
+    vol_up = 0.0; vol_down = 0.0
+
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        if "(" in sym:
+            continue
+        try:
+            chg = float(t["priceChangePercent"])
+            vol = float(t["quoteVolume"])
+        except (KeyError, ValueError):
+            continue
+        if vol < 50_000:
+            continue
+        total += 1
+        if chg > 0.5:
+            up_count += 1
+            vol_up += vol
+        elif chg < -0.5:
+            down_count += 1
+            vol_down += vol
+
+    if total == 0:
+        return 0, "محايد 🟡"
+
+    # Breadth: نسبة الصاعدين مقابل النازلين (-50 إلى +50)
+    breadth_score = (up_count - down_count) / total * 50
+
+    # Volume flow: نسبة حجم الشراء مقابل البيع (-50 إلى +50)
+    total_vol = vol_up + vol_down
+    vol_score = (vol_up - vol_down) / total_vol * 50 if total_vol > 0 else 0
+
+    score = int(breadth_score + vol_score)
+    score = max(-100, min(100, score))
+    _market_bias_score = score
+
+    if score >= 60:    label = "Strong Bull 🟢🟢"
+    elif score >= 20:  label = "Bull 🟢"
+    elif score >= -20: label = "محايد 🟡"
+    elif score >= -60: label = "Bear 🔴"
+    else:              label = "Strong Bear 🔴🔴"
+
+    return score, label
+
+
+def scan_bb_squeeze():
+    # type: () -> None
+    """
+    BB Squeeze Scanner — مثل Wolf Flow الذي يرصد 388 عملة تتضغط
+    يكتشف العملات التي تتضغط في Bollinger Bands قبل الانفجار
+
+    الشروط:
+    1. BB Width الحالي < أدنى BB Width في آخر 25 شمعة (ضغط شديد)
+    2. آخر شمعة تخترق الـ Upper Band (بداية الانفجار)
+    3. حجم آخر شمعة > 2x المتوسط (تأكيد)
+    4. Flow إيجابي (IN > OUT)
+    """
+    global _bb_squeeze_alerted, last_bb_squeeze_scan, _coin_first_seen, hot_alerted
+
+    now = time.time()
+    if now - last_bb_squeeze_scan < BB_SQUEEZE_SCAN_EVERY:
+        return
+    last_bb_squeeze_scan = now
+
+    if not all_tickers:
+        return
+
+    # المرحلة 1: فلترة سريعة
+    pool = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        if "(" in sym or ")" in sym:
+            continue
+        try:
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+            price  = float(t["lastPrice"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < BB_SQUEEZE_MIN_VOL:
+            continue
+        if change < -15.0 or change > 50.0:
+            continue
+
+        # فلتر العمر
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        if now - _bb_squeeze_alerted.get(sym, 0) < BB_SQUEEZE_COOLDOWN:
+            continue
+        if now - hot_alerted.get(sym, 0) < 1800:
+            continue
+
+        pool.append((sym, vol, change, price))
+
+    if not pool:
+        return
+
+    pool.sort(key=lambda x: -x[1])
+    pool = pool[:BB_SQUEEZE_MAX_COINS]
+
+    def _calc_bb(closes, period, mult):
+        """يحسب Bollinger Bands لآخر N شمعة"""
+        if len(closes) < period:
+            return None, None, None
+        subset = closes[-period:]
+        sma = sum(subset) / period
+        variance = sum((c - sma) ** 2 for c in subset) / period
+        std = variance ** 0.5
+        return sma, sma + mult * std, sma - mult * std
+
+    def _bb_width(closes, period, mult):
+        """يحسب عرض BB كنسبة مئوية من SMA"""
+        sma, upper, lower = _calc_bb(closes, period, mult)
+        if sma is None or sma == 0:
+            return None
+        return (upper - lower) / sma * 100
+
+    def _fmt(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.0f}$".format(v)
+
+    squeeze_coins = []  # للـ log فقط
+
+    for sym, vol_24h, change, price in pool:
+        kd = get_klines(sym, "15m", 60)
+        if not kd or len(kd.get("closes", [])) < BB_PERIOD + 25:
+            continue
+
+        closes  = kd["closes"]
+        volumes = kd["vols"]
+        highs   = kd["highs"]
+
+        # احسب BB width لكل شمعة من آخر 30 شمعة
+        widths = []
+        for i in range(30, 0, -1):
+            w = _bb_width(closes[:-i] if i > 0 else closes, BB_PERIOD, BB_STD_MULT)
+            if w is not None:
+                widths.append(w)
+
+        if len(widths) < 20:
+            continue
+
+        current_width = widths[-1]
+        historical_min = min(widths[:-1])  # أدنى width تاريخي (بدون الحالي)
+
+        # شرط الضغط: BB Width الحالي هو الأضيق في آخر 30 شمعة
+        is_squeeze = current_width <= historical_min * 1.05  # هامش 5%
+        if not is_squeeze:
+            continue
+
+        squeeze_coins.append(sym)
+
+        # شرط الاختراق: آخر شمعة فوق Upper Band
+        _, upper, _ = _calc_bb(closes, BB_PERIOD, BB_STD_MULT)
+        if upper is None or closes[-1] < upper:
+            continue
+
+        # شرط الحجم: آخر شمعة > 2x المتوسط
+        avg_vol = sum(volumes[-20:-1]) / 19 if len(volumes) >= 20 else 0
+        if avg_vol <= 0 or volumes[-1] < avg_vol * 2.0:
+            continue
+
+        # تدفق الأموال
+        flow1h = calc_money_flow_1h(sym)
+        if flow1h["net"] < 0:
+            continue
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+
+        msg = (
+            "💥 *BB SQUEEZE BREAKOUT* 💥\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📈 تغيير 24h: `" + str(round(change, 1)) + "%`\n"
+            + "  📦 حجم: `" + _fmt(vol_24h) + "`\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "🎯 BB Width: `" + str(round(current_width, 2)) + "%` — أضيق نقطة في 30 شمعة\n"
+            + "💹 *Flow 1h:* IN `" + _fmt(flow1h["in"]) + "` / OUT `" + _fmt(flow1h["out"]) + "` / Net `" + _fmt(flow1h["net"]) + "↑`\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — انفجار بعد ضغط 🎯"
+        )
+
+        send(msg)
+        _bb_squeeze_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "bb_squeeze_" + str(round(change, 1)) + "%",
+                                   vol_24h, price, sector)
+        log.info("BB SQUEEZE BREAKOUT | %s | width=%.2f%% | flow_net=%.0f$",
+                 sym, current_width, flow1h["net"])
+
+    if squeeze_coins:
+        log.info("BB Squeeze | %d في ضغط: %s", len(squeeze_coins),
+                 ", ".join(squeeze_coins[:10]))
 
 
 def scan_bounce_reversal():
@@ -12527,6 +12767,12 @@ def _send_daily_report_body(today, now_utc):
 
     _btc         = float(btc_ch)          if btc_ch          is not None else 0.0
 
+    # ── Market Bias Score ─────────────────────────────────────────────
+    _bias_score, _bias_label = calc_market_bias_score()
+    _bias_bar_green = max(0, min(10, int((_bias_score + 100) / 20)))
+    _bias_bar_red   = 10 - _bias_bar_green
+    _bias_bar = "🟢" * _bias_bar_green + "🔴" * _bias_bar_red
+
     _display_state = market_state
     if market_state == "SAFE" and sell_pct >= 80:
         _display_state = "CAUTION"
@@ -12554,6 +12800,8 @@ def _send_daily_report_body(today, now_utc):
         "🗓️ `{date}` — إغلاق اليوم\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "{mkt_icon} *السوق: {mkt_state}*\n"
+        "📊 *Market Bias:* `{bias_score:+d}/100` — {bias_label}\n"
+        "{bias_bar}\n"
         "₿ BTC 24h: `{btc:+.2f}%` | 1h: `{btc1h:+.2f}%`\n"
         "{btc_tps_line}"
         "Ξ ETH 24h: `{eth:+.2f}%`\n"
@@ -12604,6 +12852,7 @@ def _send_daily_report_body(today, now_utc):
             ) if eth_tps_stats else ""
         ),
         mkt_icon=_mkt_icons.get(_display_state,"📊"), mkt_state=_display_state,
+        bias_score=_bias_score, bias_label=_bias_label, bias_bar=_bias_bar,
         bar=mkt_bar,
         rp=rising_pct,  fp=falling_pct,
         rising=rising,  falling=falling,
@@ -14754,6 +15003,8 @@ def run():
             scan_5m_breakout()
             # Bounce Reversal — كل دقيقتين (نزول + بيع يخف + شمعات خضراء)
             scan_bounce_reversal()
+            # BB Squeeze — كل 5 دقائق (Bollinger Band compression breakout)
+            scan_bb_squeeze()
             poll_commands()
 
 
