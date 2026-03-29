@@ -422,6 +422,7 @@ SECTOR_KEYWORDS = {
         "ROSE","SCRT","OASIS","HARMONY","ELROND","MULTIVERSX","APTOS",
         "MOVEMENT","MONAD","BERACHAIN","INITIA","SAGA","STORY","SUPRA",
         "HYPERLIQUID","ECLIPSE","FUSE","VENOM","NEON","ZETA","XPL",
+        "SENTUSDT","ONTUSDT","A2ZUSDT",
     ],
     "Layer2": [
         "MATIC","OP","ARB","ZK","STRK","LRC","METIS","MANTA","SCROLL",
@@ -850,6 +851,7 @@ SECTORS = {
         "OPENMETAUSDT","WIMUSDT","EVERLANDUSDT","PORTALSUSDT",
         "MIDNIGHTUSDT","METAUSDT","EARTHUSDT","UNIVERSEUSDT",
         "REALMSUSDT","STARSUSDT","REALVRUSDT","DECENTRALUSDT",
+        "DUSTUSDT",
     ],
 
     "Payments": [
@@ -4415,10 +4417,8 @@ def scan_5m_breakout(price_map=None, vol_now=None):
     5m Breakout Scanner — يكتشف الاختراق لحظة بدايته
     يشبه Wolf Flow: EMA5>EMA10>EMA20 + volume spike على 5m + اختراق المقاومة
 
-    الخطوات:
-    1. فلترة سريعة من all_tickers: عملات SECTORS بتغيير +2%→+30% وحجم 300K+
-    2. لأفضل 25 عملة: يسحب 5m klines (25 شمعة)
-    3. يتحقق: EMA5>EMA10>EMA20 + حجم آخر شمعة 2.5x+ + اختراق أعلى 20 شمعة
+    Tier 1 — عملات SECTORS: حجم 300K+، تغيير 2-30%
+    Tier 2 — كل السوق: حجم 1M+، تغيير 3-25%، flow ratio 8x+
     """
     global _breakout5m_alerted, last_breakout5m_scan, _coin_first_seen, hot_alerted
 
@@ -4435,12 +4435,14 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         all_sector_coins.update(sc)
 
     # المرحلة 1: فلترة سريعة بدون API calls إضافية
-    pool = []
+    pool = []   # (sym, vol, change, price, is_sector)
     for t in all_tickers:
         sym = t.get("symbol", "")
-        if sym not in all_sector_coins:
+        if not sym.endswith("USDT"):
             continue
         if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT","") in STABLECOINS:
             continue
         try:
             vol    = float(t["quoteVolume"])
@@ -4449,11 +4451,15 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         except (KeyError, ValueError):
             continue
 
-        if vol < BREAKOUT5M_MIN_VOL:
-            continue
-        # تغيير إيجابي يدل على بداية حركة (ليست ساكنة ولا متأخرة جداً)
-        if change < 2.0 or change > 30.0:
-            continue
+        in_sector = sym in all_sector_coins
+
+        # حدود مختلفة لكل tier
+        if in_sector:
+            if vol < BREAKOUT5M_MIN_VOL: continue
+            if change < 2.0 or change > 30.0: continue
+        else:
+            if vol < 1_000_000: continue          # Tier 2: حجم أعلى
+            if change < 3.0 or change > 25.0: continue
 
         # فلتر العمر
         if sym not in _coin_first_seen:
@@ -4461,22 +4467,21 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
-        # cooldown
+        # cooldowns
         if now - _breakout5m_alerted.get(sym, 0) < BREAKOUT5M_COOLDOWN:
             continue
-
-        # cooldown مع hot_alerted لمنع التكرار مع scan_instant_movers
         if now - hot_alerted.get(sym, 0) < 3600:
             continue
 
-        pool.append((sym, vol, change, price))
+        pool.append((sym, vol, change, price, in_sector))
 
     if not pool:
         return
 
-    # أفضل 25 عملة بالحجم
-    pool.sort(key=lambda x: -x[1])
-    pool = pool[:BREAKOUT5M_MAX_COINS]
+    # أفضل 35 عملة بالحجم (25 sector + 10 non-sector)
+    sector_pool    = sorted([x for x in pool if x[4]],     key=lambda x: -x[1])[:25]
+    nonsector_pool = sorted([x for x in pool if not x[4]], key=lambda x: -x[1])[:10]
+    pool = sector_pool + nonsector_pool
 
     def _ema_calc(values, period):
         if len(values) < period:
@@ -4487,7 +4492,12 @@ def scan_5m_breakout(price_map=None, vol_now=None):
             e = v * k + e * (1 - k)
         return e
 
-    for sym, vol_24h, change, price in pool:
+    def _fmt_usd(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.0f}$".format(v)
+
+    for sym, vol_24h, change, price, in_sector in pool:
         kd = get_klines(sym, "5m", 25)
         if not kd or len(kd.get("closes", [])) < 20:
             continue
@@ -4533,32 +4543,44 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         _net_5m   = _in_5m - _out_5m
         _ratio_5m = _in_5m / _out_5m if _out_5m > 0 else 99.0
 
+        # Tier 2 يحتاج flow ratio 8x+ (معيار أصعب)
+        if not in_sector and _ratio_5m < 8.0:
+            continue
+
         # فلتر: يجب أن يكون تدفق الشراء أكبر (flow إيجابي)
         if _net_5m < 0:
             continue
 
-        # تدفق 1h من calc_money_flow_1h
+        # تدفق 1h
         _flow1h = calc_money_flow_1h(sym)
 
-        def _fmt_usd(v):
-            if v >= 1_000_000: return "{:.1f}M".format(v / 1e6)
-            if v >= 1_000:     return "{:.1f}K".format(v / 1e3)
-            return "{:.0f}$".format(v)
+        # مستوى الحجم
+        _vol_level = ("📊 عالٍ جداً" if vol_24h >= 10_000_000 else
+                      "📊 عالٍ"       if vol_24h >= 3_000_000  else
+                      "📊 جيد"        if vol_24h >= 1_000_000  else
+                      "📊 عادي")
 
-        sector = next((s for s, c in SECTORS.items() if sym in c), "Unknown")
-        base   = sym.replace("USDT", "")
+        # مستوى الاهتمام — بناءً على vol_spike + flow ratio
+        _interest = ("🔥 قوي جداً" if vol_spike >= 5 and _ratio_5m >= 5 else
+                     "⚡ قوي"       if vol_spike >= 3 or  _ratio_5m >= 3 else
+                     "🟡 محايد")
 
+        # جودة الـ Flow
         _flow_quality = ("💹 استثنائي" if _ratio_5m >= 10 else
                          "🔥 قوي"       if _ratio_5m >= 3  else
                          "📈 جيد")
 
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+        _tier_tag = "" if in_sector else " 🌐"
+
         msg = (
-            "🚀 *5m BREAKOUT* 🚀\n"
+            "🚀 *5m BREAKOUT* 🚀" + _tier_tag + "\n"
             + "━" * 18 + "\n"
             + "📍 *" + base + "/USDT*\n"
             + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
-            + "  📈 تغيير 24h: `+" + str(round(change, 1)) + "%`\n"
-            + "  📦 حجم 24h: `" + str(round(vol_24h / 1e6, 2)) + "M USDT`\n"
+            + "  📈 تغيير 1h: `+" + str(round(change, 1)) + "%`\n"
+            + "  " + _vol_level + " | " + _interest + "\n"
             + "  🏷️ قطاع: `" + sector + "`\n"
             + "━" * 18 + "\n"
             + "⚡ EMA5>EMA10>EMA20 | حجم 5m: `" + str(round(vol_spike, 1)) + "x`\n"
@@ -4575,8 +4597,8 @@ def scan_5m_breakout(price_map=None, vol_now=None):
             candidates.append(sym)
         add_to_liquidity_watchlist(sym, "5m_breakout+" + str(round(change, 0)) + "%",
                                    vol_24h, price, sector)
-        log.info("5m BREAKOUT | %s | +%.1f%% | EMA(5/10/20)=%.6f/%.6f/%.6f | vol_spike=%.1fx | flow5m=%.0f$",
-                 sym, change, e5, e10, e20, vol_spike, _net_5m)
+        log.info("5m BREAKOUT%s | %s | +%.1f%% | EMA OK | vol_spike=%.1fx | flow5m_ratio=%.1fx | net=%.0f$",
+                 ("(T2)" if not in_sector else ""), sym, change, vol_spike, _ratio_5m, _net_5m)
 
 
 def scan_realtime_liquidity(price_map=None, vol_now=None):
