@@ -4435,7 +4435,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
 
         if m["score"] >= 6:   icon = "🔥🔥"; lvl = "EXPLOSIVE MOVE"
         elif m["score"] >= 4: icon = "🔥";   lvl = "STRONG MOVE"
-        else:                 icon = "⚡";        lvl = "ACTIVE MOVE"
+        else:                 icon = "⚡";    lvl = "ACTIVE MOVE"
 
         gem_tag = ""
         if sym in gem_watchlist:
@@ -4443,6 +4443,14 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
 
         vol_str = str(round(m["vol"]/1e6,2))+"M" if m["vol"]>=1e6 else str(round(m["vol"]/1e3,0))+"K"
         _confirm_count, _badge = _register_confirm(sym, "instant")
+
+        # عملات كبيرة (حجم > 5M) → ننتظر تأكيد الجوكر
+        # عملات صغيرة/متوسطة → ادخل الآن مباشرة (تتحرك بسرعة)
+        _is_large_cap = m["vol"] >= 5_000_000
+        if _is_large_cap:
+            _action_line = "🃏 _عملة كبيرة — الجوكر سيرسل تأكيد الدخول_"
+        else:
+            _action_line = "✅ *ادخل الآن* — زخم قوي + سيولة مؤكدة 🎯"
 
         msg = (
             icon+" *"+lvl+"* "+icon+"\n"
@@ -4455,7 +4463,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
             +gem_tag
             +"━"*18+"\n"
             +"🎯 *"+lvl+"* " + _badge + " | قوة: `"+str(m["score"])+"/9`\n"
-            +"👁️ _إشارة مراقبة — انتظر الجوكر للدخول_ 🃏"
+            + _action_line
         )
         if not can_send_signal(): break
         send(msg)
