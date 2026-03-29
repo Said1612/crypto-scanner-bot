@@ -214,6 +214,16 @@ BB_SQUEEZE_MAX_COINS   = 50     # أقصى عدد يُفحص
 BB_PERIOD              = 20     # فترة Bollinger Bands
 BB_STD_MULT            = 2.0    # معامل الانحراف المعياري
 
+# 1h Move Scanner — Wolf Flow style (حركة الساعة الأخيرة)
+MOVE1H_SCAN_EVERY  = 120      # كل دقيقتين
+MOVE1H_COOLDOWN    = 7200     # ساعتان بين تنبيهين للعملة
+MOVE1H_MIN_VOL     = 50_000   # حجم 24h أدنى (أقل من 5m لاصطياد micro-caps)
+MOVE1H_MOVE_MIN    = 4.0      # حركة 1h ≥ 4%
+MOVE1H_MOVE_MAX    = 30.0     # حركة 1h ≤ 30% (فوق ذلك = pump مشبوه)
+MOVE1H_FLOW_RATIO  = 1.3      # نسبة IN/OUT (منخفضة مثل Wolf Flow)
+MOVE1H_VOL_SPIKE   = 1.5      # حجم آخر شمعة 1h > 1.5× المتوسط
+MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
+
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
 FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
@@ -1046,6 +1056,8 @@ _bounce_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
 last_bb_squeeze_scan = 0.0
 _bb_squeeze_alerted  = {}   # type: Dict[str, float]  {sym: last_alert_time}
 _market_bias_score   = 0    # type: int  — آخر نقطة محسوبة (-100 إلى +100)
+last_move1h_scan     = 0.0
+_move1h_alerted      = {}   # type: Dict[str, float]  {sym: last_alert_time}
 _multi_confirm       = {}   # type: Dict[str, dict]  {sym: {"count":N,"scanners":[],"last_time":ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 دقيقة — نافذة التأكيد المتعدد
 
@@ -4691,6 +4703,175 @@ def calc_market_bias_score():
     else:              label = "Strong Bear 🔴🔴"
 
     return score, label
+
+
+def scan_1h_move():
+    # type: () -> None
+    """
+    1h Move Scanner — Wolf Flow style
+    يرصد العملات التي تحركت 4%+ في الساعة الأخيرة (مثل DIAUSDT/BANANAUSDT)
+    الفرق عن 5m breakout: يعتمد على حركة الـ 1h لا الـ 24h
+    يعمل على كل السوق بدون قيود القطاعات
+
+    الشروط:
+    1. حركة 1h ≥ 4% (آخر شمعة 1h مقارنة بالسابقة)
+    2. Flow 1h: IN > OUT بنسبة ≥ 1.3x
+    3. حجم آخر شمعة 1h > 1.5× متوسط الشمعات السابقة
+    4. ليس دخولاً متأخراً (سعر < 92% من نطاق 24h)
+    """
+    global _move1h_alerted, last_move1h_scan, _coin_first_seen, hot_alerted
+
+    now = time.time()
+    if now - last_move1h_scan < MOVE1H_SCAN_EVERY:
+        return
+    last_move1h_scan = now
+
+    if not all_tickers:
+        return
+
+    # المرحلة 1: فلترة سريعة من ticker
+    pool = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if any(k in sym for k in LEVERAGE_KEYWORDS):
+            continue
+        if sym.replace("USDT", "") in STABLECOINS:
+            continue
+        if "(" in sym or ")" in sym:
+            continue
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < MOVE1H_MIN_VOL:
+            continue
+        # فلتر أساسي: 24h اتجاه إيجابي
+        if change < 1.0 or change > 60.0:
+            continue
+
+        # فلتر العمر
+        if sym not in _coin_first_seen:
+            _coin_first_seen[sym] = now
+        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+            continue
+
+        # cooldown
+        if now - _move1h_alerted.get(sym, 0) < MOVE1H_COOLDOWN:
+            continue
+        if now - hot_alerted.get(sym, 0) < 1800:
+            continue
+
+        # فلتر الدخول المتأخر
+        try:
+            _h24 = float(t.get("highPrice", price))
+            _l24 = float(t.get("lowPrice",  price))
+            if _is_late_entry(price, _h24, _l24):
+                continue
+        except (ValueError, TypeError):
+            pass
+
+        pool.append((sym, vol, change, price, t))
+
+    if not pool:
+        return
+
+    # أفضل 50 بالحجم
+    pool.sort(key=lambda x: -x[1])
+    pool = pool[:MOVE1H_MAX_COINS]
+
+    def _fmt(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.0f}$".format(v)
+
+    for sym, vol_24h, change_24h, price, ticker in pool:
+        # المرحلة 2: klines 1h (6 شمعات)
+        kd = get_klines(sym, "1h", 6)
+        if not kd or len(kd.get("closes", [])) < 3:
+            continue
+
+        closes  = kd["closes"]
+        opens   = kd["opens"]
+        highs   = kd["highs"]
+        lows    = kd["lows"]
+        vols    = kd["vols"]
+
+        # حركة الشمعة الأخيرة (الساعة الأخيرة)
+        if opens[-1] <= 0:
+            continue
+        move_1h = (closes[-1] - closes[-2]) / closes[-2] * 100 if closes[-2] > 0 else 0.0
+
+        if move_1h < MOVE1H_MOVE_MIN or move_1h > MOVE1H_MOVE_MAX:
+            continue
+
+        # حجم الشمعة الأخيرة مقارنة بالمتوسط
+        prev_vols = vols[-5:-1]
+        avg_vol = sum(prev_vols) / len(prev_vols) if prev_vols else 0
+        if avg_vol <= 0:
+            continue
+        vol_spike_1h = vols[-1] / avg_vol
+        if vol_spike_1h < MOVE1H_VOL_SPIKE:
+            continue
+
+        # Flow 1h من آخر شمعتين
+        _in_1h = 0.0; _out_1h = 0.0
+        for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
+            rng = h - l
+            br  = (c - l) / rng if rng > 0 else 0.5
+            vu  = v * c
+            _in_1h  += vu * br
+            _out_1h += vu * (1.0 - br)
+
+        if _out_1h <= 0:
+            continue
+        _ratio_1h = _in_1h / _out_1h
+        if _ratio_1h < MOVE1H_FLOW_RATIO:
+            continue
+        if _in_1h <= _out_1h:
+            continue
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+        _confirm_count, _badge = _register_confirm(sym, "1h_move")
+
+        # تصنيف الحجم مثل Wolf Flow
+        _vol_label = ("Elevated 🔥" if vol_spike_1h >= 3.0 else
+                      "Good ⚡"      if vol_spike_1h >= 1.5 else
+                      "Normal")
+
+        # تصنيف الاهتمام مثل Wolf Flow
+        _interest = ("Strong 💪" if _ratio_1h >= 3.0 else
+                     "Neutral 🟡" if _ratio_1h >= 1.3 else
+                     "Weak")
+
+        msg = (
+            "📡 *1h MOVE* 📡 " + _badge + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *" + base + "/USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📈 حركة 1h: `+" + str(round(move_1h, 2)) + "%`\n"
+            + "  ⚡ Volume: " + _vol_label + " | Interest: " + _interest + "\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "💹 *Flow 1h:* IN `" + _fmt(_in_1h) + "` / OUT `" + _fmt(_out_1h) + "` / Net `+" + _fmt(_in_1h - _out_1h) + "`\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — زخم 1h + Flow إيجابي 🎯"
+        )
+
+        send(msg)
+        _move1h_alerted[sym] = now
+        hot_alerted[sym] = now
+        if sym not in candidates:
+            candidates.append(sym)
+        add_to_liquidity_watchlist(sym, "1h_move+" + str(round(move_1h, 1)) + "%",
+                                   vol_24h, price, sector)
+        log.info("1h MOVE | %s | 1h=+%.2f%% | vol_spike=%.1fx | flow_ratio=%.1fx | net=%.0f$",
+                 sym, move_1h, vol_spike_1h, _ratio_1h, _in_1h - _out_1h)
 
 
 def scan_bb_squeeze():
@@ -15089,6 +15270,8 @@ def run():
             scan_5m_breakout()
             # Bounce Reversal — كل دقيقتين (نزول + بيع يخف + شمعات خضراء)
             scan_bounce_reversal()
+            # 1h Move — Wolf Flow style — كل دقيقتين (حركة الساعة الأخيرة)
+            scan_1h_move()
             # BB Squeeze — كل 5 دقائق (Bollinger Band compression breakout)
             scan_bb_squeeze()
             poll_commands()
