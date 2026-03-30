@@ -226,7 +226,8 @@ MOVE1H_COOLDOWN    = 7200     # ساعتان بين تنبيهين للعملة
 MOVE1H_MIN_VOL     = 50_000   # حجم 24h أدنى (أقل من 5m لاصطياد micro-caps)
 MOVE1H_MOVE_MIN    = 4.0      # حركة 1h ≥ 4%
 MOVE1H_MOVE_MAX    = 30.0     # حركة 1h ≤ 30% (فوق ذلك = pump مشبوه)
-MOVE1H_FLOW_RATIO  = 1.3      # نسبة IN/OUT (منخفضة مثل Wolf Flow)
+MOVE1H_FLOW_RATIO  = 3.0      # نسبة IN/OUT — Wolf Flow يستخدم 5x-10x
+MOVE1H_NET_MIN     = 1_000    # حد أدنى Net Flow بالدولار — يمنع إشارات ضعيفة
 MOVE1H_VOL_SPIKE   = 1.5      # حجم آخر شمعة 1h > 1.5× المتوسط
 MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
 
@@ -4929,6 +4930,9 @@ def scan_1h_move():
             continue
         if _in_1h <= _out_1h:
             continue
+        _net_1h = _in_1h - _out_1h
+        if _net_1h < MOVE1H_NET_MIN:
+            continue
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
         base   = sym.replace("USDT", "")
@@ -4936,26 +4940,30 @@ def scan_1h_move():
 
         # تصنيف الحجم مثل Wolf Flow
         _vol_label = ("Elevated 🔥" if vol_spike_1h >= 3.0 else
-                      "Good ⚡"      if vol_spike_1h >= 1.5 else
+                      "Good ✅"      if vol_spike_1h >= 1.5 else
                       "Normal")
 
-        # تصنيف الاهتمام مثل Wolf Flow
-        _interest = ("Strong 💪" if _ratio_1h >= 3.0 else
-                     "Neutral 🟡" if _ratio_1h >= 1.3 else
+        # تصنيف الـ Flow مثل Wolf Flow (بناءً على النسبة)
+        _interest = ("Strong 💪"  if _ratio_1h >= 8.0 else
+                     "Good 🟢"    if _ratio_1h >= 5.0 else
+                     "Neutral 🟡" if _ratio_1h >= 3.0 else
                      "Weak")
 
         msg = (
             "📡 *1h MOVE* 📡 " + _badge + "\n"
             + "━" * 18 + "\n"
-            + "📍 *" + base + "/USDT*\n"
+            + "📍 *#" + base + "USDT*\n"
             + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
             + "  📈 حركة 1h: `+" + str(round(move_1h, 2)) + "%`\n"
-            + "  ⚡ Volume: " + _vol_label + " | Interest: " + _interest + "\n"
+            + "  📦 Volume: " + _vol_label + "\n"
+            + "  🎯 Flow: " + _interest + "\n"
             + "  🏷️ قطاع: `" + sector + "`\n"
             + "━" * 18 + "\n"
-            + "💹 *Flow 1h:* IN `" + _fmt(_in_1h) + "` / OUT `" + _fmt(_out_1h) + "` / Net `+" + _fmt(_in_1h - _out_1h) + "`\n"
+            + "  ▲ In:  `$" + _fmt(_in_1h) + "`\n"
+            + "  ▼ Out: `$" + _fmt(_out_1h) + "`\n"
+            + "  💚 Net: `+$" + _fmt(_net_1h) + "`\n"
             + "━" * 18 + "\n"
-            + "✅ *ادخل الآن* — زخم 1h + Flow إيجابي 🎯"
+            + "✅ *ادخل الآن* — Flow شرائي قوي 🎯"
         )
 
         send(msg)
