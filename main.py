@@ -3243,7 +3243,7 @@ def analyze_sector_flow():
             try:
                 ch  = float(tmap[sym]["priceChangePercent"])
                 vol = float(tmap[sym]["quoteVolume"])
-                if ch > 0 and vol > 200_000:
+                if 1.0 <= ch <= 25.0 and vol > 200_000:   # حد أدنى 1% + حد أعلى 25% (SOLU 36% = دخول متأخر)
                     top_coins.append((sym.replace("USDT",""), ch, vol))
             except (KeyError, ValueError):
                 pass
@@ -3417,7 +3417,7 @@ def detect_sector_rotation():
             vol = float(tmap[sym]["quoteVolume"])
             pr  = float(tmap[sym]["lastPrice"])
 
-            if vol >= 200_000 and ch <= 15:
+            if vol >= 200_000 and 1.0 <= ch <= 20.0:   # حد أدنى 1% + حد أعلى 20% (تجنب دخول متأخر)
                 top_coins.append((sym.replace("USDT",""), ch, vol, pr))
         except (KeyError, ValueError):
             pass
