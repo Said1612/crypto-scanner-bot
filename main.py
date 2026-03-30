@@ -123,6 +123,7 @@ EXTRA_COINS = [
 
     # Wolf Flow signals 30 Mar 2026
     "USUALUSDT", "STGUSDT",
+    "BARDUSDT", "ONGUSDT", "PYRUSDT",
 ]
 
 TPS_SPIKE      = 2.0
@@ -5508,7 +5509,11 @@ def scan_extra_coins():
         if closes[-2] <= 0:
             continue
         move_1h = (closes[-1] - closes[-2]) / closes[-2] * 100
-        if move_1h < EXTRA_MOVE_MIN or move_1h > 60.0:
+        if move_1h > 60.0:
+            continue
+        # إذا Net Flow كبير جداً ($10K+) نقبل حتى حركة 0.5% — BARDUSDT نموذج
+        _move_floor = 0.5 if sym in EXTRA_COINS else EXTRA_MOVE_MIN
+        if move_1h < _move_floor:
             continue
 
         # حساب Flow
@@ -5526,6 +5531,9 @@ def scan_extra_coins():
         _net   = _in - _out
 
         if _ratio < EXTRA_FLOW_RATIO or _net < EXTRA_NET_MIN:
+            continue
+        # حركة صغيرة (< EXTRA_MOVE_MIN) تُقبل فقط إذا Net كبير ($10K+)
+        if move_1h < EXTRA_MOVE_MIN and _net < 10_000:
             continue
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
