@@ -5258,14 +5258,25 @@ def scan_volume_breakout():
         if candle_move > VOLBR_PRICE_MAX:
             continue
 
-        # Flow حقيقي: شمعة خضراء = شراء، حمراء = بيع (باستخدام open)
+        # تتبع السيولة الحقيقية: حجم شراء/بيع لكل شمعة (آخر 15 شمعة)
+        # المنطق: شمعة خضراء = buy_ratio بين 0.5→1.0 حسب موقع الإغلاق
+        #         شمعة حمراء  = buy_ratio بين 0.0→0.5 حسب موقع الإغلاق
         _in = 0.0; _out = 0.0
-        for o, h, l, c, v in zip(opens[-5:], highs[-5:], lows[-5:], closes[-5:], vols[-5:]):
-            vu = v * c
-            if c >= o:          # شمعة خضراء → شراء
-                _in  += vu
-            else:               # شمعة حمراء → بيع
-                _out += vu
+        _n = min(len(closes), 15)
+        for i in range(-_n, 0):
+            o, h, l, c, v = opens[i], highs[i], lows[i], closes[i], vols[i]
+            vu  = v * c
+            rng = h - l
+            if rng > 0:
+                pos = (c - l) / rng          # 0=عند القاع  1=عند القمة
+                if c >= o:                   # شمعة خضراء → buy_ratio: 0.5→1.0
+                    buy_ratio = (pos + 1.0) / 2.0
+                else:                        # شمعة حمراء → buy_ratio: 0.0→0.5
+                    buy_ratio = pos / 2.0
+            else:
+                buy_ratio = 0.5
+            _in  += vu * buy_ratio
+            _out += vu * (1.0 - buy_ratio)
 
         flow_ratio = _in / _out if _out > 0 else 1.0
         _net_flow  = _in - _out
