@@ -8441,6 +8441,11 @@ def scan_whale_confirmation(price_map):
         ats_mult    = ats / ats_then if ats_then > 0 else 1.0
         elapsed_min = int((now - data["time"]) / 60)
 
+        # ATS نزل = الحوت خرج أو النشاط خف — لا إشارة
+        if elapsed_min >= 2 and ats_mult < 0.90:
+            log.debug("JOKER skip %s: ATS dropped %.1fx (%.0f$→%.0f$)", sym, ats_mult, ats_then, ats)
+            continue
+
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
 
 
