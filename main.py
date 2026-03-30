@@ -4492,7 +4492,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
         # فلتر العملات الجديدة
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         # فلتر السيولة الحقيقية
@@ -4680,7 +4680,7 @@ def scan_fast_breakout():
         # فلتر العمر
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         # cooldowns
@@ -4869,7 +4869,7 @@ def scan_1h_move():
         # فلتر العمر
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         # cooldown
@@ -5051,7 +5051,7 @@ def scan_flow_accumulation():
 
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         if now - _flowacc_alerted.get(sym, 0) < FLOWACC_COOLDOWN:
@@ -5198,7 +5198,7 @@ def scan_volume_breakout():
 
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         if now - _volbr_alerted.get(sym, 0) < VOLBR_COOLDOWN:
@@ -5348,7 +5348,7 @@ def scan_micro_pump():
 
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         if now - _micropump_alerted.get(sym, 0) < MICROPUMP_COOLDOWN:
@@ -5619,7 +5619,7 @@ def scan_bb_squeeze():
         # فلتر العمر
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         if now - _bb_squeeze_alerted.get(sym, 0) < BB_SQUEEZE_COOLDOWN:
@@ -5801,7 +5801,7 @@ def scan_bounce_reversal():
         # فلتر العمر
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         # cooldowns
@@ -5978,7 +5978,7 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         # فلتر العمر
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         # cooldowns
@@ -6170,7 +6170,7 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
         # فلتر العملات الجديدة
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         # فلتر السيولة الحقيقية
@@ -6326,7 +6326,7 @@ def scan_hot_market(price_map=None, vol_now=None):
         # فلتر العملات الجديدة
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
         # فلتر السيولة الحقيقية
@@ -8305,7 +8305,7 @@ def scan_whale_confirmation(price_map):
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
             continue
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
 
@@ -10368,7 +10368,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
             continue
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             log.debug(" VOL_SURGE skip new coin: %s", sym)
             continue
 
@@ -10789,7 +10789,7 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
         if sym not in _coin_first_seen:
             _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
             continue
-        if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
+        if (now - _coin_first_seen.get(sym, now - (NEW_COIN_MIN_DAYS+1)*86400)) / 86400 < NEW_COIN_MIN_DAYS:
             log.debug(" PRE_PUMP skip new coin: %s", sym)
             continue
 
