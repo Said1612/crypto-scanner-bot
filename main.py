@@ -1833,23 +1833,34 @@ CVD_PERIOD  = 24
 def calc_money_flow_1h(sym):
     # type: (str) -> dict
     """
-    تدفق الأموال الحقيقية (آخر 2 شمعة 1h) بالدولار — مثل Wolf Flow
-    يستخدم: buy_ratio = (close - low) / (high - low) لتقدير ضغط الشراء/البيع
+    تدفق الأموال الحقيقية (آخر 3 شمعات 1h) بالدولار — مثل Wolf Flow
+    المنطق:
+      شمعة خضراء (close>=open): buy_ratio = (pos+1)/2  → 0.5..1.0
+      شمعة حمراء  (close<open):  buy_ratio = pos/2      → 0.0..0.5
+    حيث pos = (close-low)/(high-low)
     يعيد: in, out, net, ratio
     """
-    kd = get_klines(sym, "1h", 4)
+    kd = get_klines(sym, "1h", 5)
     if not kd:
         return {"in": 0.0, "out": 0.0, "net": 0.0, "ratio": 1.0}
+    opens  = kd["opens"]
     highs  = kd["highs"]
     lows   = kd["lows"]
     closes = kd["closes"]
     vols   = kd["vols"]
     total_in  = 0.0
     total_out = 0.0
-    for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
-        rng = h - l
-        buy_ratio = (c - l) / rng if rng > 0 else 0.5
-        vol_usdt   = v * c
+    for o, h, l, c, v in zip(opens[-3:], highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
+        rng      = h - l
+        vol_usdt = v * c
+        if rng > 0:
+            pos = (c - l) / rng          # 0=عند القاع  1=عند القمة
+            if c >= o:                   # شمعة خضراء → buy_ratio: 0.5→1.0
+                buy_ratio = (pos + 1.0) / 2.0
+            else:                        # شمعة حمراء → buy_ratio: 0.0→0.5
+                buy_ratio = pos / 2.0
+        else:
+            buy_ratio = 0.5
         total_in  += vol_usdt * buy_ratio
         total_out += vol_usdt * (1.0 - buy_ratio)
     net   = total_in - total_out
