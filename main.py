@@ -4656,9 +4656,10 @@ def scan_fast_breakout():
         if prev_price <= 0:
             continue
 
-        # الحركة خلال 30 ثانية
+        # الحركة خلال 30 ثانية — القطاع الساخن أسهل بـ 30%
         move_30s = (price - prev_price) / prev_price * 100.0
-        if move_30s < FAST_MOVE_30S:
+        _fast_threshold = FAST_MOVE_30S * (0.7 if sym in hot_symbols else 1.0)
+        if move_30s < _fast_threshold:
             continue
 
         # فلتر العمر
@@ -4926,17 +4927,22 @@ def scan_1h_move():
         if _out_1h <= 0:
             continue
         _ratio_1h = _in_1h / _out_1h
-        if _ratio_1h < MOVE1H_FLOW_RATIO:
+        # القطاع الساخن → حدود أدنى أسهل بـ 30%
+        _is_hot_sector = sym in hot_symbols
+        _req_ratio = MOVE1H_FLOW_RATIO * (0.7 if _is_hot_sector else 1.0)
+        _req_net   = MOVE1H_NET_MIN   * (0.5 if _is_hot_sector else 1.0)
+        if _ratio_1h < _req_ratio:
             continue
         if _in_1h <= _out_1h:
             continue
         _net_1h = _in_1h - _out_1h
-        if _net_1h < MOVE1H_NET_MIN:
+        if _net_1h < _req_net:
             continue
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
         base   = sym.replace("USDT", "")
         _confirm_count, _badge = _register_confirm(sym, "1h_move")
+        _hot_badge = " 🔥*قطاع ساخن*" if _is_hot_sector else ""
 
         # تصنيف الحجم مثل Wolf Flow
         _vol_label = ("Elevated 🔥" if vol_spike_1h >= 3.0 else
@@ -4950,7 +4956,7 @@ def scan_1h_move():
                      "Weak")
 
         msg = (
-            "📡 *1h MOVE* 📡 " + _badge + "\n"
+            "📡 *1h MOVE* 📡 " + _badge + _hot_badge + "\n"
             + "━" * 18 + "\n"
             + "📍 *#" + base + "USDT*\n"
             + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
@@ -5239,8 +5245,10 @@ def scan_volume_breakout():
         flow_ratio = _in / _out if _out > 0 else 1.0
         _net_flow  = _in - _out
 
-        # يجب flow شرائي قوي — إشارات قليلة وناجحة
-        if flow_ratio < 2.0 or _net_flow < 500:
+        # يجب flow شرائي قوي — القطاع الساخن أسهل بـ 30%
+        _vbr_ratio_req = 2.0 * (0.7 if sym in hot_symbols else 1.0)
+        _vbr_net_req   = 500 * (0.5 if sym in hot_symbols else 1.0)
+        if flow_ratio < _vbr_ratio_req or _net_flow < _vbr_net_req:
             continue
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
