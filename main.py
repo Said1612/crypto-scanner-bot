@@ -4490,7 +4490,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
 
         # فلتر العملات الجديدة
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -4678,7 +4678,7 @@ def scan_fast_breakout():
 
         # فلتر العمر
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -4867,7 +4867,7 @@ def scan_1h_move():
 
         # فلتر العمر
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -5049,7 +5049,7 @@ def scan_flow_accumulation():
             continue
 
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -5196,7 +5196,7 @@ def scan_volume_breakout():
             continue
 
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -5346,7 +5346,7 @@ def scan_micro_pump():
             continue
 
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -5617,7 +5617,7 @@ def scan_bb_squeeze():
 
         # فلتر العمر
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -5799,7 +5799,7 @@ def scan_bounce_reversal():
 
         # فلتر العمر
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -5976,7 +5976,7 @@ def scan_5m_breakout(price_map=None, vol_now=None):
 
         # فلتر العمر
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -6168,7 +6168,7 @@ def scan_realtime_liquidity(price_map=None, vol_now=None):
 
         # فلتر العملات الجديدة
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -6324,7 +6324,7 @@ def scan_hot_market(price_map=None, vol_now=None):
 
         # فلتر العملات الجديدة
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
 
@@ -8302,7 +8302,7 @@ def scan_whale_confirmation(price_map):
 
         # تجاهل العملات الجديدة اقل من 3 أيام
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
             continue
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             continue
@@ -10365,7 +10365,7 @@ def scan_volume_surge(price_map, vol_now, changes_map):
 
         # فلتر العملات الجديدة (أقل من 7 أيام)
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
             continue
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             log.debug(" VOL_SURGE skip new coin: %s", sym)
@@ -10786,7 +10786,7 @@ def scan_pre_pump_watch(price_map, vol_now, changes_map):
 
         # فلتر العملات الجديدة (أقل من 7 أيام)
         if sym not in _coin_first_seen:
-            _coin_first_seen[sym] = now
+            _coin_first_seen[sym] = now - (NEW_COIN_MIN_DAYS + 1) * 86400
             continue
         if (now - _coin_first_seen.get(sym, now)) / 86400 < NEW_COIN_MIN_DAYS:
             log.debug(" PRE_PUMP skip new coin: %s", sym)
@@ -14585,6 +14585,7 @@ def save_state():
             "daily_gem_count":          daily_gem_count,
             "stable_vol_history":       stable_vol_history,
             "daily_market_vol_history": daily_market_vol_history,
+            "coin_first_seen":          _coin_first_seen,
 
             "whale_watchlist":          {k: v for k, v in whale_watchlist.items()},
             "coin_signal_count":        coin_signal_count,
@@ -14614,6 +14615,7 @@ def load_state():
     global daily_gem_count, stable_vol_history, daily_market_vol_history
     global daily_signals
     global whale_watchlist, coin_signal_count, market_activity_history
+    global _coin_first_seen
 
 
     state = redis_load()
@@ -14675,6 +14677,7 @@ def load_state():
         stable_vol_history.update(state.get("stable_vol_history", {}))
         whale_watchlist.update(state.get("whale_watchlist", {}))
         coin_signal_count.update(state.get("coin_signal_count", {}))
+        _coin_first_seen.update(state.get("coin_first_seen", {}))
         _mah = state.get("market_activity_history", [])
         if isinstance(_mah, list):
             market_activity_history.extend(_mah[-30:])
