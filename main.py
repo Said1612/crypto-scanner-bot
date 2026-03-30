@@ -228,11 +228,11 @@ BB_STD_MULT            = 2.0    # معامل الانحراف المعياري
 MOVE1H_SCAN_EVERY  = 60       # كل دقيقة
 MOVE1H_COOLDOWN    = 7200     # ساعتان بين تنبيهين للعملة
 MOVE1H_MIN_VOL     = 50_000   # حجم 24h أدنى (أقل من 5m لاصطياد micro-caps)
-MOVE1H_MOVE_MIN    = 2.5      # حركة 1h ≥ 2.5% (was 4.0)
-MOVE1H_MOVE_MAX    = 30.0     # حركة 1h ≤ 30% (فوق ذلك = pump مشبوه)
-MOVE1H_FLOW_RATIO  = 1.5      # نسبة IN/OUT — was 2.0، Wolf Flow يُرسل بـ 1.5x
-MOVE1H_NET_MIN     = 1_000    # حد أدنى Net Flow بالدولار — يمنع إشارات ضعيفة
-MOVE1H_VOL_SPIKE   = 1.2      # حجم آخر شمعة 1h > 1.2× المتوسط (was 1.5)
+MOVE1H_MOVE_MIN    = 1.5      # حركة 1h ≥ 1.5% — BARDUSDT كان 1.59%
+MOVE1H_MOVE_MAX    = 30.0     # حركة 1h ≤ 30%
+MOVE1H_FLOW_RATIO  = 1.5      # نسبة IN/OUT
+MOVE1H_NET_MIN     = 500      # حد أدنى Net Flow — was $1000
+MOVE1H_VOL_SPIKE   = 1.0      # حجم آخر شمعة 1h ≥ متوسط (was 1.2) — Wolf Flow لا يشترطه
 MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
 
 # Flow Accumulation Scanner — السعر ثابت + أموال تتراكم (NTRNUSDT type)
@@ -4889,7 +4889,10 @@ def scan_1h_move():
         pool.append((sym, vol, change, price, t))
 
     if not pool:
+        log.info("scan_1h_move: pool empty (no coins passed 24h filter)")
         return
+
+    log.info("scan_1h_move: pool=%d coins", len(pool))
 
     # أفضل 80 بالحجم — EXTRA_COINS ذات الحجم المنخفض تُضاف دائماً
     _extra_in_pool = [(s, v, c, p, t) for s, v, c, p, t in pool if s in EXTRA_COINS]
@@ -5531,9 +5534,11 @@ def scan_extra_coins():
         _net   = _in - _out
 
         if _ratio < EXTRA_FLOW_RATIO or _net < EXTRA_NET_MIN:
+            log.info("EXTRA skip %s: ratio=%.1fx net=$%.0f", sym, _ratio, _net)
             continue
         # حركة صغيرة (< EXTRA_MOVE_MIN) تُقبل فقط إذا Net كبير ($10K+)
         if move_1h < EXTRA_MOVE_MIN and _net < 10_000:
+            log.info("EXTRA skip %s: low move %.2f%% + low net $%.0f", sym, move_1h, _net)
             continue
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
