@@ -233,7 +233,7 @@ MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
 
 # Flow Accumulation Scanner — السعر ثابت + أموال تتراكم (NTRNUSDT type)
 FLOWACC_SCAN_EVERY  = 90      # كل 90 ثانية
-FLOWACC_COOLDOWN    = 5400    # 90 دقيقة
+FLOWACC_COOLDOWN    = 10800   # 3 ساعات
 FLOWACC_MIN_VOL     = 30_000  # حجم منخفض — يقبل micro-caps
 FLOWACC_FLOW_RATIO  = 6.0     # IN/OUT ≥ 6x — تجميع خفي قوي
 FLOWACC_PRICE_MAX   = 3.0     # حركة سعرية ≤ 3% (السعر شبه ثابت)
@@ -242,7 +242,7 @@ FLOWACC_MAX_COINS   = 60      # أقصى عملات
 
 # Volume Breakout Scanner — انفجار حجم × 5 بدون حركة سعرية (قبل الـ pump)
 VOLBR_SCAN_EVERY   = 60       # كل دقيقة
-VOLBR_COOLDOWN     = 5400     # 90 دقيقة
+VOLBR_COOLDOWN     = 10800    # 3 ساعات
 VOLBR_MIN_VOL      = 20_000   # يقبل micro-caps
 VOLBR_SPIKE_MIN    = 5.0      # حجم > 5x المتوسط — انفجار حقيقي
 VOLBR_PRICE_MAX    = 5.0      # السعر لم يتحرك كثيراً بعد
@@ -250,7 +250,7 @@ VOLBR_MAX_COINS    = 60
 
 # Micro Pump Scanner — حركة 1-4% + flow استثنائي 12x+ (مبكر جداً)
 MICROPUMP_SCAN_EVERY = 60     # كل دقيقة
-MICROPUMP_COOLDOWN   = 5400   # 90 دقيقة
+MICROPUMP_COOLDOWN   = 10800  # 3 ساعات
 MICROPUMP_MIN_VOL    = 20_000
 MICROPUMP_MOVE_MIN   = 0.8    # حركة ≥ 0.8% فقط
 MICROPUMP_MOVE_MAX   = 5.0    # ≤ 5% — لم يتحرك كثيراً بعد
@@ -259,10 +259,10 @@ MICROPUMP_MAX_COINS  = 60
 
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
-FAST_SCAN_COOLDOWN = 3600     # ساعة واحدة cooldown
+FAST_SCAN_COOLDOWN = 7200     # ساعتان cooldown
 FAST_MIN_VOL       = 150_000
-FAST_MOVE_30S      = 0.8      # خُفِّض من 1.5% — يلتقط بداية الحركة مبكراً
-FAST_MOVE_24H_MIN  = 2.0      # يجب أن يكون اتجاه 24h إيجابي
+FAST_MOVE_30S      = 2.0      # حركة 30s قوية — إشارات قليلة وناجحة
+FAST_MOVE_24H_MIN  = 5.0      # اتجاه 24h إيجابي قوي
 
 
 WL_ENTRY_MOVE    = 3.0
@@ -5237,6 +5237,11 @@ def scan_volume_breakout():
             _out += vu * (1.0 - br)
 
         flow_ratio = _in / _out if _out > 0 else 1.0
+        _net_flow  = _in - _out
+
+        # يجب flow شرائي قوي — إشارات قليلة وناجحة
+        if flow_ratio < 2.0 or _net_flow < 500:
+            continue
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
         base   = sym.replace("USDT", "")
