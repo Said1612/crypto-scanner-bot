@@ -5193,7 +5193,7 @@ def scan_volume_breakout():
 
         if vol < VOLBR_MIN_VOL:
             continue
-        if change < -3.0 or change > 25.0:
+        if change < 1.0 or change > 25.0:   # يمنع عملات 0% أو سلبية (XMR-type)
             continue
 
         if sym not in _coin_first_seen:
