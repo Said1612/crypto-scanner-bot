@@ -229,7 +229,7 @@ MOVE1H_COOLDOWN    = 7200     # ساعتان بين تنبيهين للعملة
 MOVE1H_MIN_VOL     = 50_000   # حجم 24h أدنى (أقل من 5m لاصطياد micro-caps)
 MOVE1H_MOVE_MIN    = 4.0      # حركة 1h ≥ 4%
 MOVE1H_MOVE_MAX    = 30.0     # حركة 1h ≤ 30% (فوق ذلك = pump مشبوه)
-MOVE1H_FLOW_RATIO  = 3.0      # نسبة IN/OUT — Wolf Flow يستخدم 5x-10x
+MOVE1H_FLOW_RATIO  = 2.0      # نسبة IN/OUT — was 3.0، Wolf Flow يُرسل بـ 1.5x
 MOVE1H_NET_MIN     = 1_000    # حد أدنى Net Flow بالدولار — يمنع إشارات ضعيفة
 MOVE1H_VOL_SPIKE   = 1.5      # حجم آخر شمعة 1h > 1.5× المتوسط
 MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
@@ -272,8 +272,8 @@ MICROPUMP_MAX_COINS  = 60
 FAST_SCAN_EVERY    = 30       # كل 30 ثانية — مثل Wolf Flow
 FAST_SCAN_COOLDOWN = 7200     # ساعتان cooldown
 FAST_MIN_VOL       = 150_000
-FAST_MOVE_30S      = 2.0      # حركة 30s قوية — إشارات قليلة وناجحة
-FAST_MOVE_24H_MIN  = 5.0      # اتجاه 24h إيجابي قوي
+FAST_MOVE_30S      = 1.2      # حركة 30s — was 2.0 (أكثر واقعية)
+FAST_MOVE_24H_MIN  = 3.0      # اتجاه 24h إيجابي — was 5.0
 
 
 WL_ENTRY_MOVE    = 3.0
@@ -10158,21 +10158,21 @@ def get_coin_tier(vol_24h):
 
 TIER_SETTINGS = {
     "big": {
-        "vdelta_min":  0.60,
+        "vdelta_min":  0.52,   # was 0.60 — السوق هابط VDelta منخفضة
         "ats_min":     200,
         "tps_spike":   2.0,
         "vol_min":     10_000_000,
         "label":       "Big Cap 🏦",
     },
     "mid": {
-        "vdelta_min":  0.58,
-        "ats_min":     100,    # ATS 200$+
+        "vdelta_min":  0.50,   # was 0.58 — UNIUSDT 56% كان يُرفض بفرق 2%
+        "ats_min":     100,
         "tps_spike":   2.0,
         "vol_min":     1_000_000,
         "label":       "Mid Cap 📊",
     },
     "small": {
-        "vdelta_min":  0.55,
+        "vdelta_min":  0.46,   # was 0.55
         "ats_min":     50,
         "tps_spike":   2.5,
         "vol_min":     20_000,
