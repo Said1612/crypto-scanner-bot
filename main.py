@@ -120,6 +120,9 @@ EXTRA_COINS = [
     "ENJUSDT", "STEEMUSDT", "DUSDT", "ANKRUSDT",
     "RDNTUSDT", "OGNUSDT", "UTKUSDT", "SOPHUSDT",
     "GASUSDT",
+
+    # Wolf Flow signals 30 Mar 2026
+    "USUALUSDT", "STGUSDT",
 ]
 
 TPS_SPIKE      = 2.0
@@ -261,7 +264,7 @@ EXTRA_SCAN_EVERY   = 60       # كل دقيقة
 EXTRA_COOLDOWN     = 21600    # 6 ساعات بين إشارتين للعملة
 EXTRA_MIN_VOL      = 3_000    # حجم أدنى منخفض جداً للـ micro-caps
 EXTRA_MOVE_MIN     = 3.0      # حركة 1h ≥ 3%
-EXTRA_FLOW_RATIO   = 2.0      # flow شرائي ≥ 2x
+EXTRA_FLOW_RATIO   = 1.5      # flow شرائي ≥ 1.5x (مطابق لـ Wolf Flow minimum)
 EXTRA_NET_MIN      = 200      # حد أدنى Net Flow $200
 MICROPUMP_MAX_COINS  = 60
 
