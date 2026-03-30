@@ -114,6 +114,11 @@ EXTRA_COINS = [
 
     "CFXUSDT", "APTUSDT", "SEIUSDT", "INJUSDT",
     "NEARUSDT", "SOLUSDT", "AVAXUSDT", "ADAUSDT",
+
+    # Wolf Flow top performers — مراقبة مستمرة
+    "STOUSDT", "SENTUSDT", "BIFIUSDT", "NOMUSDT",
+    "ENJUSDT", "STEEMUSDT", "DUSDT", "ANKRUSDT",
+    "RDNTUSDT", "OGNUSDT", "UTKUSDT", "SOPHUSDT",
 ]
 
 TPS_SPIKE      = 2.0
