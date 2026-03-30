@@ -411,12 +411,12 @@ SMART_MONEY_STABLES = [
 ]
 
 
-MEXC_24H    = "https://api.binance.com/api/v3/ticker/24hr"
-MEXC_TICKER = "https://api.binance.com/api/v3/ticker/24hr"
-MEXC_PRICE  = "https://api.binance.com/api/v3/ticker/price"
-MEXC_KLINES = "https://api.binance.com/api/v3/klines"
-MEXC_DEPTH  = "https://api.binance.com/api/v3/depth"
-MEXC_TRADES = "https://api.binance.com/api/v3/trades"
+MEXC_24H    = "https://api.mexc.com/api/v3/ticker/24hr"
+MEXC_TICKER = "https://api.mexc.com/api/v3/ticker/24hr"
+MEXC_PRICE  = "https://api.mexc.com/api/v3/ticker/price"
+MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
+MEXC_DEPTH  = "https://api.mexc.com/api/v3/depth"
+MEXC_TRADES = "https://api.mexc.com/api/v3/trades"
 
 EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
 
@@ -15475,12 +15475,12 @@ def scan_defi_llama():
 #   Funding Rate إيجابي عالي = السوق متفائل أكثر = خطر انعكاس
 # ═══════════════════════════════════════════════════════════════════
 
-BINANCE_FUNDING_URL = "https://fapi.binance.com/fapi/v1/premiumIndex?symbol={}"
+MEXC_FUNDING_URL  = "https://api.mexc.com/api/v1/contract/funding_rate/{}"
 _funding_last     = 0.0
 _funding_every    = 3600   # كل ساعة
 _funding_alerted  = {}     # {sym: ts}
 
-FUNDING_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+FUNDING_SYMBOLS = ["BTC_USDT", "ETH_USDT", "SOL_USDT"]
 
 def scan_funding_rates():
     # type: () -> None
@@ -15494,14 +15494,14 @@ def scan_funding_rates():
 
     for sym in FUNDING_SYMBOLS:
         try:
-            data = safe_get(BINANCE_FUNDING_URL.format(sym))
-            if not data or not data.get("lastFundingRate"):
+            data = safe_get(MEXC_FUNDING_URL.format(sym))
+            if not data or not data.get("data"):
                 continue
 
-            rate = float(data.get("lastFundingRate", 0))
+            rate = float(data["data"].get("fundingRate", 0))
             rate_pct = rate * 100
 
-            base = sym.replace("USDT", "")
+            base = sym.replace("_USDT", "")
 
             # Funding Rate سالب جداً = فرصة شراء
             if rate_pct <= -0.03:
