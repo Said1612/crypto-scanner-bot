@@ -5233,6 +5233,7 @@ def scan_volume_breakout():
             continue
 
         closes  = kd["closes"]
+        opens   = kd["opens"]
         highs   = kd["highs"]
         lows    = kd["lows"]
         vols    = kd["vols"]
@@ -5246,6 +5247,10 @@ def scan_volume_breakout():
         if vol_spike < VOLBR_SPIKE_MIN:
             continue
 
+        # شمعة الحجم الكبير يجب أن تكون خضراء (شراء وليس بيع)
+        if closes[-1] < opens[-1]:
+            continue
+
         # السعر لم يتحرك كثيراً في آخر شمعة
         if closes[-2] <= 0:
             continue
@@ -5253,14 +5258,14 @@ def scan_volume_breakout():
         if candle_move > VOLBR_PRICE_MAX:
             continue
 
-        # Flow من آخر 3 شمعات
+        # Flow حقيقي: شمعة خضراء = شراء، حمراء = بيع (باستخدام open)
         _in = 0.0; _out = 0.0
-        for h, l, c, v in zip(highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
-            rng = h - l
-            br  = (c - l) / rng if rng > 0 else 0.5
-            vu  = v * c
-            _in  += vu * br
-            _out += vu * (1.0 - br)
+        for o, h, l, c, v in zip(opens[-5:], highs[-5:], lows[-5:], closes[-5:], vols[-5:]):
+            vu = v * c
+            if c >= o:          # شمعة خضراء → شراء
+                _in  += vu
+            else:               # شمعة حمراء → بيع
+                _out += vu
 
         flow_ratio = _in / _out if _out > 0 else 1.0
         _net_flow  = _in - _out
