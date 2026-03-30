@@ -124,6 +124,7 @@ EXTRA_COINS = [
     # Wolf Flow signals 30 Mar 2026
     "USUALUSDT", "STGUSDT",
     "BARDUSDT", "ONGUSDT", "PYRUSDT",
+    "AMPUSDT",
 ]
 
 TPS_SPIKE      = 2.0
