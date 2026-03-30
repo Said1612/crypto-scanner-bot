@@ -4860,8 +4860,8 @@ def scan_1h_move():
 
         if vol < (5_000 if sym in EXTRA_COINS else MOVE1H_MIN_VOL):
             continue
-        # فلتر أساسي: 24h اتجاه إيجابي
-        if change < 1.0 or change > 60.0:
+        # فلتر أساسي: لا خسارة حادة في 24h (يسمح بالسلبي البسيط في السوق الهابط)
+        if change < -8.0 or change > 60.0:
             continue
 
         # فلتر العمر
@@ -5479,7 +5479,7 @@ def scan_extra_coins():
 
         if vol < EXTRA_MIN_VOL:
             continue
-        if change < 1.0 or change > 80.0:
+        if change < -8.0 or change > 80.0:
             continue
         if now - _extra_alerted.get(sym, 0) < EXTRA_COOLDOWN:
             continue
@@ -7901,10 +7901,10 @@ def get_adaptive_thresholds(coin_vol=0, coin_ats=0):
 
     if market_state == "SAFE":
         return {
-            "score_big":    55,
-            "score_mid":    42,
-            "score_small":  30,
-            "vdelta_min":   0.60,
+            "score_big":    45,   # was 55
+            "score_mid":    35,   # was 42
+            "score_small":  25,   # was 30
+            "vdelta_min":   0.52, # was 0.60 — يتوافق مع TIER_SETTINGS
             "tps_min":      0.20,
             "ats_boost":    1.0,
             "rr_min":       1.5,
@@ -7941,11 +7941,11 @@ def get_adaptive_thresholds(coin_vol=0, coin_ats=0):
         _label_sfx = (" 🐋BTC" if _whale_btc else "") + (" 🐋Coin" if _whale_coin else "")
 
         return {
-            "score_big":    75,
-            "score_mid":    65,
-            "score_small":  55,
-            "vdelta_min":   0.72,
-            "tps_min":      0.50,   # TPS موثوق فقط
+            "score_big":    60,   # was 75 — لا يزال صارماً لكن ليس مستحيلاً
+            "score_mid":    50,   # was 65
+            "score_small":  40,   # was 55
+            "vdelta_min":   0.60, # was 0.72 — لا حيتان بـ VDelta 72% في السوق الهابط
+            "tps_min":      0.30, # was 0.50
             "ats_boost":    1.50,
             "rr_min":       2.0,
             "sigs_min":     3,
@@ -11068,8 +11068,8 @@ def scan_tps_ats(price_map, vol_now, changes_map):
                 or (_vdelta >= _tier["vdelta_min"] and _ats >= _tier["ats_min"] * 2)
             )
 
-        # Use tier-based VDelta threshold
-        if _vdelta < max(_mth["vdelta_min"] - 0.02, 0.53):
+        # Use tier-based VDelta threshold (not adaptive — avoids double-filtering)
+        if _vdelta < _tier["vdelta_min"]:
             continue
 
         # Tier-based score threshold: small-cap=30, mid=42, big=55
