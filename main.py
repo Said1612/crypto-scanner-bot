@@ -1070,6 +1070,7 @@ last_wl_check    = 0.0
 ts_positions     = {}  # type: Dict[str, Dict]  {sym: {entry, peak, stop, locked}}
 ts_sell_alerted  = {}  # type: Dict[str, float] {sym: last_sell_time}
 last_ts_scan     = 0.0
+last_milestone_check = 0.0
 daily_signals    = {"date": "", "count": 0}
 last_rt_scan         = 0.0
 last_bottom_scan     = 0.0
@@ -3853,6 +3854,27 @@ def get_backtest_stats():
 perf_signals = {}   # type: Dict[str, Dict]
 perf_id_counter = 0 # type: int
 
+MILESTONES = [
+    (2,  "✅",  "WIN confirmed +2% reached"),
+    (5,  "🔥",  "+5% milestone reached"),
+    (10, "💥",  "+10% milestone reached"),
+    (15, "🚀",  "+15% milestone reached"),
+    (20, "🏆",  "+20% milestone reached"),
+    (30, "🏆🏆", "+30% milestone reached"),
+    (50, "🌙",  "+50% milestone reached"),
+]
+
+def _fmt_elapsed(seconds):
+    # type: (float) -> str
+    if seconds < 60:
+        return "{}s".format(int(seconds))
+    elif seconds < 3600:
+        m, s = int(seconds // 60), int(seconds % 60)
+        return "{}m {}s".format(m, s) if s else "{}m".format(m)
+    else:
+        h, m = int(seconds // 3600), int((seconds % 3600) // 60)
+        return "{}h {}m".format(h, m) if m else "{}h".format(h)
+
 
 PERF_SYSTEMS = {
     "quick":    "⚡ Quick Signals",
@@ -3893,6 +3915,9 @@ def perf_register(sym, price, system, score=0, signals_desc=""):
         "checked_1h":   False,
         "checked_4h":   False,
         "checked_24h":  False,
+
+        "milestones_hit": [],
+        "max_gain":       0.0,
     }
     log.info(" Perf registered | %s | %s | score=%d", system, sym, score)
     return sid
@@ -3929,6 +3954,34 @@ def perf_check(price_map=None):
 
         if elapsed >= 172800:
             del perf_signals[sid]
+            continue
+
+        # تتبع أعلى ربح
+        if gain > data.get("max_gain", 0.0):
+            data["max_gain"] = gain
+
+        # إرسال إشعارات المراحل
+        for pct, emoji, label in MILESTONES:
+            if pct not in data["milestones_hit"] and gain >= pct:
+                data["milestones_hit"].append(pct)
+                elapsed_str = _fmt_elapsed(elapsed)
+                coin = sym.replace("USDT", "")
+                msg = (
+                    "{} *{}* {}\n"
+                    "Max gain: `{:+.2f}%`\n"
+                    "Price now: `{}`\n"
+                    "Entry:     `{}`\n"
+                    "Achieved in: `{}`"
+                ).format(
+                    emoji, coin, label,
+                    gain,
+                    fmt_price(price),
+                    fmt_price(entry),
+                    elapsed_str
+                )
+                send(msg)
+                log.info(" MILESTONE +%d%% | %s | gain=%.2f%% | elapsed=%s",
+                         pct, sym, gain, elapsed_str)
 
 
 def perf_daily_report():
@@ -15852,6 +15905,11 @@ def run():
 
 
             if now - last_ts_scan >= TS_SCAN_EVERY:
+                perf_check(price_map)
+
+            global last_milestone_check
+            if now - last_milestone_check >= 30:
+                last_milestone_check = now
                 perf_check(price_map)
 
 
