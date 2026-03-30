@@ -227,11 +227,11 @@ BB_STD_MULT            = 2.0    # معامل الانحراف المعياري
 MOVE1H_SCAN_EVERY  = 60       # كل دقيقة
 MOVE1H_COOLDOWN    = 7200     # ساعتان بين تنبيهين للعملة
 MOVE1H_MIN_VOL     = 50_000   # حجم 24h أدنى (أقل من 5m لاصطياد micro-caps)
-MOVE1H_MOVE_MIN    = 4.0      # حركة 1h ≥ 4%
+MOVE1H_MOVE_MIN    = 2.5      # حركة 1h ≥ 2.5% (was 4.0)
 MOVE1H_MOVE_MAX    = 30.0     # حركة 1h ≤ 30% (فوق ذلك = pump مشبوه)
-MOVE1H_FLOW_RATIO  = 2.0      # نسبة IN/OUT — was 3.0، Wolf Flow يُرسل بـ 1.5x
+MOVE1H_FLOW_RATIO  = 1.5      # نسبة IN/OUT — was 2.0، Wolf Flow يُرسل بـ 1.5x
 MOVE1H_NET_MIN     = 1_000    # حد أدنى Net Flow بالدولار — يمنع إشارات ضعيفة
-MOVE1H_VOL_SPIKE   = 1.5      # حجم آخر شمعة 1h > 1.5× المتوسط
+MOVE1H_VOL_SPIKE   = 1.2      # حجم آخر شمعة 1h > 1.2× المتوسط (was 1.5)
 MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
 
 # Flow Accumulation Scanner — السعر ثابت + أموال تتراكم (NTRNUSDT type)
@@ -263,7 +263,7 @@ MICROPUMP_FLOW_RATIO = 12.0   # flow استثنائي 12x+
 EXTRA_SCAN_EVERY   = 60       # كل دقيقة
 EXTRA_COOLDOWN     = 21600    # 6 ساعات بين إشارتين للعملة
 EXTRA_MIN_VOL      = 3_000    # حجم أدنى منخفض جداً للـ micro-caps
-EXTRA_MOVE_MIN     = 3.0      # حركة 1h ≥ 3%
+EXTRA_MOVE_MIN     = 2.0      # حركة 1h ≥ 2% (was 3.0)
 EXTRA_FLOW_RATIO   = 1.5      # flow شرائي ≥ 1.5x (مطابق لـ Wolf Flow minimum)
 EXTRA_NET_MIN      = 200      # حد أدنى Net Flow $200
 MICROPUMP_MAX_COINS  = 60
@@ -4484,7 +4484,7 @@ def scan_instant_movers(price_map=None, vol_now=None, changes_map=None):
         except: continue
 
         if vol   < 500_000: continue
-        if change < 8.0:    continue
+        if change < 5.0:    continue  # was 8.0
         if change > 60.0:   continue
 
         # فلتر العملات الجديدة
@@ -10158,21 +10158,21 @@ def get_coin_tier(vol_24h):
 
 TIER_SETTINGS = {
     "big": {
-        "vdelta_min":  0.52,   # was 0.60 — السوق هابط VDelta منخفضة
+        "vdelta_min":  0.45,   # was 0.52 — السوق هابط VDelta 20-50%
         "ats_min":     200,
         "tps_spike":   2.0,
         "vol_min":     10_000_000,
         "label":       "Big Cap 🏦",
     },
     "mid": {
-        "vdelta_min":  0.50,   # was 0.58 — UNIUSDT 56% كان يُرفض بفرق 2%
+        "vdelta_min":  0.44,   # was 0.50 — معظم Mid Cap بين 24-49%
         "ats_min":     100,
         "tps_spike":   2.0,
         "vol_min":     1_000_000,
         "label":       "Mid Cap 📊",
     },
     "small": {
-        "vdelta_min":  0.46,   # was 0.55
+        "vdelta_min":  0.40,   # was 0.46
         "ats_min":     50,
         "tps_spike":   2.5,
         "vol_min":     20_000,
