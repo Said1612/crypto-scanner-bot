@@ -255,6 +255,14 @@ MICROPUMP_MIN_VOL    = 20_000
 MICROPUMP_MOVE_MIN   = 0.8    # حركة ≥ 0.8% فقط
 MICROPUMP_MOVE_MAX   = 5.0    # ≤ 5% — لم يتحرك كثيراً بعد
 MICROPUMP_FLOW_RATIO = 12.0   # flow استثنائي 12x+
+
+# Extra Coins Scanner — مراقبة مكثفة لعملات Wolf Flow
+EXTRA_SCAN_EVERY   = 60       # كل دقيقة
+EXTRA_COOLDOWN     = 21600    # 6 ساعات بين إشارتين للعملة
+EXTRA_MIN_VOL      = 3_000    # حجم أدنى منخفض جداً للـ micro-caps
+EXTRA_MOVE_MIN     = 3.0      # حركة 1h ≥ 3%
+EXTRA_FLOW_RATIO   = 2.0      # flow شرائي ≥ 2x
+EXTRA_NET_MIN      = 200      # حد أدنى Net Flow $200
 MICROPUMP_MAX_COINS  = 60
 
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
@@ -1099,6 +1107,8 @@ MULTI_CONFIRM_WINDOW = 1800  # 30 دقيقة — نافذة التأكيد ال�
 
 
 backtest_signals     = {}  # type: Dict[str, Dict]  {sym: {entry_price, entry_time, sector, checked_1h, checked_4h, checked_24h}}
+last_extra_scan      = 0.0
+_extra_alerted       = {}   # type: Dict[str, float]
 
 api_calls_total    = 0
 api_calls_minute   = 0
@@ -4646,7 +4656,7 @@ def scan_fast_breakout():
         # حفظ السعر الحالي للمقارنة في الجولة القادمة
         new_snap[sym] = price
 
-        if vol < FAST_MIN_VOL:
+        if vol < (10_000 if sym in EXTRA_COINS else FAST_MIN_VOL):
             continue
         if change < FAST_MOVE_24H_MIN or change > 40.0:
             continue
@@ -4845,7 +4855,7 @@ def scan_1h_move():
         except (KeyError, ValueError):
             continue
 
-        if vol < MOVE1H_MIN_VOL:
+        if vol < (5_000 if sym in EXTRA_COINS else MOVE1H_MIN_VOL):
             continue
         # فلتر أساسي: 24h اتجاه إيجابي
         if change < 1.0 or change > 60.0:
@@ -5426,6 +5436,119 @@ def scan_micro_pump():
                                    vol_24h, price, sector)
         log.info("MICRO PUMP | %s | move_5m=+%.2f%% | ratio=%.1fx",
                  sym, move_5m, ratio)
+
+
+def scan_extra_coins():
+    # type: () -> None
+    """
+    ماسح مخصص لـ EXTRA_COINS (عملات Wolf Flow) بحدود منخفضة جداً.
+    يصطاد micro-caps قبل الحركة حتى لو حجمها صغير.
+    """
+    global last_extra_scan, _extra_alerted
+    now = time.time()
+    if now - last_extra_scan < EXTRA_SCAN_EVERY:
+        return
+    last_extra_scan = now
+
+    if not all_tickers:
+        return
+
+    ticker_map = {t.get("symbol", ""): t for t in all_tickers}
+
+    def _fmt(v):
+        if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
+        if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
+        return "{:.0f}$".format(v)
+
+    for sym in EXTRA_COINS:
+        if not sym.endswith("USDT"):
+            continue
+        t = ticker_map.get(sym)
+        if not t:
+            continue
+
+        try:
+            price  = float(t["lastPrice"])
+            vol    = float(t["quoteVolume"])
+            change = float(t["priceChangePercent"])
+        except (KeyError, ValueError):
+            continue
+
+        if vol < EXTRA_MIN_VOL:
+            continue
+        if change < 1.0 or change > 80.0:
+            continue
+        if now - _extra_alerted.get(sym, 0) < EXTRA_COOLDOWN:
+            continue
+
+        # فلتر الدخول المتأخر
+        try:
+            _h24 = float(t.get("highPrice", price))
+            _l24 = float(t.get("lowPrice",  price))
+            if _is_late_entry(price, _h24, _l24):
+                continue
+        except (ValueError, TypeError):
+            pass
+
+        # klines 1h
+        kd = get_klines(sym, "1h", 6)
+        if not kd or len(kd.get("closes", [])) < 3:
+            continue
+
+        closes = kd["closes"]
+        highs  = kd["highs"]
+        lows   = kd["lows"]
+        vols   = kd["vols"]
+
+        if closes[-2] <= 0:
+            continue
+        move_1h = (closes[-1] - closes[-2]) / closes[-2] * 100
+        if move_1h < EXTRA_MOVE_MIN or move_1h > 60.0:
+            continue
+
+        # حساب Flow
+        _in = 0.0; _out = 0.0
+        for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
+            rng = h - l
+            br  = (c - l) / rng if rng > 0 else 0.5
+            vu  = v * c
+            _in  += vu * br
+            _out += vu * (1.0 - br)
+
+        if _out <= 0:
+            continue
+        _ratio = _in / _out
+        _net   = _in - _out
+
+        if _ratio < EXTRA_FLOW_RATIO or _net < EXTRA_NET_MIN:
+            continue
+
+        sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
+        base   = sym.replace("USDT", "")
+        _is_hot = sym in hot_symbols
+        _hot_badge = " 🔥*قطاع ساخن*" if _is_hot else ""
+        _confirm_count, _badge = _register_confirm(sym, "extra")
+
+        msg = (
+            "🎯 *EXTRA WATCH* 🎯 " + _badge + _hot_badge + "\n"
+            + "━" * 18 + "\n"
+            + "📍 *#" + base + "USDT*\n"
+            + "  💰 السعر: `" + str(round(price, 8)).rstrip("0").rstrip(".") + "`\n"
+            + "  📈 حركة 1h: `+" + str(round(move_1h, 2)) + "%`\n"
+            + "  🏷️ قطاع: `" + sector + "`\n"
+            + "━" * 18 + "\n"
+            + "  ▲ In:  `$" + _fmt(_in) + "`\n"
+            + "  ▼ Out: `$" + _fmt(_out) + "`\n"
+            + "  💚 Net: `+$" + _fmt(_net) + "`\n"
+            + "━" * 18 + "\n"
+            + "✅ *ادخل الآن* — Wolf Flow coins 🐺🎯"
+        )
+
+        send(msg)
+        _extra_alerted[sym] = now
+        perf_register(sym, price, "extra_coins", 60, "move={:.1f}% flow={:.1f}x".format(move_1h, _ratio))
+        log.info("EXTRA_COINS | %s | 1h=+%.2f%% | ratio=%.1fx | net=$%.0f",
+                 sym, move_1h, _ratio, _net)
 
 
 def scan_bb_squeeze():
@@ -15812,6 +15935,8 @@ def run():
             scan_volume_breakout()
             # Micro Pump — حركة صغيرة + flow استثنائي 12x+
             scan_micro_pump()
+            # Extra Coins — مراقبة مكثفة لعملات Wolf Flow بحدود منخفضة
+            scan_extra_coins()
             # BB Squeeze — كل 5 دقائق (Bollinger Band compression breakout)
             scan_bb_squeeze()
             poll_commands()
