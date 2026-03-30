@@ -4946,12 +4946,16 @@ def scan_1h_move():
         if vol_spike_1h < MOVE1H_VOL_SPIKE:
             continue
 
-        # Flow 1h من آخر شمعتين
+        # Flow 1h من آخر 3 شمعات (open-based direction)
         _in_1h = 0.0; _out_1h = 0.0
-        for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
-            rng = h - l
-            br  = (c - l) / rng if rng > 0 else 0.5
+        for o, h, l, c, v in zip(opens[-3:], highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
             vu  = v * c
+            rng = h - l
+            if rng > 0:
+                pos = (c - l) / rng
+                br  = (pos + 1.0) / 2.0 if c >= o else pos / 2.0
+            else:
+                br  = 0.5
             _in_1h  += vu * br
             _out_1h += vu * (1.0 - br)
 
@@ -5097,6 +5101,7 @@ def scan_flow_accumulation():
             continue
 
         closes  = kd["closes"]
+        opens   = kd["opens"]
         highs   = kd["highs"]
         lows    = kd["lows"]
         vols    = kd["vols"]
@@ -5117,12 +5122,16 @@ def scan_flow_accumulation():
         if vol_spike < FLOWACC_VOL_SPIKE:
             continue
 
-        # Flow من آخر شمعتين
+        # Flow من آخر 3 شمعات (open-based direction)
         _in = 0.0; _out = 0.0
-        for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
-            rng = h - l
-            br  = (c - l) / rng if rng > 0 else 0.5
+        for o, h, l, c, v in zip(opens[-3:], highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
             vu  = v * c
+            rng = h - l
+            if rng > 0:
+                pos = (c - l) / rng
+                br  = (pos + 1.0) / 2.0 if c >= o else pos / 2.0
+            else:
+                br  = 0.5
             _in  += vu * br
             _out += vu * (1.0 - br)
 
@@ -5410,6 +5419,7 @@ def scan_micro_pump():
             continue
 
         closes  = kd["closes"]
+        opens   = kd["opens"]
         highs   = kd["highs"]
         lows    = kd["lows"]
         vols    = kd["vols"]
@@ -5421,12 +5431,16 @@ def scan_micro_pump():
         if move_5m < MICROPUMP_MOVE_MIN or move_5m > MICROPUMP_MOVE_MAX:
             continue
 
-        # Flow من آخر 3 شمعات 5m — يجب أن يكون استثنائياً
+        # Flow من آخر 3 شمعات 5m — يجب أن يكون استثنائياً (open-based)
         _in = 0.0; _out = 0.0
-        for h, l, c, v in zip(highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
-            rng = h - l
-            br  = (c - l) / rng if rng > 0 else 0.5
+        for o, h, l, c, v in zip(opens[-3:], highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
             vu  = v * c
+            rng = h - l
+            if rng > 0:
+                pos = (c - l) / rng
+                br  = (pos + 1.0) / 2.0 if c >= o else pos / 2.0
+            else:
+                br  = 0.5
             _in  += vu * br
             _out += vu * (1.0 - br)
 
@@ -5533,6 +5547,7 @@ def scan_extra_coins():
             continue
 
         closes = kd["closes"]
+        opens  = kd["opens"]
         highs  = kd["highs"]
         lows   = kd["lows"]
         vols   = kd["vols"]
@@ -5547,12 +5562,16 @@ def scan_extra_coins():
         if move_1h < _move_floor:
             continue
 
-        # حساب Flow
+        # حساب Flow (open-based direction, آخر 3 شمعات)
         _in = 0.0; _out = 0.0
-        for h, l, c, v in zip(highs[-2:], lows[-2:], closes[-2:], vols[-2:]):
-            rng = h - l
-            br  = (c - l) / rng if rng > 0 else 0.5
+        for o, h, l, c, v in zip(opens[-3:], highs[-3:], lows[-3:], closes[-3:], vols[-3:]):
             vu  = v * c
+            rng = h - l
+            if rng > 0:
+                pos = (c - l) / rng
+                br  = (pos + 1.0) / 2.0 if c >= o else pos / 2.0
+            else:
+                br  = 0.5
             _in  += vu * br
             _out += vu * (1.0 - br)
 
@@ -5901,12 +5920,16 @@ def scan_bounce_reversal():
         if e5 < recent_low * 0.99:
             continue
 
-        # حساب قوة الارتداد
+        # حساب قوة الارتداد (open-based direction)
         _in_5m = 0.0; _out_5m = 0.0
-        for h, l, c, v in zip(highs[-3:], lows[-3:], closes[-3:], volumes[-3:]):
-            rng = h - l
-            br  = (c - l) / rng if rng > 0 else 0.5
+        for o, h, l, c, v in zip(opens[-3:], highs[-3:], lows[-3:], closes[-3:], volumes[-3:]):
             vu  = v * c
+            rng = h - l
+            if rng > 0:
+                pos = (c - l) / rng
+                br  = (pos + 1.0) / 2.0 if c >= o else pos / 2.0
+            else:
+                br  = 0.5
             _in_5m  += vu * br
             _out_5m += vu * (1.0 - br)
 
@@ -6044,6 +6067,7 @@ def scan_5m_breakout(price_map=None, vol_now=None):
             continue
 
         closes  = kd["closes"]
+        opens   = kd["opens"]
         volumes = kd["vols"]
         highs   = kd["highs"]
         lows    = kd["lows"]
@@ -6073,12 +6097,16 @@ def scan_5m_breakout(price_map=None, vol_now=None):
         if closes[-1] < resistance * 1.001:
             continue
 
-        # حساب تدفق الأموال (5m) — IN/OUT بالدولار
+        # حساب تدفق الأموال (5m) — IN/OUT بالدولار (open-based direction)
         _in_5m = 0.0; _out_5m = 0.0
-        for h, l, c, v in zip(highs[-5:], lows[-5:], closes[-5:], volumes[-5:]):
-            rng = h - l
-            br  = (c - l) / rng if rng > 0 else 0.5
+        for o, h, l, c, v in zip(opens[-5:], highs[-5:], lows[-5:], closes[-5:], volumes[-5:]):
             vu  = v * c
+            rng = h - l
+            if rng > 0:
+                pos = (c - l) / rng
+                br  = (pos + 1.0) / 2.0 if c >= o else pos / 2.0
+            else:
+                br  = 0.5
             _in_5m  += vu * br
             _out_5m += vu * (1.0 - br)
         _net_5m   = _in_5m - _out_5m
