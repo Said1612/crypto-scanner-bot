@@ -4890,9 +4890,11 @@ def scan_1h_move():
     if not pool:
         return
 
-    # أفضل 50 بالحجم
-    pool.sort(key=lambda x: -x[1])
-    pool = pool[:MOVE1H_MAX_COINS]
+    # أفضل 80 بالحجم — EXTRA_COINS ذات الحجم المنخفض تُضاف دائماً
+    _extra_in_pool = [(s, v, c, p, t) for s, v, c, p, t in pool if s in EXTRA_COINS]
+    _main_pool     = [(s, v, c, p, t) for s, v, c, p, t in pool if s not in EXTRA_COINS]
+    _main_pool.sort(key=lambda x: -x[1])
+    pool = _main_pool[:MOVE1H_MAX_COINS] + _extra_in_pool
 
     def _fmt(v):
         if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
