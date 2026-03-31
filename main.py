@@ -4962,16 +4962,26 @@ def scan_1h_move():
         if _out_1h <= 0:
             continue
         _ratio_1h = _in_1h / _out_1h
-        # القطاع الساخن → حدود أدنى أسهل بـ 30%
+        _net_1h   = _in_1h - _out_1h
+
+        # نظام متدرج — زخم قوي يحتاج ratio أقل، زخم ضعيف يحتاج ratio أعلى
+        # درس من NOM: 1h Move +8.31% + ratio 2.46x = فاز +5% في 45s
+        # ANKRUSDT فشل لأن حركته كانت ضعيفة رغم دخوله
         _is_hot_sector = sym in hot_symbols
-        _req_ratio = MOVE1H_FLOW_RATIO * (0.7 if _is_hot_sector else 1.0)
-        _req_net   = MOVE1H_NET_MIN   * (0.5 if _is_hot_sector else 1.0)
-        if _ratio_1h < _req_ratio:
+        _hot_mult      = 0.7 if _is_hot_sector else 1.0
+        if move_1h >= 7.0:                        # زخم قوي جداً — ratio أقل مقبول
+            _req_ratio = 2.0  * _hot_mult
+            _req_net   = 500  * _hot_mult
+        elif move_1h >= 5.0:                      # زخم متوسط — المعيار الطبيعي
+            _req_ratio = MOVE1H_FLOW_RATIO * _hot_mult
+            _req_net   = MOVE1H_NET_MIN    * _hot_mult
+        else:                                     # زخم بطيء (4-5%) — يحتاج flow أقوى
+            _req_ratio = MOVE1H_FLOW_RATIO * 1.5 * _hot_mult
+            _req_net   = MOVE1H_NET_MIN    * 2.0 * _hot_mult
+
+        if _ratio_1h < _req_ratio or _net_1h < _req_net:
             continue
         if _in_1h <= _out_1h:
-            continue
-        _net_1h = _in_1h - _out_1h
-        if _net_1h < _req_net:
             continue
 
         sector = next((s for s, c in SECTORS.items() if sym in c), "غير محدد")
