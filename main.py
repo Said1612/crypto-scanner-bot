@@ -8446,6 +8446,16 @@ def scan_whale_confirmation(price_map):
             log.debug("JOKER skip %s: ATS dropped %.1fx (%.0f$→%.0f$)", sym, ats_mult, ats_then, ats)
             continue
 
+        # السعر نزل منذ الدخول = الفرصة انتهت (إلا إذا كان ارتداداً من قاع)
+        if price_chg < -1.5 and not _oversold_bounce:
+            log.debug("JOKER skip %s: price dropped %.1f%% since entry", sym, price_chg)
+            continue
+
+        # 24h اتجاه سلبي مع ضعف VDelta = لا فرصة حقيقية
+        if _coin_chg_j < -3.0 and vdelta < 0.75 and not _oversold_bounce:
+            log.debug("JOKER skip %s: 24h negative %.1f%% + VD %.0f%%", sym, _coin_chg_j, vdelta*100)
+            continue
+
         sector = next((s for s, syms in SECTORS.items() if sym in syms), "غير محدد")
 
 
@@ -8460,12 +8470,15 @@ def scan_whale_confirmation(price_map):
 
 
         if elapsed_min >= 2:
+            _ats_sign  = "+" if ats_mult >= 1.0 else "-"
+            _ats_disp  = ats_mult if ats_mult >= 1.0 else (1.0 / ats_mult if ats_mult > 0 else 0)
+            _ats_emoji = "🔥" if ats_mult >= 2.0 else "⚡" if ats_mult >= 1.0 else "⬇️"
             evolution_line = (
                 "📊 *التطور:*\n"
                 "  🦐 قبل `{min}` دقيقة: ATS `{ats_b:.0f}$`\n".format(
                     min=elapsed_min, ats_b=ats_then) +
-                "  {wt} الآن: ATS `{ats:.0f}$` (+{mult:.1f}×) 🔥\n".format(
-                    wt=whale_type, ats=ats, mult=ats_mult) +
+                "  {wt} الآن: ATS `{ats:.0f}$` ({sign}{mult:.1f}×) {em}\n".format(
+                    wt=whale_type, ats=ats, sign=_ats_sign, mult=_ats_disp, em=_ats_emoji) +
                 "━━━━━━━━━━━━━━━━━━\n"
             )
         else:
@@ -8499,22 +8512,33 @@ def scan_whale_confirmation(price_map):
 
         # تدفق الأموال الحقيقية — Wolf Flow style
         _jflow = calc_money_flow_1h(sym)
+        _flow_unavailable = (_jflow["in"] == 0.0 and _jflow["out"] == 0.0)
+
+        # إذا فشلت API لأكثر من 10 دقائق → لا إشارة (بيانات غير موثوقة)
+        if _flow_unavailable and elapsed_min >= 10:
+            log.debug("JOKER skip %s: no flow data after %d min", sym, elapsed_min)
+            continue
+
         def _jfmt(v):
             if v >= 1_000_000: return "{:.1f}M$".format(v / 1e6)
             if v >= 1_000:     return "{:.1f}K$".format(v / 1e3)
             return "{:.0f}$".format(v)
-        _jflow_quality = ("💹 استثنائي" if _jflow["ratio"] >= 10 else
-                          "🔥 قوي"       if _jflow["ratio"] >= 3  else
-                          "📈 إيجابي"    if _jflow["net"] > 0    else
-                          "⚠️ ضعيف")
-        _jflow_line = (
-            "💹 *Flow 1h:* IN `{i}` / OUT `{o}` / Net `{n}` — {q}\n".format(
-                i=_jfmt(_jflow["in"]),
-                o=_jfmt(_jflow["out"]),
-                n=_jfmt(abs(_jflow["net"])) + ("↑" if _jflow["net"] >= 0 else "↓"),
-                q=_jflow_quality,
+
+        if _flow_unavailable:
+            _jflow_line = "💹 *Flow 1h:* `جارٍ التحميل...`\n"
+        else:
+            _jflow_quality = ("💹 استثنائي" if _jflow["ratio"] >= 10 else
+                              "🔥 قوي"       if _jflow["ratio"] >= 3  else
+                              "📈 إيجابي"    if _jflow["net"] > 0    else
+                              "⚠️ ضعيف")
+            _jflow_line = (
+                "💹 *Flow 1h:* IN `{i}` / OUT `{o}` / Net `{n}` — {q}\n".format(
+                    i=_jfmt(_jflow["in"]),
+                    o=_jfmt(_jflow["out"]),
+                    n=_jfmt(abs(_jflow["net"])) + ("↑" if _jflow["net"] >= 0 else "↓"),
+                    q=_jflow_quality,
+                )
             )
-        )
 
         msg = (
             header +
