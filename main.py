@@ -109,7 +109,7 @@ EXTRA_COINS = [
     "XLMUSDT", "XRPUSDT", "PYTHUSDT", "REQUSDT",
 
 
-    "LINKUSDT", "BANDUSDT", "SUPRAUSDT", "API3USDT",
+    "LINKUSDT", "BANDUSDT", "SUPRAUSDT",  # API3USDT حُذف — max +0.66% فشل
 
 
     "CFXUSDT", "APTUSDT", "SEIUSDT", "INJUSDT",
@@ -117,7 +117,7 @@ EXTRA_COINS = [
 
     # Wolf Flow top performers — مراقبة مستمرة
     "STOUSDT", "SENTUSDT", "BIFIUSDT", "NOMUSDT",
-    "ENJUSDT", "STEEMUSDT", "DUSDT", "ANKRUSDT",
+    "ENJUSDT", "STEEMUSDT", "DUSDT",  # ANKRUSDT حُذف — max +1.56% فشل
     "RDNTUSDT", "OGNUSDT", "UTKUSDT", "SOPHUSDT",
     "GASUSDT",
 
@@ -229,11 +229,11 @@ BB_STD_MULT            = 2.0    # معامل الانحراف المعياري
 MOVE1H_SCAN_EVERY  = 60       # كل دقيقة
 MOVE1H_COOLDOWN    = 7200     # ساعتان بين تنبيهين للعملة
 MOVE1H_MIN_VOL     = 50_000   # حجم 24h أدنى (أقل من 5m لاصطياد micro-caps)
-MOVE1H_MOVE_MIN    = 1.5      # حركة 1h ≥ 1.5% — BARDUSDT كان 1.59%
+MOVE1H_MOVE_MIN    = 3.0      # حركة 1h ≥ 3% — NOM كان 8.31%، BARDUSDT 2.96% (يُستثنى من EXTRA)
 MOVE1H_MOVE_MAX    = 30.0     # حركة 1h ≤ 30%
-MOVE1H_FLOW_RATIO  = 1.5      # نسبة IN/OUT
-MOVE1H_NET_MIN     = 500      # حد أدنى Net Flow — was $1000
-MOVE1H_VOL_SPIKE   = 1.0      # حجم آخر شمعة 1h ≥ متوسط (was 1.2) — Wolf Flow لا يشترطه
+MOVE1H_FLOW_RATIO  = 3.0      # نسبة IN/OUT — درس: ANKRUSDT/API3USDT كانا 1.5x فشلا
+MOVE1H_NET_MIN     = 1_000    # حد أدنى Net Flow $1000
+MOVE1H_VOL_SPIKE   = 1.2      # حجم آخر شمعة 1h > 1.2x المتوسط
 MOVE1H_MAX_COINS   = 50       # أقصى عملات تُفحص بـ klines
 
 # Flow Accumulation Scanner — السعر ثابت + أموال تتراكم (NTRNUSDT type)
@@ -265,9 +265,9 @@ MICROPUMP_FLOW_RATIO = 12.0   # flow استثنائي 12x+
 EXTRA_SCAN_EVERY   = 60       # كل دقيقة
 EXTRA_COOLDOWN     = 21600    # 6 ساعات بين إشارتين للعملة
 EXTRA_MIN_VOL      = 3_000    # حجم أدنى منخفض جداً للـ micro-caps
-EXTRA_MOVE_MIN     = 2.0      # حركة 1h ≥ 2% (was 3.0)
-EXTRA_FLOW_RATIO   = 1.5      # flow شرائي ≥ 1.5x (مطابق لـ Wolf Flow minimum)
-EXTRA_NET_MIN      = 200      # حد أدنى Net Flow $200
+EXTRA_MOVE_MIN     = 3.0      # حركة 1h ≥ 3% — درس: 2% أعطى إشارات ضعيفة
+EXTRA_FLOW_RATIO   = 3.0      # flow شرائي ≥ 3x — درس: 1.5x فشل مع ANKRUSDT/API3USDT
+EXTRA_NET_MIN      = 500      # حد أدنى Net Flow $500 (was $200)
 MICROPUMP_MAX_COINS  = 60
 
 # Fast scanner — Tier 0 (30 ثانية، بدون klines)
@@ -8043,8 +8043,8 @@ def get_adaptive_thresholds(coin_vol=0, coin_ats=0):
 
 WHALE_WATCH_TTL    = 14400
 WHALE_CHECK_EVERY  = 60
-WHALE_ATS_MIN      = 100
-WHALE_VDELTA_MIN   = 0.58    # VDelta 65%+
+WHALE_ATS_MIN      = 150      # حد أدنى ATS للحوت (was 100)
+WHALE_VDELTA_MIN   = 0.65    # VDelta ≥ 65% — 0.58 أعطى إشارات ضعيفة
 
 
 whale_watchlist    = {}   # type: Dict[str, Dict]
