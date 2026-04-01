@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 15.0 (SNIPER EDITION)
-السر: اقتناص الانفجار السيولاتي (Liquidity Sniping)
-الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + تقاطع EMA
-المطور: MAFIO AI - نظام القناص
+MAFIO BOT - VERSION 15.1 (ANTI-LATE SNIPER)
+التحديث: منع الدخول المتأخر + فلتر العملات المستقرة + شرط زخم الحجم
+الهدف: اقتناص بداية الانفجار فقط وتجنب القمم
 """
 
 import os
@@ -21,13 +20,16 @@ ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
 # معايير "التجميع الساكن" (Static Accumulation)
 MIN_VOLUME_24H = 500000     
-MIN_24H_CHANGE = -5.0       # تجنب العملات المنهارة
-MAX_24H_CHANGE = 5.0        # التركيز على العملات التي لم تنفجر بعد
-MAX_PRICE_POS = 0.45        # يجب أن تكون قريبة من القاع اليومي
+MIN_24H_CHANGE = -5.0       
+MAX_24H_CHANGE = 10.0       # رفع طفيف للسماح بمرونة التجميع
+MAX_PRICE_POS = 0.45        
 
-# معايير الانفجار اللحظي
-MIN_FLOW_RATIO = 3.8        # نسبة الشراء مقابل البيع (مستوحاة من الصور)
-MIN_NET_FLOW_USD = 35000    # الحد الأدنى للصافي 35 ألف دولار
+# معايير الانفجار اللحظي (Wolf Flow Sniper 15.1)
+MIN_FLOW_RATIO = 3.8        
+MAX_FLOW_RATIO = 500.0      # منع النسب الخيالية (تلاعب)
+MIN_NET_FLOW_USD = 35000    
+MAX_1H_MOVE = 15.0          # منع الدخول المتأخر (أهم تعديل)
+MIN_VOL_ACCEL = 1.5         # يجب أن يكون هناك زخم حقيقي في الحجم
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -129,6 +131,15 @@ def analyze_flow(sym, source):
         
         move_1h = ((closes[-1] - float(kd[-13][4])) / float(kd[-13][4])) * 100
         
+        # تصفية الدخول المتأخر (Late Entry)
+        if move_1h > MAX_1H_MOVE: return "LATE_ENTRY"
+        
+        # تصفية النسب الخيالية (تلاعب)
+        if ratio > MAX_FLOW_RATIO: return "FAKE_FLOW"
+        
+        # تصفية الحجم الضعيف (No Momentum)
+        if vol_accel < MIN_VOL_ACCEL: return "LOW_MOMENTUM"
+        
         return {
             "in": in_f, 
             "out": out_f, 
@@ -159,9 +170,16 @@ def scan():
     for t in tickers:
         sym = t['symbol']
         if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
+        
+        # تصفية العملات المستقرة (Stablecoins)
+        stables = ["USDC", "BUSD", "USD1", "EUR", "GBP", "DAI", "FDUSD", "TUSD"]
+        if any(s in sym for s in stables): continue
+        
         try:
-            chg_24h = float(t['priceChangePercent']); vol_24h = float(t['quoteVolume'])
-            price = float(t['lastPrice']); high, low = float(t['highPrice']), float(t['lowPrice'])
+            chg_24h = float(t['priceChangePercent'])
+            vol_24h = float(t['quoteVolume'])
+            price = float(t['lastPrice'])
+            high, low = float(t['highPrice']), float(t['lowPrice'])
             
             if vol_24h < MIN_VOLUME_24H or chg_24h < MIN_24H_CHANGE or chg_24h > MAX_24H_CHANGE: continue
             
@@ -180,7 +198,7 @@ def scan():
         if sym in state["sent_coins"]: continue
 
         data = analyze_flow(sym, source)
-        if not data or data == "TREND_DOWN": continue
+        if not data or isinstance(data, str): continue
         
         if data['ratio'] >= MIN_FLOW_RATIO and data['net'] >= MIN_NET_FLOW_USD:
             if state["is_first_run"]:
@@ -195,7 +213,7 @@ def scan():
             
             msg = (
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"💀 *MAFIO SNIPER 15.0* 📡\n\n"
+                f"💀 *MAFIO SNIPER 15.1* 📡\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
@@ -220,8 +238,8 @@ def scan():
         logger.info("✅ Silent first scan complete. Sniper is active!")
 
 def main():
-    logger.info("🚀 MAFIO BOT 15.0 (Sniper Edition) Started")
-    send_telegram("💀 *MAFIO BOT 15.0* متصل.\nتم تفعيل نظام اقتناص الانفجارات (Liquidity Sniping) بنجاح.")
+    logger.info("🚀 MAFIO BOT 15.1 (Sniper Edition) Started")
+    send_telegram("💀 *MAFIO BOT 15.1* متصل.\nتم تفعيل نظام مكافحة الدخول المتأخر (Anti-Late) بنجاح.")
     
     while True:
         try:
