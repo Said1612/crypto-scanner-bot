@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 3.3 (ULTRA STABLE)
-المطور: MAFIO Engine
-الوصف: نسخة مستقرة جداً لاقتناص الانفجارات السعرية من البداية
+MAFIO BOT - VERSION 3.4 (GOLDEN EDITION)
+الاستراتيجية: اقتناص الانفجار من القاع الحقيقي ومنع شراء القمم
 """
 
 import os
 import time
 import requests
 import logging
+import traceback
 from datetime import datetime, timezone
 
 # ==========================================================
@@ -17,12 +17,13 @@ from datetime import datetime, timezone
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير الصرامة (MAFIO Pro Mode)
+# معايير الفحص (MAFIO Balanced Mode)
 MAX_SIGNALS_PER_DAY = 15
-MIN_VOLUME_24H = 400000    
-MIN_24H_CHANGE = 1.5       # العملة بدأت تخضر
-MAX_24H_CHANGE = 15.0      
-MIN_FLOW_RATIO = 4.0       # سيولة داخلة قوية
+MIN_VOLUME_24H = 150000    # تقليل الحد لزيادة فرص الرصد
+MIN_24H_CHANGE = 0.5       # العملة بدأت تتحرك
+MAX_24H_CHANGE = 15.0      # منع العملات التي طارت فعلاً
+MAX_PRICE_POS = 0.4        # شرط القاع: السعر في أول 40% من نطاق اليوم
+MIN_FLOW_RATIO = 3.5       # سيولة داخلة جيدة
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -41,8 +42,7 @@ def get_data(url, params=None):
     try:
         r = requests.get(url, params=params, timeout=15)
         if r.status_code != 200: return None
-        data = r.json()
-        return data
+        return r.json()
     except: return None
 
 def calc_ema(prices, period):
@@ -54,47 +54,40 @@ def calc_ema(prices, period):
     return ema
 
 def check_indicators(sym, current_price):
-    kd_15m = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "15m", "limit": 50})
-    kd_1h = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "1h", "limit": 50})
-    
-    # فحص صارم لنوع البيانات (يجب أن تكون قائمة وليست قاموس خطأ)
-    if not isinstance(kd_15m, list) or not isinstance(kd_1h, list): return False, None
-    if len(kd_15m) < 30 or len(kd_1h) < 20: return False, None
-
     try:
-        # استخراج البيانات مع فحص طول كل شمعة
-        closes_15m = [float(c[4]) for c in kd_15m if isinstance(c, list) and len(c) >= 6]
-        vols_15m = [float(c[5]) for c in kd_15m if isinstance(c, list) and len(c) >= 6]
-        opens_15m = [float(c[1]) for c in kd_15m if isinstance(c, list) and len(c) >= 6]
-        closes_1h = [float(c[4]) for c in kd_1h if isinstance(c, list) and len(c) >= 6]
+        kd_15m = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "15m", "limit": 50})
+        if not isinstance(kd_15m, list) or len(kd_15m) < 30: return False, None
 
-        if len(closes_15m) < 25 or len(closes_1h) < 20: return False, None
+        closes = []
+        opens = []
+        vols = []
+        for c in kd_15m:
+            if isinstance(c, list) and len(c) >= 6:
+                closes.append(float(c[4]))
+                opens.append(float(c[1]))
+                vols.append(float(c[5]))
 
-        # 1. فحص الاتجاه (EMA)
-        ema5_1h = calc_ema(closes_1h, 5)
-        ema20_1h = calc_ema(closes_1h, 20)
-        if ema5_1h <= ema20_1h: return False, None
+        if len(closes) < 30: return False, None
 
-        # 2. فحص انفجار الحجم (Volume Spike)
-        avg_vol = sum(vols_15m[-15:-1]) / 14
-        current_vol = vols_15m[-1]
-        if current_vol < avg_vol * 2.5: return False, None
+        # 1. فحص EMA (5 فوق 20)
+        ema5 = calc_ema(closes, 5)
+        ema20 = calc_ema(closes, 20)
+        if ema5 <= ema20: return False, None
 
-        # 3. تحليل السيولة (Flow)
+        # 2. فحص السيولة (Flow)
         in_vol = 0; out_vol = 0
         for i in range(-5, 0):
-            val = vols_15m[i] * closes_15m[i]
-            if closes_15m[i] > opens_15m[i]: in_vol += val
+            val = vols[i] * closes[i]
+            if closes[i] > opens[i]: in_vol += val
             else: out_vol += val
         
-        if out_vol == 0: out_vol = 1
-        ratio = in_vol / out_vol
-        vdelta = in_vol / (in_vol + out_vol)
+        ratio = in_vol / out_vol if out_vol > 0 else 5.0
+        vdelta = in_vol / (in_vol + out_vol) if (in_vol + out_vol) > 0 else 0.5
 
         if ratio < MIN_FLOW_RATIO or vdelta < 0.70: return False, None
 
-        return True, {"ratio": ratio, "vdelta": vdelta, "spike": current_vol/avg_vol}
-    except Exception as e:
+        return True, {"ratio": ratio, "vdelta": vdelta}
+    except:
         return False, None
 
 def scan():
@@ -103,68 +96,73 @@ def scan():
         state.update({"date": today, "count": 0, "sent_coins": []})
 
     raw_tickers = get_data("https://api.mexc.com/api/v3/ticker/24hr")
-    if not isinstance(raw_tickers, list): return
+    if not isinstance(raw_tickers, list): 
+        logger.warning("⚠️ Failed to fetch tickers or invalid format.")
+        return
 
-    # تصفية العملات الواعدة فقط لتقليل الضغط على API
-    promising_tickers = []
+    promising = []
     for t in raw_tickers:
-        if not isinstance(t, dict): continue
-        sym = t.get('symbol', '')
-        if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
         try:
+            sym = t.get('symbol', '')
+            if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
+            
             vol = float(t.get('quoteVolume', 0))
-            chg = float(t.get('priceChangePercent', 0))
-            if vol > MIN_VOLUME_24H and MIN_24H_CHANGE < chg < MAX_24H_CHANGE:
-                promising_tickers.append(t)
+            price = float(t.get('lastPrice', 0))
+            high = float(t.get('highPrice', 0))
+            low = float(t.get('lowPrice', 0))
+            open_p = float(t.get('openPrice', 0))
+            
+            if open_p == 0 or high == low: continue
+            
+            real_chg = ((price - open_p) / open_p) * 100
+            price_pos = (price - low) / (high - low)
+
+            # فلاتر MAFIO BOT 3.4
+            if vol > MIN_VOLUME_24H and MIN_24H_CHANGE < real_chg < MAX_24H_CHANGE and price_pos < MAX_PRICE_POS:
+                promising.append({'sym': sym, 'price': price, 'chg': real_chg, 'pos': price_pos})
         except: continue
 
-    # ترتيب حسب الحجم وأخذ أفضل 50 فقط
-    promising_tickers = sorted(promising_tickers, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:50]
-    
-    logger.info(f"🔍 MAFIO BOT: Scanning {len(promising_tickers)} hot pairs...")
+    logger.info(f"🔍 MAFIO BOT: Found {len(promising)} candidates in the bottom range.")
 
-    for i, t in enumerate(promising_tickers):
-        sym = t['symbol']
+    for item in promising[:30]: # فحص أفضل 30 مرشحاً
+        sym = item['sym']
         if sym in state["sent_coins"]: continue
-        
-        price = float(t['lastPrice'])
-        chg = float(t['priceChangePercent'])
+        if state["count"] >= MAX_SIGNALS_PER_DAY: break
 
-        # فحص المؤشرات
-        success, data = check_indicators(sym, price)
+        success, data = check_indicators(sym, item['price'])
         if success:
             state["count"] += 1
             state["sent_coins"].append(sym)
             
             msg = (
-                "🤖 *MAFIO BOT - إشارة انفجار حقيقي* 🚀\n"
+                "🤖 *MAFIO BOT - اقتناص من القاع* 🚀\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 f"📍 العملة: *#{sym.replace('USDT','')}*\n"
-                f"💰 السعر: `{price:.8g}`\n"
-                f"📈 التغيير: `+{chg:.2f}%` (بداية صعود)\n"
+                f"💰 السعر: `{item['price']:.8g}`\n"
+                f"📈 التغيير: `+{item['chg']:.2f}%` (بداية حركة)\n"
+                f"📍 موقع السعر: `%{item['pos']*100:.0f}` من القاع ✅\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "📊 *تحليل الحيتان (Strict Mode):*\n"
-                f"💥 انفجار الحجم: `{data['spike']:.1f}x` 🔥\n"
+                "🌊 *تحليل السيولة (Flow):*\n"
                 f"✅ قوة التدفق: `{data['ratio']:.1f}x` لصالح الشراء\n"
-                f"💎 ضغط الحيتان: `{data['vdelta']*100:.0f}%` 🐋\n"
+                f"💎 ضغط الحيتان: `{data['vdelta']*100:.0f}%` 🔥\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "📢 *القرار:* تم رصد دخول سيولة ضخمة مع بداية ترند صاعد\n"
-                "⚠️ _ادخل الآن - MAFIO رصد الانفجار!_ 🎯"
+                "📢 *القرار:* العملة في منطقة شراء آمنة والسيولة بدأت بالتدفق\n"
+                "⚠️ _ادخل الآن - MAFIO رصد الانفجار قبل حدوثه!_ 🎯"
             )
             send_telegram(msg)
             logger.info(f"✅ Signal Sent: {sym}")
-            time.sleep(1) # تأخير بسيط بين العملات
+            time.sleep(2)
 
 def main():
-    logger.info("🚀 MAFIO BOT 3.3 Started Successfully")
-    send_telegram("✅ *MAFIO BOT 3.3* يعمل الآن بنجاح. تم إصلاح كافة الأخطاء السابقة وهو يبحث عن الانفجارات...")
+    logger.info("🚀 MAFIO BOT 3.4 Started - Golden Edition")
+    send_telegram("✅ *MAFIO BOT 3.4* متصل الآن ويبحث عن انفجارات القاع الحقيقية...")
     while True:
         try:
             scan()
             time.sleep(60) 
         except Exception as e:
-            logger.error(f"Main Loop Error: {e}")
-            time.sleep(20)
+            logger.error(f"❌ Critical Error: {e}")
+            time.sleep(30)
 
 if __name__ == "__main__":
     main()
