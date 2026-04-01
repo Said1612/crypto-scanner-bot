@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 14.1 (TRANSPARENCY & FLOW)
-السر: سجلات لحظية لكل خطوة + تحسين حساسية Binance
+MAFIO BOT - VERSION 14.2 (INDESTRUCTIBLE EDITION)
+السر: نظام التبديل التلقائي بين Binance و MEXC لضمان استمرار البحث
 المطور: MAFIO AI
 """
 
@@ -13,26 +13,26 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات الاحترافية - Binance Settings
+# الإعدادات الاحترافية - Multi-Source Settings
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير Binance (تم تحسينها للحساسية)
-MIN_VOLUME_24H = 800000     # 800 ألف دولار
+# معايير البحث العامة
+MIN_VOLUME_24H = 500000     
 MIN_24H_CHANGE = -12.0      
 MAX_24H_CHANGE = 30.0      
 MAX_PRICE_POS = 0.65       
 
 # معايير الانفجار
-MIN_FLOW_RATIO = 3.2       
-MIN_NET_FLOW_USD = 30000   # 30 ألف دولار صافي سيولة
+MIN_FLOW_RATIO = 3.5       
+MIN_NET_FLOW_USD = 20000   
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
 logger = logging.getLogger("MAFIO_BOT")
 
-state = {"date": "", "count": 0, "sent_coins": []}
+state = {"date": "", "count": 0, "sent_coins": [], "current_source": "BINANCE"}
 
 def send_telegram(message):
     if "ضع_" in TOKEN or not TOKEN: return
@@ -40,12 +40,25 @@ def send_telegram(message):
     try: requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=15)
     except: pass
 
-def get_binance_data(endpoint, params=None):
-    try:
-        url = f"https://api.binance.com/api/v3/{endpoint}"
-        r = requests.get(url, params=params, timeout=10)
-        return r.json() if r.status_code == 200 else None
-    except: return None
+def get_data_from_anywhere(source, endpoint, params=None):
+    """محرك جلب البيانات مع دعم التبديل التلقائي"""
+    if source == "BINANCE":
+        urls = [
+            f"https://api.binance.com/api/v3/{endpoint}",
+            f"https://api1.binance.com/api/v3/{endpoint}",
+            f"https://api2.binance.com/api/v3/{endpoint}",
+            f"https://api3.binance.com/api/v3/{endpoint}"
+        ]
+    else: # MEXC
+        urls = [f"https://api.mexc.com/api/v3/{endpoint}"]
+
+    for url in urls:
+        try:
+            r = requests.get(url, params=params, timeout=15)
+            if r.status_code == 200: return r.json()
+            if r.status_code == 429: time.sleep(2)
+        except: continue
+    return None
 
 def calc_ema(prices, period):
     if len(prices) < period: return 0
@@ -55,10 +68,10 @@ def calc_ema(prices, period):
         ema = (p * k) + (ema * (1 - k))
     return ema
 
-def analyze_flow(sym):
+def analyze_flow(sym, source):
     try:
-        time.sleep(0.2) # تجنب الحظر
-        kd = get_binance_data("klines", {"symbol": sym, "interval": "15m", "limit": 30})
+        time.sleep(0.2)
+        kd = get_data_from_anywhere(source, "klines", {"symbol": sym, "interval": "15m", "limit": 30})
         if not kd: return None
         
         closes = [float(c[4]) for c in kd]; opens = [float(c[1]) for c in kd]; vols = [float(c[5]) for c in kd]
@@ -80,10 +93,16 @@ def scan():
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if state["date"] != today: state.update({"date": today, "count": 0, "sent_coins": []})
 
-    logger.info("🔍 Fetching market data from Binance...")
-    tickers = get_binance_data("ticker/24hr")
-    if not tickers: 
-        logger.error("❌ Failed to fetch tickers from Binance")
+    source = state["current_source"]
+    logger.info(f"🔍 Searching market using {source}...")
+    
+    tickers = get_data_from_anywhere(source, "ticker/24hr")
+    
+    # التبديل التلقائي في حال الفشل
+    if not tickers:
+        new_source = "MEXC" if source == "BINANCE" else "BINANCE"
+        logger.warning(f"⚠️ {source} failed. Switching to {new_source}...")
+        state["current_source"] = new_source
         return
 
     candidates = []
@@ -101,21 +120,16 @@ def scan():
             candidates.append({'sym': sym, 'vol': vol_24h, 'price': price, 'chg': chg_24h})
         except: continue
 
-    logger.info(f"📊 Found {len(candidates)} candidates matching basic filters.")
+    logger.info(f"📊 {source}: Found {len(candidates)} potential coins.")
     candidates.sort(key=lambda x: x['vol'], reverse=True)
-    top_40 = candidates[:40]
+    top_candidates = candidates[:35]
 
-    if not top_40:
-        logger.info("😴 No elite candidates found in this cycle.")
-        return
-
-    logger.info(f"🧪 Analyzing flow for top {len(top_40)} coins...")
     max_r = 0.0
-    for c in top_40:
+    for c in top_candidates:
         sym = c['sym']
         if sym in state["sent_coins"]: continue
 
-        data = analyze_flow(sym)
+        data = analyze_flow(sym, source)
         if not data or data == "TREND_DOWN": continue
         
         if data['ratio'] > max_r: max_r = data['ratio']
@@ -123,7 +137,7 @@ def scan():
         if data['ratio'] >= MIN_FLOW_RATIO and data['net'] >= MIN_NET_FLOW_USD:
             state["count"] += 1; state["sent_coins"].append(sym)
             msg = (
-                "🐺 *MAFIO BOT - BINANCE FLOW* 🐺\n\n"
+                f"💀 *MAFIO BOT - {source} FLOW* 💀\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 24h Change: `+{c['chg']:.2f}%` \n"
@@ -131,22 +145,22 @@ def scan():
                 f"🌊 *Net Flow:* `+${data['net']/1000:.1f}K` \n"
                 f"🕒 {datetime.now().strftime('%H:%M UTC')}\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⚠️ _سيولة مؤسساتية مرصودة على Binance!_ 🚀"
+                f"⚠️ _سيولة مؤسساتية مرصودة على {source}!_ 🚀"
             )
             send_telegram(msg)
-            logger.info(f"🎯 SIGNAL SENT: {sym} | Ratio: {data['ratio']:.1f}x")
+            logger.info(f"🎯 SIGNAL: {sym} | Source: {source}")
             time.sleep(1)
 
-    logger.info(f"✅ Cycle complete. Max Ratio found: {max_r:.1f}x")
+    logger.info(f"✅ Cycle complete ({source}). Max Ratio: {max_r:.1f}x")
 
 def main():
-    logger.info("🚀 MAFIO BOT 14.1 (Transparency Edition) Started")
-    send_telegram("💀 *MAFIO BOT 14.1* متصل.\nنظام الشفافية والبحث اللحظي نشط الآن.")
+    logger.info("🚀 MAFIO BOT 14.2 (Indestructible) Started")
+    send_telegram("💀 *MAFIO BOT 14.2* متصل.\nنظام التبديل التلقائي (Binance/MEXC) نشط الآن لضمان استقرار البحث.")
     
     while True:
         try:
             scan()
-            time.sleep(45) 
+            time.sleep(40) 
         except Exception as e:
             logger.error(f"⚠️ Loop Error: {e}")
             time.sleep(30)
