@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 15.0 (WOLF FLOW SNIPER)
+MAFIO BOT - VERSION 15.0 (SNIPER EDITION)
 السر: اقتناص الانفجار السيولاتي (Liquidity Sniping)
 الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + تقاطع EMA
-المطور: MAFIO AI - نظام الذئب القناص
+المطور: MAFIO AI - نظام القناص
 """
 
 import os
@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات الاحترافية - Pro Settings (Wolf Flow Style)
+# الإعدادات الاحترافية - Pro Settings (MAFIO Style)
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
@@ -102,7 +102,6 @@ def track_profits():
 def analyze_flow(sym, source):
     try:
         time.sleep(0.2)
-        # استخدام فريم 5 دقائق للاقتناص اللحظي (كما في الصور)
         kd = get_data_from_anywhere(source, "klines", {"symbol": sym, "interval": "5m", "limit": 50})
         if not kd: return None
         
@@ -110,20 +109,15 @@ def analyze_flow(sym, source):
         opens = [float(c[1]) for c in kd]
         vols = [float(c[5]) for c in kd]
         
-        # حساب المتوسطات EMA 5, 10, 20
         ema5 = calc_ema(closes, 5)
         ema10 = calc_ema(closes, 10)
         ema20 = calc_ema(closes, 20)
         
-        # شرط تقاطع المتوسطات (EMA Squeeze/Crossover)
-        # السعر فوق المتوسطات، والمتوسطات مرتبة صعودياً
         if not (closes[-1] > ema5 > ema10 > ema20): return "TREND_DOWN"
         
-        # رصد تسارع الحجم (Volume Acceleration)
         avg_vol = sum(vols[-11:-1]) / 10
         vol_accel = vols[-1] / avg_vol if avg_vol > 0 else 1.0
         
-        # حساب السيولة (آخر 4 شموع 5 دقائق = 20 دقيقة)
         in_f = 0; out_f = 0
         for i in range(-4, 0):
             c_val = vols[i] * closes[i]
@@ -133,7 +127,6 @@ def analyze_flow(sym, source):
         if out_f == 0: out_f = 1
         ratio = in_f / out_f
         
-        # حركة السعر في آخر ساعة (12 شمعة 5 دقائق)
         move_1h = ((closes[-1] - float(kd[-13][4])) / float(kd[-13][4])) * 100
         
         return {
@@ -152,7 +145,7 @@ def scan():
     if state["date"] != today: state.update({"date": today, "count": 0, "sent_coins": []})
 
     source = state["current_source"]
-    logger.info(f"🔍 Wolf Flow Scanning {source}...")
+    logger.info(f"🔍 MAFIO Scanning {source}...")
     
     tickers = get_data_from_anywhere(source, "ticker/24hr")
     
@@ -170,10 +163,8 @@ def scan():
             chg_24h = float(t['priceChangePercent']); vol_24h = float(t['quoteVolume'])
             price = float(t['lastPrice']); high, low = float(t['highPrice']), float(t['lowPrice'])
             
-            # فلتر التجميع الساكن (Static Accumulation)
             if vol_24h < MIN_VOLUME_24H or chg_24h < MIN_24H_CHANGE or chg_24h > MAX_24H_CHANGE: continue
             
-            # فلتر القاع اليومي
             price_pos = (price - low) / (high - low) if (high - low) > 0 else 0.5
             if price_pos > MAX_PRICE_POS: continue
             
@@ -191,7 +182,6 @@ def scan():
         data = analyze_flow(sym, source)
         if not data or data == "TREND_DOWN": continue
         
-        # تصفية الإشارات بناءً على "الاختراق السيولاتي"
         if data['ratio'] >= MIN_FLOW_RATIO and data['net'] >= MIN_NET_FLOW_USD:
             if state["is_first_run"]:
                 state["sent_coins"].append(sym)
@@ -200,14 +190,13 @@ def scan():
             state["count"] += 1; state["sent_coins"].append(sym)
             active_trades[sym] = {'entry': c['price'], 'time': time.time(), 'max_gain': 0, 'milestones': []}
             
-            # تصنيف الإشارة بناءً على تسارع الحجم
             interest = "Institutional Breakout 🐋"
             if data['vol_accel'] > 2.5: interest = "🔥 High Short Squeeze Risk 🧨"
             
             msg = (
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"🐺 *WOLF FLOW SNIPER 15.0* 📡\n\n"
-                f"🆕 *#{sym.replace('USDT','')}* 🐺 · 🔔 Signal #{state['count']}\n"
+                f"💀 *MAFIO SNIPER 15.0* 📡\n\n"
+                f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
                 f"📍 Position: `%{c['price_pos']*100:.0f}` from Bottom ✅\n\n"
@@ -231,8 +220,8 @@ def scan():
         logger.info("✅ Silent first scan complete. Sniper is active!")
 
 def main():
-    logger.info("🚀 MAFIO BOT 15.0 (Wolf Flow Sniper) Started")
-    send_telegram("🐺 *MAFIO BOT 15.0* متصل.\nتم تفعيل نظام اقتناص الانفجارات (Liquidity Sniping) بناءً على تحليل صفقات الصور الناجحة.")
+    logger.info("🚀 MAFIO BOT 15.0 (Sniper Edition) Started")
+    send_telegram("💀 *MAFIO BOT 15.0* متصل.\nتم تفعيل نظام اقتناص الانفجارات (Liquidity Sniping) بنجاح.")
     
     while True:
         try:
