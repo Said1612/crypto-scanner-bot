@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 5.0 (LIQUIDITY FLOW ENGINE)
-الاستراتيجية: التركيز الكلي على قوة السيولة الشرائية (Inflow vs Outflow)
-اقتناص العملات في الأسواق الهابطة بناءً على تجميع الحيتان
+MAFIO BOT - VERSION 6.0 (ULTRA STRICT - PRE-EXPLOSION)
+الاستراتيجية: اقتناص التجميع في القاع الحقيقي (Bottom Accumulation)
+منع شراء القمم نهائياً والتركيز على السيولة الشرائية الصامتة
 """
 
 import os
@@ -13,17 +13,18 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات - Settings
+# الإعدادات الصارمة - Strict Settings
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير الاقتناص (Wolf Flow Logic)
-MAX_SIGNALS_PER_DAY = 12
+# معايير الاقتناص (Strict Wolf Flow Logic)
+MAX_SIGNALS_PER_DAY = 10
 MIN_VOLUME_24H = 300000    
-MIN_FLOW_RATIO = 4.0       # الشراء يجب أن يكون 4 أضعاف البيع على الأقل
-MIN_NET_FLOW_USD = 5000    # صافي دخول السيولة يجب أن يتجاوز 5000$ في ساعة
-MAX_24H_CHANGE = 15.0      # تجنب العملات التي تضخمت فعلياً
+MAX_24H_CHANGE = 7.0       # صارم جداً: لا ندخل في عملة ارتفعت أكثر من 7% في يوم
+MAX_PRICE_POS = 0.25       # صارم جداً: العملة يجب أن تكون في أول 25% من قاع اليوم (قاع حقيقي)
+MIN_FLOW_RATIO = 5.0       # الشراء يجب أن يكون 5 أضعاف البيع
+MIN_NET_FLOW_USD = 8000    # صافي دخول السيولة في ساعة
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -46,47 +47,42 @@ def get_data(url, params=None):
         return r.json()
     except: return None
 
-def analyze_institutional_flow(sym):
-    """تحليل السيولة المؤسساتية (دخول وخروج الأموال الحقيقي)"""
+def analyze_bottom_accumulation(sym):
+    """تحليل التجميع في القاع (سعر ثابت + سيولة تنفجر)"""
     try:
-        # جلب شموع 15 دقيقة (آخر ساعة = 4 شموع)
+        # جلب شموع 15 دقيقة لآخر ساعتين (8 شموع)
         kd = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "15m", "limit": 20})
-        if not isinstance(kd, list) or len(kd) < 10: return None
+        if not isinstance(kd, list) or len(kd) < 12: return None
 
         in_flow = 0; out_flow = 0
         closes = []
         
         # تحليل آخر 4 شموع (الساعة الأخيرة)
         for c in kd[-4:]:
-            if len(c) < 6: continue
             op, hi, lo, cl, vo = float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])
             closes.append(cl)
             candle_usd_vol = vo * cl
-            
-            if cl > op: # شمعة شرائية
-                in_flow += candle_usd_vol
-            else: # شمعة بيعية
-                out_flow += candle_usd_vol
+            if cl > op: in_flow += candle_usd_vol
+            else: out_flow += candle_usd_vol
         
         if out_flow == 0: out_flow = 1
-        net_flow = in_flow - out_flow
         ratio = in_flow / out_flow
+        net_flow = in_flow - out_flow
         
-        # حساب حركة السعر في ساعة
-        move_1h = ((closes[-1] - float(kd[-5][4])) / float(kd[-5][4])) * 100 if len(kd) >= 5 else 0
-
-        # تحديد حالة الاهتمام والحجم
-        vol_status = "High 🔥" if ratio > 5.0 else "Good ✅"
-        interest = "Institutional 🐋" if ratio > 4.0 else "Neutral"
+        # حساب حركة السعر في آخر 4 ساعات (يجب أن لا تكون قد انفجرت)
+        price_4h_ago = float(kd[0][4])
+        move_4h = ((closes[-1] - price_4h_ago) / price_4h_ago) * 100
+        
+        # حركة الساعة الأخيرة
+        move_1h = ((closes[-1] - float(kd[-5][4])) / float(kd[-5][4])) * 100
 
         return {
             "move_1h": move_1h,
+            "move_4h": move_4h,
             "in": in_flow,
             "out": out_flow,
             "net": net_flow,
             "ratio": ratio,
-            "vol_status": vol_status,
-            "interest": interest,
             "price": closes[-1]
         }
     except: return None
@@ -105,35 +101,42 @@ def scan():
         if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
         
         try:
-            vol_24h = float(t.get('quoteVolume', 0))
-            chg_24h = float(t.get('priceChangePercent', 0))
+            price = float(t['lastPrice'])
+            high = float(t['highPrice'])
+            low = float(t['lowPrice'])
+            vol_24h = float(t['quoteVolume'])
+            chg_24h = float(t['priceChangePercent'])
             
-            # فلاتر أولية
-            if vol_24h < MIN_VOLUME_24H or chg_24h > MAX_24H_CHANGE: continue
-            if sym in state["sent_coins"] or state["count"] >= MAX_SIGNALS_PER_DAY: continue
-            
-            # منع تلاحم الإشارات (إشارة كل 10 دقائق على الأقل)
-            if time.time() - last_signal_time < 600: continue
+            # 1. فلتر القاع الصارم: السعر يجب أن يكون في أول 25% من نطاق اليوم
+            price_pos = (price - low) / (high - low) if (high - low) > 0 else 0.5
+            if price_pos > MAX_PRICE_POS: continue 
 
-            # التحليل العميق للسيولة (Flow)
-            flow = analyze_institutional_flow(sym)
+            # 2. فلتر التغيير اليومي: لا ندخل في عملة "خضراء" جداً
+            if vol_24h < MIN_VOLUME_24H or chg_24h > MAX_24H_CHANGE: continue
+            
+            if sym in state["sent_coins"] or state["count"] >= MAX_SIGNALS_PER_DAY: continue
+            if time.time() - last_signal_time < 900: continue # إشارة كل 15 دقيقة كحد أقصى
+
+            # 3. التحليل العميق للتجميع (Accumulation)
+            flow = analyze_bottom_accumulation(sym)
             if not flow: continue
 
-            # الشرط الذهبي: سيولة شرائية طاغية (Inflow >> Outflow)
-            if flow['ratio'] < MIN_FLOW_RATIO or flow['net'] < MIN_NET_FLOW_USD: continue
+            # شرط الاقتناص: سيولة ضخمة + السعر لم ينفجر في 4 ساعات
+            if flow['ratio'] < MIN_FLOW_RATIO or flow['net'] < MIN_NET_FLOW_USD or flow['move_4h'] > 10.0: continue
 
-            # إرسال الإشارة بتنسيق Wolf Flow
+            # إرسال الإشارة
             state["count"] += 1
             state["sent_coins"].append(sym)
             last_signal_time = time.time()
             
             msg = (
-                "🐺 *MAFIO BOT* 🐺\n\n"
+                "🐺 *MAFIO BOT - اقتناص من القاع* 🐺\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 🐺 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${flow['price']:.8g}`\n"
-                f"📈 1h Move: `+{flow['move_1h']:.2f}%` ⚡\n\n"
-                f"⚡ Volume: `{flow['vol_status']}`\n"
-                f"🟡 Interest: `{flow['interest']}`\n"
+                f"📈 1h Move: `+{flow['move_1h']:.2f}%` ⚡\n"
+                f"📍 Position: `%{price_pos*100:.0f}` from Bottom ✅\n\n"
+                f"⚡ Volume: `Good ✅` \n"
+                f"🟡 Interest: `Institutional 🐋` \n"
                 "💹 *1h Flow:*\n"
                 f"  📥 In: `${flow['in']/1000:.1f}K` \n"
                 f"  📤 Out: `${flow['out']/1000:.1f}K` \n"
@@ -141,16 +144,16 @@ def scan():
                 "🟡 Funding: `Neutral` 📈 Longs\n\n"
                 f"🕒 {datetime.now().strftime('%d %b %Y %H:%M')}\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⚠️ _ادخل الآن - سيولة شرائية ضخمة تكتسح العروض!_ 🚀"
+                "⚠️ _ادخل الآن - العملة في القاع والسيولة بدأت بالانفجار!_ 🚀"
             )
             send_telegram(msg)
-            logger.info(f"✅ Signal: {sym} | Ratio: {flow['ratio']:.1f}x")
+            logger.info(f"✅ Strict Catch: {sym} | Pos: {price_pos:.2f}")
             time.sleep(2)
         except: continue
 
 def main():
-    logger.info("🚀 MAFIO BOT 5.0 (Flow Engine) Started")
-    send_telegram("✅ *MAFIO BOT 5.0* متصل.\nالمحرك يركز الآن على اقتناص السيولة الشرائية القوية (Flow In) حتى في الأسواق الهابطة.")
+    logger.info("🚀 MAFIO BOT 6.0 (Strict Bottom Hunter) Started")
+    send_telegram("✅ *MAFIO BOT 6.0* متصل.\nتم تفعيل فلاتر القاع الصارمة لمنع شراء القمم واقتناص الانفجارات من البداية.")
     while True:
         try:
             scan()
