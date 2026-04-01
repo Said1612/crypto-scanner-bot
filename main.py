@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 15.1 (ANTI-LATE SNIPER)
-التحديث: منع الدخول المتأخر + فلتر العملات المستقرة + شرط زخم الحجم
-الهدف: اقتناص بداية الانفجار فقط وتجنب القمم
+MAFIO BOT - VERSION 15.2 (GEM SNIPER EDITION)
+السر: اقتناص الانفجار السيولاتي (Liquidity Sniping)
+الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + تقاطع EMA
+المطور: MAFIO AI - نظام القناص الاحترافي
 """
 
 import os
@@ -19,17 +20,17 @@ TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
 # معايير "التجميع الساكن" (Static Accumulation)
-MIN_VOLUME_24H = 500000     
+MIN_VOLUME_24H = 250000     # تخفيض لاقتناص العملات الواعدة (Gems) مثل BANK
 MIN_24H_CHANGE = -5.0       
-MAX_24H_CHANGE = 10.0       # رفع طفيف للسماح بمرونة التجميع
-MAX_PRICE_POS = 0.45        
+MAX_24H_CHANGE = 12.0       # زيادة طفيفة للسماح بمرونة أكبر
+MAX_PRICE_POS = 0.50        # السماح بالدخول حتى لو ارتفعت قليلاً عن القاع
 
-# معايير الانفجار اللحظي (Wolf Flow Sniper 15.1)
-MIN_FLOW_RATIO = 3.8        
+# معايير الانفجار اللحظي (MAFIO Sniper 15.2)
+MIN_FLOW_RATIO = 3.5        
 MAX_FLOW_RATIO = 500.0      # منع النسب الخيالية (تلاعب)
-MIN_NET_FLOW_USD = 35000    
-MAX_1H_MOVE = 15.0          # منع الدخول المتأخر (أهم تعديل)
-MIN_VOL_ACCEL = 1.5         # يجب أن يكون هناك زخم حقيقي في الحجم
+MIN_NET_FLOW_USD = 25000    # تخفيض الصافي المطلوب ليتناسب مع العملات الصغيرة
+MAX_1H_MOVE = 20.0          # منع الدخول المتأخر (أهم تعديل)
+MIN_VOL_ACCEL = 1.8         # يجب أن يكون هناك زخم حقيقي في الحجم
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -172,7 +173,7 @@ def scan():
         if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
         
         # تصفية العملات المستقرة (Stablecoins)
-        stables = ["USDC", "BUSD", "USD1", "EUR", "GBP", "DAI", "FDUSD", "TUSD"]
+        stables = ["USDC", "BUSD", "USD1", "EUR", "GBP", "DAI", "FDUSD", "TUSD", "USDP", "PYUSD", "USDD", "ZUSD"]
         if any(s in sym for s in stables): continue
         
         try:
@@ -213,7 +214,7 @@ def scan():
             
             msg = (
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"💀 *MAFIO SNIPER 15.1* 📡\n\n"
+                f"💀 *MAFIO SNIPER 15.2* 📡\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
@@ -238,8 +239,8 @@ def scan():
         logger.info("✅ Silent first scan complete. Sniper is active!")
 
 def main():
-    logger.info("🚀 MAFIO BOT 15.1 (Sniper Edition) Started")
-    send_telegram("💀 *MAFIO BOT 15.1* متصل.\nتم تفعيل نظام مكافحة الدخول المتأخر (Anti-Late) بنجاح.")
+    logger.info("🚀 MAFIO BOT 15.2 (Sniper Edition) Started")
+    send_telegram("💀 *MAFIO BOT 15.2* متصل.\nتم تفعيل نظام اقتناص الكنوز (Gem Sniper) بنجاح.")
     
     while True:
         try:
