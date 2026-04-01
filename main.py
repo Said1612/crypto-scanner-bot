@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 9.0 (300% HUNTER - FLOW ENGINE)
-الاستراتيجية: اقتناص الانفجار من منطقة التجميع (STO Style)
-المطور: MAFIO AI - نظام رصد السيولة المؤسساتية
+MAFIO BOT - VERSION 10.0 (ATOMIC FLOW ENGINE)
+السر: رصد تسارع السيولة (Flow Acceleration) قبل حركة السعر
+اقتناص الانفجارات في دقائق معدودة - نظام Wolf Flow المطور
 """
 
 import os
@@ -13,19 +13,18 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات الاحترافية - Pro Settings
+# الإعدادات السرية - Secret Settings
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير "اقتناص الانفجار" (STO Logic)
+# معايير "الاقتناص اللحظي"
 MAX_SIGNALS_PER_DAY = 15
 MIN_VOLUME_24H = 200000    
-MAX_24H_CHANGE = 12.0      # العملة لا تزال في بداية حركتها
-MAX_PRICE_POS = 0.30       # الربع السفلي من سعر اليوم (قاع حقيقي)
-MIN_1H_MOVE = 1.0          # بداية الانطلاق
-MIN_FLOW_RATIO = 5.0       # الشراء 5 أضعاف البيع (سيطرة كاملة)
-MIN_NET_FLOW_USD = 20000   # دخول سيولة قوية (20 ألف دولار كحد أدنى في ساعة)
+MAX_24H_CHANGE = 15.0      
+MAX_PRICE_POS = 0.40       # السماح بنطاق أوسع قليلاً لاقتناص بداية الارتداد
+MIN_FLOW_RATIO = 6.0       # الشراء يجب أن يكون 6 أضعاف البيع (اكتساح عروض)
+MIN_NET_FLOW_USD = 10000   
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -46,14 +45,6 @@ def get_data(url, params=None):
         return r.json() if r.status_code == 200 else None
     except: return None
 
-def calc_ema(prices, period):
-    if len(prices) < period: return 0
-    k = 2 / (period + 1)
-    ema = sum(prices[:period]) / period
-    for p in prices[period:]:
-        ema = (p * k) + (ema * (1 - k))
-    return ema
-
 def track_profits():
     if not active_trades: return
     tickers = get_data("https://api.mexc.com/api/v3/ticker/24hr")
@@ -69,58 +60,58 @@ def track_profits():
         if gain > active_trades[sym]['max_gain']:
             active_trades[sym]['max_gain'] = gain
             
-        for milestone in [2, 5, 10, 20, 50, 100, 200, 300]:
+        # تنبيهات Milestones مطابقة للصور
+        for milestone in [2, 5, 10, 25, 50, 100, 200, 300]:
             if gain >= milestone and milestone not in active_trades[sym]['milestones']:
                 active_trades[sym]['milestones'].append(milestone)
-                duration = int((time.time() - active_trades[sym]['time']) / 60)
+                duration_sec = int(time.time() - active_trades[sym]['time'])
+                h = duration_sec // 3600
+                m = (duration_sec % 3600) // 60
+                time_str = f"{h}h {m}m" if h > 0 else f"{m}m"
+                
                 msg = (
-                    f"🚀 *{sym.replace('USDT','')} {milestone}% milestone reached*\n"
+                    f"🚀 *{sym.replace('USDT','')} +{milestone}% milestone reached*\n"
                     f"📊 Max gain: `+{active_trades[sym]['max_gain']:.2f}%` \n"
                     f"💰 Price now: `${current_price:.8g}` \n"
                     f"🏁 Entry: `${entry_price:.8g}` \n"
-                    f"⏱ Achieved in: `{duration}m`"
+                    f"⏱ Achieved in: `{time_str}`"
                 )
                 send_telegram(msg)
-        if (time.time() - active_trades[sym]['time']) > 172800: del active_trades[sym] # تتبع لمدة يومين
+        if (time.time() - active_trades[sym]['time']) > 172800: del active_trades[sym]
 
-def analyze_explosion_potential(sym):
-    """تحليل إمكانية الانفجار (نفس نمط STO)"""
+def analyze_atomic_flow(sym):
+    """تحليل تسارع السيولة اللحظي (Atomic Flow)"""
     try:
-        # جلب شموع 15 دقيقة (لتحليل الحجم والسيولة)
-        kd_15m = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "15m", "limit": 40})
-        # جلب شموع الساعة (لتأكيد الترند)
-        kd_1h = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "1h", "limit": 20})
-        
-        if not kd_15m or not kd_1h: return None
+        # جلب شموع 5 دقائق لرصد التسارع اللحظي
+        kd_5m = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "5m", "limit": 20})
+        if not kd_5m or len(kd_5m) < 10: return None
 
-        closes_15m = [float(c[4]) for c in kd_15m]
-        opens_15m = [float(c[1]) for c in kd_15m]
-        vols_15m = [float(c[5]) for c in kd_15m]
-        
-        closes_1h = [float(c[4]) for c in kd_1h]
-        ema20_1h = calc_ema(closes_1h, 20)
-        current_price = closes_15m[-1]
-
-        # 1. فحص الترند: يجب أن يكون السعر قد بدأ بالاستقرار فوق EMA20 ساعة
-        if current_price < ema20_1h: return None
-
-        # 2. فحص انفجار الحجم (Volume Spike): الحجم الحالي > 3 أضعاف متوسط آخر 20 شمعة
-        avg_vol = sum(vols_15m[-21:-1]) / 20
-        current_vol = vols_15m[-1]
-        if current_vol < avg_vol * 3.0: return None
-
-        # 3. تحليل السيولة (Flow In vs Out)
+        # حساب السيولة في آخر 15 دقيقة (3 شموع)
         in_f = 0; out_f = 0
-        for i in range(-4, 0): # آخر ساعة
-            c_val = vols_15m[i] * closes_15m[i]
-            if closes_15m[i] > opens_15m[i]: in_f += c_val
-            else: out_f += c_val
+        for c in kd_5m[-3:]:
+            op, cl, vo = float(c[1]), float(c[4]), float(c[5])
+            usd_vol = vo * cl
+            if cl > op: in_f += usd_vol
+            else: out_f += usd_vol
         
+        # حساب السيولة في الـ 45 دقيقة السابقة للمقارنة (التسارع)
+        prev_in = 0
+        for c in kd_5m[-12:-3]:
+            op, cl, vo = float(c[1]), float(c[4]), float(c[5])
+            if cl > op: prev_in += (vo * cl)
+        
+        avg_prev_in = prev_in / 9
+        current_in_avg = in_f / 3
+        
+        # معامل التسارع: كم مرة زاد الشراء الآن عن السابق
+        acceleration = current_in_avg / avg_prev_in if avg_prev_in > 0 else 1.0
+        
+        if out_f == 0: out_f = 1
+        ratio = in_f / out_f
         net_f = in_f - out_f
-        ratio = in_f / out_f if out_f > 0 else 10.0
         
         # حركة الساعة
-        move_1h = ((current_price - float(kd_1h[-2][4])) / float(kd_1h[-2][4])) * 100
+        move_1h = ((float(kd_5m[-1][4]) - float(kd_5m[-12][4])) / float(kd_5m[-12][4])) * 100
 
         return {
             "move_1h": move_1h,
@@ -128,8 +119,8 @@ def analyze_explosion_potential(sym):
             "out": out_f,
             "net": net_f,
             "ratio": ratio,
-            "price": current_price,
-            "spike": current_vol / avg_vol
+            "accel": acceleration,
+            "price": float(kd_5m[-1][4])
         }
     except: return None
 
@@ -150,18 +141,16 @@ def scan():
             vol_24h = float(t['quoteVolume'])
             chg_24h = float(t['priceChangePercent'])
             
-            # فلتر القاع الصارم (STO Style)
             price_pos = (price - low) / (high - low) if (high - low) > 0 else 0.5
             if price_pos > MAX_PRICE_POS or vol_24h < MIN_VOLUME_24H or chg_24h > MAX_24H_CHANGE: continue
-            
             if sym in state["sent_coins"] or state["count"] >= MAX_SIGNALS_PER_DAY: continue
 
-            # التحليل العميق للانفجار
-            data = analyze_explosion_potential(sym)
+            # التحليل الذري للسيولة
+            data = analyze_atomic_flow(sym)
             if not data: continue
 
-            # شروط الاقتناص الذهبية
-            if data['ratio'] < MIN_FLOW_RATIO or data['net'] < MIN_NET_FLOW_USD or data['move_1h'] < MIN_1H_MOVE: continue
+            # السر: سيولة طاغية (Ratio > 6) + تسارع في الشراء (Accel > 2.5)
+            if data['ratio'] < MIN_FLOW_RATIO or data['accel'] < 2.5 or data['net'] < MIN_NET_FLOW_USD: continue
 
             # إرسال الإشارة
             state["count"] += 1
@@ -169,29 +158,29 @@ def scan():
             active_trades[sym] = {'entry': price, 'time': time.time(), 'max_gain': 0, 'milestones': []}
             
             msg = (
-                "💀 *MAFIO BOT - قناص الانفجارات* 💀\n\n"
+                "💀 *MAFIO BOT* 💀\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${price:.8g}`\n"
-                f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
-                f"📍 Position: `%{price_pos*100:.0f}` from Bottom ✅\n\n"
-                f"💥 Volume Spike: `{data['spike']:.1f}x` (انفجار حجم) 🔥\n"
-                f"🟡 Interest: `Institutional Accumulation 🐋` \n"
+                f"📈 1h Move: `{data['move_1h']:+.2f}%` ⚡\n\n"
+                f"⚡ Volume: `High 🔥` \n"
+                f"🟡 Interest: `Flow Acceleration 🚀` \n"
                 "💹 *1h Flow:*\n"
                 f"  📥 In: `${data['in']/1000:.1f}K` \n"
                 f"  📤 Out: `${data['out']/1000:.1f}K` \n"
-                f"  ▲ Net: `+${data['net']/1000:.1f}K` ✅\n\n"
+                f"  ▲ Net: `+${data['net']/1000:.1f}K` ✅\n"
+                "🟡 Funding: `Neutral` 📈 Longs\n\n"
                 f"🕒 {datetime.now().strftime('%d %b %Y %H:%M')}\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⚠️ _ادخل الآن - العملة تكرر نموذج STO التاريخي!_ 🚀"
+                "⚠️ _ادخل الآن - تم رصد تسارع عنيف في سيولة الحيتان!_ 🎯"
             )
             send_telegram(msg)
-            logger.info(f"✅ Explosion Signal: {sym} | Spike: {data['spike']:.1f}x")
+            logger.info(f"✅ Atomic Flow: {sym} | Accel: {data['accel']:.1f}x")
             time.sleep(2)
         except: continue
 
 def main():
-    logger.info("🚀 MAFIO BOT 9.0 (300% Hunter) Started")
-    send_telegram("✅ *MAFIO BOT 9.0* متصل.\nتم تفعيل خوارزمية STO لاقتناص الانفجارات الكبرى من منطقة التجميع.")
+    logger.info("🚀 MAFIO BOT 10.0 (Atomic Flow) Started")
+    send_telegram("✅ *MAFIO BOT 10.0* متصل.\nتم تفعيل خوارزمية تسارع السيولة (Acceleration) لاقتناص الانفجارات اللحظية.")
     while True:
         try:
             scan()
