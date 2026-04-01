@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 12.0 (LIVE MONITORING MODE)
-السر: رصد الانفجارات اللحظية فقط وتجاهل الإشارات القديمة عند التشغيل
-المطور: MAFIO AI - نظام الرصد الصامت
+MAFIO BOT - VERSION 12.1 (LIVE MONITORING + HEARTBEAT)
+السر: رصد الانفجارات اللحظية فقط مع سجلات توضح حالة البحث المستمر
+المطور: MAFIO AI
 """
 
 import os
@@ -21,9 +21,9 @@ ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 # معايير الأمان والاقتناص
 MAX_SIGNALS_PER_DAY = 15
 MIN_VOLUME_24H = 300000    
-MIN_24H_CHANGE = -5.0      # منع النزيف الحاد
-MAX_24H_CHANGE = 12.0      # منع العملات المنفجرة مسبقاً
-MAX_PRICE_POS = 0.35       # الثلث السفلي من السعر
+MIN_24H_CHANGE = -5.0      
+MAX_24H_CHANGE = 12.0      
+MAX_PRICE_POS = 0.35       
 MIN_FLOW_RATIO = 5.0       
 MIN_NET_FLOW_USD = 25000   
 # ==========================================================
@@ -84,48 +84,24 @@ def track_profits():
         if (time.time() - active_trades[sym]['time']) > 86400: del active_trades[sym]
 
 def analyze_live_flow(sym):
-    """تحليل السيولة اللحظية مع شرط التقاطع الجديد"""
     try:
         kd_1h = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "1h", "limit": 30})
         kd_15m = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "15m", "limit": 30})
-        
         if not kd_1h or not kd_15m: return None
-
-        closes_1h = [float(c[4]) for c in kd_1h]
-        ema20_1h = calc_ema(closes_1h, 20)
-        
-        # 1. فلتر الترند (يجب أن يكون السعر فوق EMA20 ساعة)
+        closes_1h = [float(c[4]) for c in kd_1h]; ema20_1h = calc_ema(closes_1h, 20)
         if closes_1h[-1] < ema20_1h: return None
-
-        closes_15m = [float(c[4]) for c in kd_15m]
-        opens_15m = [float(c[1]) for c in kd_15m]
-        
-        # 2. شرط الشمعة الخضراء والتقاطع الجديد
+        closes_15m = [float(c[4]) for c in kd_15m]; opens_15m = [float(c[1]) for c in kd_15m]
         if closes_15m[-1] <= opens_15m[-1]: return None
-        
         ema20_15m = calc_ema(closes_15m, 20)
-        # التأكد أن السعر اخترق EMA20 في آخر شمعتين (تقاطع طازج)
         if closes_15m[-1] < ema20_15m: return None
-
-        # 3. تحليل السيولة
         in_f = 0; out_f = 0
         for i in range(-4, 0):
             c_val = float(kd_15m[i][5]) * float(kd_15m[i][4])
             if float(kd_15m[i][4]) > float(kd_15m[i][1]): in_f += c_val
             else: out_f += c_val
-        
-        net_f = in_f - out_f
-        ratio = in_f / out_f if out_f > 0 else 10.0
+        net_f = in_f - out_f; ratio = in_f / out_f if out_f > 0 else 10.0
         move_1h = ((closes_15m[-1] - float(kd_15m[-5][4])) / float(kd_15m[-5][4])) * 100
-
-        return {
-            "move_1h": move_1h,
-            "in": in_f,
-            "out": out_f,
-            "net": net_f,
-            "ratio": ratio,
-            "price": closes_15m[-1]
-        }
+        return {"move_1h": move_1h, "in": in_f, "out": out_f, "net": net_f, "ratio": ratio, "price": closes_15m[-1]}
     except: return None
 
 def scan():
@@ -135,41 +111,30 @@ def scan():
     tickers = get_data("https://api.mexc.com/api/v3/ticker/24hr")
     if not tickers: return
 
-    if state["is_first_run"]:
+    # نبض البحث (Heartbeat) لكي تعرف أن البوت يعمل
+    if not state["is_first_run"]:
+        logger.info(f"🔍 MAFIO BOT: Monitoring market... [Signals Today: {state['count']}]")
+    else:
         logger.info("🛡️ First scan: Building silent database (No signals will be sent)...")
 
     for t in tickers:
         sym = t['symbol']
         if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
-        
         try:
-            chg_24h = float(t['priceChangePercent'])
-            vol_24h = float(t['quoteVolume'])
-            price = float(t['lastPrice'])
-            high, low = float(t['highPrice']), float(t['lowPrice'])
-            
+            chg_24h = float(t['priceChangePercent']); vol_24h = float(t['quoteVolume'])
+            price = float(t['lastPrice']); high, low = float(t['highPrice']), float(t['lowPrice'])
             if chg_24h < MIN_24H_CHANGE or vol_24h < MIN_VOLUME_24H or chg_24h > MAX_24H_CHANGE: continue
-            
             price_pos = (price - low) / (high - low) if (high - low) > 0 else 0.5
             if price_pos > MAX_PRICE_POS: continue
             if sym in state["sent_coins"] or state["count"] >= MAX_SIGNALS_PER_DAY: continue
-
-            # التحليل اللحظي
             data = analyze_live_flow(sym)
             if not data: continue
-
             if data['ratio'] < MIN_FLOW_RATIO or data['net'] < MIN_NET_FLOW_USD: continue
-
-            # إذا كانت هذه أول دورة، أضف العملة للقائمة دون إرسال إشعار
             if state["is_first_run"]:
                 state["sent_coins"].append(sym)
                 continue
-
-            # إرسال الإشارة (فقط بعد انتهاء الدورة الأولى)
-            state["count"] += 1
-            state["sent_coins"].append(sym)
+            state["count"] += 1; state["sent_coins"].append(sym)
             active_trades[sym] = {'entry': price, 'time': time.time(), 'max_gain': 0, 'milestones': []}
-            
             msg = (
                 "💀 *MAFIO BOT - رصد لحظي* 💀\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
@@ -191,14 +156,13 @@ def scan():
             time.sleep(2)
         except: continue
 
-    # بعد انتهاء الدورة الأولى، قم بتغيير الحالة للسماح بالإشارات القادمة
     if state["is_first_run"]:
         state["is_first_run"] = False
         logger.info("✅ Silent database built. MAFIO BOT is now live and monitoring for NEW explosions!")
 
 def main():
-    logger.info("🚀 MAFIO BOT 12.0 (Live Monitoring) Started")
-    send_telegram("💀 *MAFIO BOT 12.0* متصل.\nالنظام الآن في وضع 'الرصد اللحظي'؛ لن تصلك إشارات قديمة عند التشغيل، فقط الانفجارات الجديدة.")
+    logger.info("🚀 MAFIO BOT 12.1 (Live Monitoring) Started")
+    send_telegram("💀 *MAFIO BOT 12.1* متصل.\nالنظام الآن في وضع 'الرصد اللحظي' النشط.")
     while True:
         try:
             scan()
