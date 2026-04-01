@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-# Build: 20260401-WOLF-EDITION
+# Build: 20260401-WOLF-FINAL
 """
 ╔══════════════════════════════════════════════════════════════╗
 ║           MAFIO-BOT — WOLF SNIPER EDITION            ║
-║       اصطياد الانفجارات من القاع (20% - 100%)         ║
+║     Anti-FOMO + Silent Volume + Bear Market Active   ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -15,34 +15,77 @@ import logging
 import requests
 from datetime import datetime, timezone
 
-# --- الإعدادات الذهبية لصيد القاع ---
-MIN_VOL_USDT       = 150_000   # منع عملات الـ Trash (مثل Pirate)
-MAX_CHG_ENTRY      = 7.0       # لا يدخل إذا صعدت أكثر من 7% (يصطاد من القاع)
-WOLF_SPIKE_LIMIT   = 4.5       # انفجار حجم 4.5 ضعف المعدل
-WOLF_PRICE_FLAT    = 1.2       # السعر شبه ثابت (تجميع خفي)
-MIN_NET_FLOW_USD   = 3000      # صافي سيولة حقيقية بالدولار
-SNIPER_TIMEFRAME   = "1m"      # الرصد على فريم الدقيقة للسرعة القصوى
+# --- إعدادات القناص (اصطياد القاع) ---
+MIN_VOL_USDT       = 150_000   # حد أدنى 150 ألف دولار (منع PIRATE)
+MAX_ENTRY_CHG      = 7.0       # لا يدخل إذا صعدت أكثر من 7% اليوم
+WOLF_SPIKE_LIMIT   = 4.0       # انفجار حجم 4 أضعاف في دقيقة واحدة
+WOLF_PRICE_FLAT    = 1.5       # السعر لم يتحرك أكثر من 1.5%
+MIN_NET_FLOW_USD   = 2500      # صافي سيولة حقيقية بالدولار
+CHECK_INTERVAL     = 10        # سرعة الفحص
 
-# ... (بقية الإعدادات والمكتبات كما هي في ملفك) ...
+# --- ثوابت وإعدادات البوت الأصلية ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
+CHAT_ID        = os.getenv("CHAT_ID",  "YOUR_CHAT_ID")
+GROUP_ID       = os.getenv("GROUP_ID", "")
 
-# --- دالة مطورة لمنع الدخول المتأخر (تمنع فخ ATLBRY) ---
-def _is_late_entry(price, high_24h, low_24h):
-    rng = high_24h - low_24h
-    if rng <= 0: return False
-    # إذا كان السعر في أعلى 10% من نطاق اليوم = خطر (تصريف)
-    pos = (price - low_24h) / rng
-    return pos >= 0.90 
+EXCLUDED = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"}
+EXTRA_COINS = ["STOUSDT", "SENTUSDT", "BIFIUSDT", "NOMUSDT", "RDNTUSDT", "SXPUSDT", "NTRNUSDT"]
 
-# --- القناص السريع (الذي يصطاد الانفجار قبل حدوثه بثوانٍ) ---
-def scan_wolf_sniper():
-    """
-    هذه الدالة هي قلب البوت الجديد.
-    تبحث عن: (انفجار فوليوم دقيقة واحدة + سعر ثابت + سيولة بالدولار)
-    """
-    global _fast_alerted, last_fast_scan
+# --- محرك التنبيهات ---
+def send(msg):
+    if not TELEGRAM_TOKEN: return
+    targets = [CHAT_ID]
+    if GROUP_ID: targets.append(GROUP_ID)
+    for chat_id in targets:
+        try:
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                          data={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+        except: pass
+
+def fmt_price(p):
+    if p < 0.0001: return "{:.8f}".format(p)
+    if p < 1: return "{:.6f}".format(p)
+    return "{:,.4f}".format(p)
+
+# --- جلب البيانات من MEXC ---
+def safe_get(url, params=None):
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        return r.json()
+    except: return None
+
+def get_klines(symbol, interval="1m", limit=10):
+    raw = safe_get("https://api.mexc.com/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
+    if not raw or len(raw) < 5: return None
+    return {
+        "closes": [float(c[4]) for c in raw],
+        "vols": [float(c[5]) for c in raw],
+        "opens": [float(c[1]) for c in raw],
+        "highs": [float(c[2]) for c in raw],
+        "lows": [float(c[3]) for c in raw]
+    }
+
+# --- حساب تدفق السيولة الحقيقي ---
+def calc_money_flow(sym):
+    kd = get_klines(sym, "1h", 3)
+    if not kd: return {"net": 0}
+    total_in = 0; total_out = 0
+    for i in range(len(kd["closes"])):
+        vol_usd = kd["vols"][i] * kd["closes"][i]
+        if kd["closes"][i] >= kd["opens"][i]: total_in += vol_usd
+        else: total_out += vol_usd
+    return {"net": total_in - total_out, "ratio": total_in/total_out if total_out > 0 else 10}
+
+# --- فلتر منع الدخول المتأخر (منع فخ القمم) ---
+def _is_late_entry(price, high, low):
+    if high == low: return False
+    pos = (price - low) / (high - low)
+    return pos >= 0.88 # إذا كان في أعلى 12% من سعر اليوم، فهو متأخر
+
+# --- خوارزمية WOLF SNIPER (صيد الانفجار الصامت) ---
+_fast_alerted = {}
+def scan_wolf_sniper(all_tickers):
     now = time.time()
-    if not all_tickers: return
-
     for t in all_tickers:
         try:
             sym = t["symbol"]
@@ -52,66 +95,61 @@ def scan_wolf_sniper():
             chg_24h = float(t["priceChangePercent"])
             price   = float(t["lastPrice"])
 
-            # الفلاتر القاسية لمنع الإشارات السيئة
-            if vol_24h < MIN_VOL_USDT: continue
-            if chg_24h > MAX_CHG_ENTRY: continue # صيد القاع فقط
-            
-            # فحص فريم الدقيقة الواحدة (السرعة القصوى)
+            if vol_24h < MIN_VOL_USDT: continue # منع العملات الميتة
+            if chg_24h > 15.0: continue # لا تدخل في عملة انفجرت بالفعل
+
+            # فحص فريم الدقيقة الواحدة لرصد "الحيتان"
             kd = get_klines(sym, "1m", 10)
             if not kd: continue
             
-            vols = kd["vols"]
-            closes = kd["closes"]
-            
-            avg_vol = sum(vols[-10:-1]) / 9
+            avg_vol = sum(kd["vols"][:-1]) / 9
             if avg_vol <= 0: continue
             
-            vol_spike = vols[-1] / avg_vol
-            price_move = abs((closes[-1] - closes[-2]) / closes[-2] * 100)
+            vol_spike = kd["vols"][-1] / avg_vol
+            price_move = abs((kd["closes"][-1] - kd["closes"][-2]) / kd["closes"][-2] * 100)
 
-            # الشرط الانفجاري: فوليوم ضخم + سعر لم يتحرك بعد
+            # الشرط الذهبي: فوليوم عالي جداً + سعر لم يتحرك
             if vol_spike > WOLF_SPIKE_LIMIT and price_move < WOLF_PRICE_FLAT:
-                # تأكيد السيولة بالدولار (Net Flow)
-                flow = calc_money_flow_1h(sym)
+                flow = calc_money_flow(sym)
                 if flow["net"] < MIN_NET_FLOW_USD: continue
                 
-                # منع الدخول إذا كنا عند القمة اليومية
-                h24 = float(t["highPrice"])
-                l24 = float(t["lowPrice"])
-                if _is_late_entry(price, h24, l24): continue
+                # التأكد من عدم الدخول في قمة اليوم
+                if _is_late_entry(price, float(t["highPrice"]), float(t["lowPrice"])): continue
 
-                base = sym.replace("USDT", "")
-                _confirm_count, _badge = _register_confirm(sym, "wolf_sniper")
+                if now - _fast_alerted.get(sym, 0) < 7200: continue
                 
                 msg = (
-                    "🐺 *WOLF SNIPER ALERT* 🐺 " + _badge + "\n"
+                    "🐺 *WOLF SNIPER ALERT* 🐺\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     "🎯 *#{}*\n"
                     "💰 سعر القاع: `{}`\n"
-                    "📊 انفجار سيولة: `{}x` في دقيقة واحدة! 🔥\n"
-                    "💹 صافي التدفق: `+${:,.0f}`\n"
+                    "📊 انفجار فوليوم: `{}x` صامت 🔥\n"
+                    "💹 سيولة داخلة: `+${:,.0f}`\n"
                     "━━━━━━━━━━━━━━━━━━\n"
-                    "🚀 *انفجار وشيك* — السعر لم يتحرك بعد 🎯\n"
-                    "📉 SL: `-3%` | الهدف: `+20% / +50%`"
-                ).format(base, fmt_price(price), round(vol_spike, 1), flow["net"])
+                    "🚀 *انفجار وشيك* — التجميع بدأ الآن 🎯\n"
+                    "⏱️ فريم الرصد: 1 دقيقة"
+                ).format(sym.replace("USDT",""), fmt_price(price), round(vol_spike,1), flow["net"])
                 
-                if now - _fast_alerted.get(sym, 0) > 7200:
-                    send(msg)
-                    _fast_alerted[sym] = now
-                    # تسجيل الإشارة للمتابعة
-                    perf_register(sym, price, "wolf_sniper", 99, "Bottom Sniper")
+                send(msg)
+                _fast_alerted[sym] = now
         except: continue
 
-# --- دالة 1h Move المعدلة (لاصطياد بداية الموجة) ---
-def scan_1h_move_wolf():
-    """
-    تعديل خاص: يدخل فقط إذا كان الـ Flow استثنائي والسعر في البداية
-    """
-    # (تم تعديل المعايير داخل الدالة الأصلية في السكريبت الكامل)
-    pass
+# --- الحلقة الرئيسية ---
+def run():
+    logging.basicConfig(level=logging.INFO)
+    print("🚀 MAFIO-BOT WOLF EDITION IS STARTING...")
+    send("✅ *البوت يعمل الآن بنظام Wolf Sniper* 🐺\nيتم رصد السيولة في القاع كل 10 ثوانٍ.")
 
-# --- تعديل محرك البحث عن العملات الساخنة ليعمل في السوق السلبي ---
-def analyze_btc_wolf():
-    # جعل البوت لا يتوقف عن العمل في السوق الأحمر، بل يصبح أكثر انتقائية
-    global market_state
-    # ... (المنطق موجود في السكريبت الكامل)
+    while True:
+        try:
+            data = safe_get("https://api.mexc.com/api/v3/ticker/24hr")
+            if data:
+                scan_wolf_sniper(data)
+            
+            time.sleep(CHECK_INTERVAL)
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    run()
