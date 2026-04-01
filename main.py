@@ -1,118 +1,186 @@
 # -*- coding: utf-8 -*-
-# Build: 20260401-ULTIMATE-WOLF
-import os, sys, time, requests, logging
-from datetime import datetime
+# Build: 20260401-WOLF-FLOW-FINAL
+"""
+╔══════════════════════════════════════════════════════════════╗
+║           WOLF FLOW ENGINE (Optimized MAFIO)         ║
+║   High Precision | Anti-Noise | Institutional Flow      ║
+╚══════════════════════════════════════════════════════════════╝
+"""
 
-# --- إعدادات اللوجات لـ Railway ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-log = logging.getLogger("WolfSniper")
+import os
+import sys
+import time
+import json
+import logging
+import requests
+from datetime import datetime, timezone
 
-# --- الإعدادات الذهبية (صيد القاع) ---
-MIN_VOL_24H      = 150000    # منع العملات الوهمية
-MAX_CHG_24H      = 8.0       # صيد من القاع فقط
-WOLF_SPIKE_LIMIT = 4.0       # انفجار حجم 4 أضعاف في دقيقة
-MIN_NET_FLOW     = 2000      # سيولة حقيقية بالدولار
-CHECK_INTERVAL   = 12        # ثانية بين كل دورة فحص
+# === الإعدادات (قم بوضع بياناتك هنا) ===
+TELEGRAM_TOKEN = "ضع_هنا_توكن_البوت"
+CHAT_ID        = "ضع_هنا_ايدي_حسابك"
 
-# --- إعدادات التليجرام ---
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-CHAT_ID        = os.getenv("CHAT_ID", "")
+# --- حدود الإشارات (لضمان الجودة) ---
+MAX_DAILY_SIGNALS  = 12      # الحد الأقصى للإشارات في اليوم (أقل من 15 كما طلبت)
+COIN_DAILY_LIMIT   = 1       # إشارة واحدة فقط لكل عملة في اليوم لمنع التكرار
+GLOBAL_SIGNAL_COOL = 1800    # انتظار 30 دقيقة بين كل إشارة وأخرى لمنع كثرة الرسائل
 
-def send_tg(msg):
-    if not TELEGRAM_TOKEN or not CHAT_ID: return
+# --- معايير Wolf Flow (الدقة العالية) ---
+MIN_VDELTA_STRONG  = 0.72    # ضغط شراء حقيقي 72%+ (قوي جداً)
+MIN_FLOW_RATIO     = 4.0     # دخول السيولة يجب أن يكون 4 أضعاف الخروج على الأقل
+MIN_VOL_USDT       = 500_000 # الحد الأدنى لحجم التداول اليومي (لضمان وجود سيولة)
+EMA_FAST           = 5       # متوسط سريع
+EMA_SLOW           = 20      # متوسط بطيء
+
+# === حالة البوت (State) ===
+daily_signals = {"date": "", "count": 0, "coins": []}
+last_signal_time = 0.0
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("WolfFlow")
+
+# === وظائف مساعدة ===
+def send(msg):
+    if not TELEGRAM_TOKEN or "ضع_هنا" in TELEGRAM_TOKEN:
+        log.info(f"[PREVIEW] {msg[:100]}...")
+        return
     try:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                      data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except Exception as e: log.error(f"Telegram Error: {e}")
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"},
+            timeout=10
+        )
+    except Exception as e:
+        log.error(f"Telegram Error: {e}")
 
-def safe_get(url, params=None):
+def can_send_signal(symbol):
+    global daily_signals, last_signal_time
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # إعادة ضبط العداد اليومي عند تغيير التاريخ
+    if daily_signals["date"] != today:
+        daily_signals = {"date": today, "count": 0, "coins": []}
+    
+    # فحص الحدود
+    if daily_signals["count"] >= MAX_DAILY_SIGNALS: 
+        log.info("Daily limit reached.")
+        return False
+    if symbol in daily_signals["coins"]: 
+        log.info(f"Symbol {symbol} already sent today.")
+        return False
+    if time.time() - last_signal_time < GLOBAL_SIGNAL_COOL: 
+        return False
+    
+    return True
+
+def register_signal(symbol):
+    global daily_signals, last_signal_time
+    daily_signals["count"] += 1
+    daily_signals["coins"].append(symbol)
+    last_signal_time = time.time()
+
+def get_klines(symbol, interval="15m", limit=50):
+    url = "https://api.mexc.com/api/v3/klines"
     try:
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code == 200: return r.json()
-        if r.status_code == 429: log.warning("⚠️ Rate Limit Hit! Sleeping...") ; time.sleep(30)
-        return None
+        r = requests.get(url, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=10)
+        data = r.json()
+        return {
+            "closes": [float(c[4]) for c in data],
+            "vols": [float(c[5]) for c in data],
+            "opens": [float(c[1]) for c in data],
+            "highs": [float(c[2]) for c in data],
+            "lows": [float(c[3]) for c in data]
+        }
     except: return None
 
-def get_klines(sym, interval="1m", limit=10):
-    data = safe_get("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": interval, "limit": limit})
-    if not data or len(data) < 5: return None
-    return {
-        "vols": [float(c[5]) for c in data],
-        "closes": [float(c[4]) for c in data],
-        "opens": [float(c[1]) for c in data]
-    }
+def calc_ema(prices, period):
+    if len(prices) < period: return 0
+    k = 2 / (period + 1)
+    ema = sum(prices[:period]) / period
+    for p in prices[period:]:
+        ema = (p * k) + (ema * (1 - k))
+    return ema
 
-def wolf_logic(all_tickers):
-    now = time.time()
-    # 1. فلترة أولية لتقليل عدد العملات (حماية من الحظر)
-    candidates = []
-    for t in all_tickers:
+# === المحرك الرئيسي للفحص ===
+def scan_wolf_flow():
+    """
+    الماسح الرئيسي: يجمع بين تدفق السيولة وتقاطع المتوسطات
+    """
+    try:
+        r = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10)
+        tickers = r.json()
+    except: return
+
+    for t in tickers:
+        sym = t["symbol"]
+        if not sym.endswith("USDT"): continue
+        
         try:
-            sym = t["symbol"]
             vol = float(t["quoteVolume"])
             chg = float(t["priceChangePercent"])
-            if sym.endswith("USDT") and vol > MIN_VOL_24H and chg < MAX_CHG_24H:
-                candidates.append(t)
+            price = float(t["lastPrice"])
         except: continue
 
-    log.info(f"🔍 Scanning {len(candidates)} potential coins from the bottom...")
+        # فلاتر أساسية: حجم جيد + تغيير إيجابي معقول
+        if vol < MIN_VOL_USDT or chg < 1.0 or chg > 25.0: continue
+        if not can_send_signal(sym): continue
 
-    for t in candidates:
-        sym = t["symbol"]
-        try:
-            # فحص السيولة اللحظية (1 دقيقة)
-            kd = get_klines(sym, "1m", 10)
-            if not kd: continue
-            
-            avg_vol = sum(kd["vols"][:-1]) / 9
-            if avg_vol <= 0: continue
-            
-            vol_spike = kd["vols"][-1] / avg_vol
-            price_move = abs((kd["closes"][-1] - kd["closes"][-2]) / kd["closes"][-2] * 100)
+        # 1. فحص الشموع (EMA + Flow)
+        kd = get_klines(sym, "15m", 40)
+        if not kd: continue
+        
+        ema5 = calc_ema(kd["closes"], EMA_FAST)
+        ema20 = calc_ema(kd["closes"], EMA_SLOW)
+        
+        # شرط الاتجاه: المتوسط السريع فوق البطيء (بداية انفجار)
+        if ema5 <= ema20: continue
 
-            # الشرط الصاعق: فوليوم عالي + سعر لم يتحرك
-            if vol_spike >= WOLF_SPIKE_LIMIT and price_move < 1.5:
-                # تأكيد التدفق بالدولار
-                net_flow = kd["vols"][-1] * kd["closes"][-1]
-                if net_flow < MIN_NET_FLOW: continue
+        # 2. حساب تدفق السيولة (Wolf Flow Style)
+        total_in = 0; total_out = 0
+        for i in range(-5, 0): # آخر 5 شموع (ساعة وربع من البيانات)
+            c_vol = kd["vols"][i] * kd["closes"][i]
+            if kd["closes"][i] > kd["opens"][i]:
+                total_in += c_vol
+            else:
+                total_out += c_vol
+        
+        flow_ratio = total_in / total_out if total_out > 0 else 10.0
+        vdelta = total_in / (total_in + total_out) if (total_in + total_out) > 0 else 0.5
 
-                msg = (
-                    "🐺 *WOLF SNIPER SIGNAL* 🐺\n"
-                    "━━━━━━━━━━━━━━━━━━\n"
-                    "🎯 *#{}*\n"
-                    "📊 الانفجار: `{}x` فوليوم دقيقة 🔥\n"
-                    "💹 سيولة السيولة: `+${:,.0f}`\n"
-                    "💰 السعر الحالي: `{}`\n"
-                    "━━━━━━━━━━━━━━━━━━\n"
-                    "🚀 *السيولة دخلت بالقاع — الانفجار وشيك* 🎯"
-                ).format(sym.replace("USDT",""), round(vol_spike,1), net_flow, t["lastPrice"])
-                
-                log.info(f"🔥 SIGNAL FOUND: {sym}!")
-                send_tg(msg)
-                time.sleep(1) # تأخير بسيط بين الإشارات
-        except: continue
+        # فلاتر Wolf Flow الصارمة لمنع الإشارات الخاطئة
+        if flow_ratio < MIN_FLOW_RATIO or vdelta < MIN_VDELTA_STRONG: continue
+
+        # 3. إرسال الإشارة بجودة عالية
+        register_signal(sym)
+        msg = (
+            "🐺 *WOLF FLOW SIGNAL* 🐺\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"📍 *#{sym.replace('USDT','')}*\n"
+            f"💰 Price: `{price}`\n"
+            f"📈 24h Change: `+{chg}%`\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"🌊 *Liquidity Flow:*\n"
+            f"  🟢 Inflow: `${total_in/1e3:.1f}K`\n"
+            f"  🔴 Outflow: `${total_out/1e3:.1f}K`\n"
+            f"  📊 Ratio: `{flow_ratio:.1f}x` 🔥\n"
+            f"  💎 VDelta: `{vdelta*100:.0f}%` (Strong Buy)\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚡ *Indicators:* EMA5 > EMA20 ✅\n"
+            "🚀 _Explosion detected before pump!_"
+        )
+        send(msg)
+        log.info(f"Signal Sent: {sym} | Ratio: {flow_ratio:.1f}x")
 
 def run():
-    log.info("🚀 MAFIO-BOT WOLF EDITION STARTED SUCCESSFULY")
-    send_tg("✅ *البوت بدأ العمل بنظام Wolf Sniper*\nيتم الآن مسح السوق بحثاً عن السيولة المختبئة بالقاع...")
-
+    log.info("Wolf Flow Bot Started...")
+    print("البوت يعمل الآن... سيتم إرسال الإشارات إلى تلغرام فور رصدها.")
+    
     while True:
-        start_time = time.time()
-        data = safe_get("https://api.mexc.com/api/v3/ticker/24hr")
-        
-        if data:
-            wolf_logic(data)
-            elapsed = time.time() - start_time
-            log.info(f"✅ Cycle finished in {round(elapsed, 1)}s. Waiting for next cycle...")
-        else:
-            log.error("❌ Failed to fetch market data. Retrying...")
-        
-        sys.stdout.flush() # لضمان ظهور اللوجات فوراً في Railway
-        time.sleep(CHECK_INTERVAL)
+        try:
+            scan_wolf_flow()
+            time.sleep(60) # فحص كل دقيقة
+        except Exception as e:
+            log.error(f"Loop Error: {e}")
+            time.sleep(30)
 
 if __name__ == "__main__":
     run()
