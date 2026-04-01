@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 6.0 (ULTRA STRICT - PRE-EXPLOSION)
-الاستراتيجية: اقتناص التجميع في القاع الحقيقي (Bottom Accumulation)
-منع شراء القمم نهائياً والتركيز على السيولة الشرائية الصامتة
+MAFIO BOT - VERSION 7.1 (SKULL EDITION)
+الاستراتيجية: اقتناص التجميع في القاع + تتبع الأرباح تلقائياً (Profit Tracking)
+المطور: MAFIO AI
 """
 
 import os
@@ -13,150 +13,154 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات الصارمة - Strict Settings
+# الإعدادات - Settings
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير الاقتناص (Strict Wolf Flow Logic)
-MAX_SIGNALS_PER_DAY = 10
-MIN_VOLUME_24H = 300000    
-MAX_24H_CHANGE = 7.0       # صارم جداً: لا ندخل في عملة ارتفعت أكثر من 7% في يوم
-MAX_PRICE_POS = 0.25       # صارم جداً: العملة يجب أن تكون في أول 25% من قاع اليوم (قاع حقيقي)
-MIN_FLOW_RATIO = 5.0       # الشراء يجب أن يكون 5 أضعاف البيع
-MIN_NET_FLOW_USD = 8000    # صافي دخول السيولة في ساعة
+# معايير الاقتناص
+MAX_SIGNALS_PER_DAY = 15
+MIN_VOLUME_24H = 250000    
+MAX_24H_CHANGE = 10.0      # لا ندخل في عملة طارت أكثر من 10% في يوم
+MAX_PRICE_POS = 0.35       # يجب أن تكون العملة في أول 35% من قاع اليوم
+MIN_FLOW_RATIO = 4.0       # الشراء 4 أضعاف البيع
 # ==========================================================
 
+# سجلات بيضاء لـ Railway
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
 logger = logging.getLogger("MAFIO_BOT")
 
+# حالة البوت وتتبع الأرباح
 state = {"date": "", "count": 0, "sent_coins": []}
-last_signal_time = 0
+active_trades = {} # لتتبع الأرباح {sym: {'entry': price, 'time': ts, 'max_gain': 0, 'milestones': []}}
 
 def send_telegram(message):
     if "ضع_" in TOKEN or not TOKEN: return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try:
-        requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=15)
+    try: requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=15)
     except: pass
 
 def get_data(url, params=None):
     try:
         r = requests.get(url, params=params, timeout=15)
-        if r.status_code != 200: return None
-        return r.json()
+        return r.json() if r.status_code == 200 else None
     except: return None
 
-def analyze_bottom_accumulation(sym):
-    """تحليل التجميع في القاع (سعر ثابت + سيولة تنفجر)"""
-    try:
-        # جلب شموع 15 دقيقة لآخر ساعتين (8 شموع)
-        kd = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "15m", "limit": 20})
-        if not isinstance(kd, list) or len(kd) < 12: return None
-
-        in_flow = 0; out_flow = 0
-        closes = []
+def track_profits():
+    """تتبع العملات المرسلة وإرسال تنبيه عند تحقيق أرباح"""
+    if not active_trades: return
+    
+    tickers = get_data("https://api.mexc.com/api/v3/ticker/24hr")
+    if not tickers: return
+    
+    ticker_dict = {t['symbol']: float(t['lastPrice']) for t in tickers}
+    
+    for sym in list(active_trades.keys()):
+        if sym not in ticker_dict: continue
         
-        # تحليل آخر 4 شموع (الساعة الأخيرة)
-        for c in kd[-4:]:
-            op, hi, lo, cl, vo = float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])
-            closes.append(cl)
-            candle_usd_vol = vo * cl
-            if cl > op: in_flow += candle_usd_vol
-            else: out_flow += candle_usd_vol
+        current_price = ticker_dict[sym]
+        entry_price = active_trades[sym]['entry']
+        start_time = active_trades[sym]['time']
         
-        if out_flow == 0: out_flow = 1
-        ratio = in_flow / out_flow
-        net_flow = in_flow - out_flow
+        gain = ((current_price - entry_price) / entry_price) * 100
         
-        # حساب حركة السعر في آخر 4 ساعات (يجب أن لا تكون قد انفجرت)
-        price_4h_ago = float(kd[0][4])
-        move_4h = ((closes[-1] - price_4h_ago) / price_4h_ago) * 100
-        
-        # حركة الساعة الأخيرة
-        move_1h = ((closes[-1] - float(kd[-5][4])) / float(kd[-5][4])) * 100
-
-        return {
-            "move_1h": move_1h,
-            "move_4h": move_4h,
-            "in": in_flow,
-            "out": out_flow,
-            "net": net_flow,
-            "ratio": ratio,
-            "price": closes[-1]
-        }
-    except: return None
+        # تتبع أعلى ربح وصل له
+        if gain > active_trades[sym]['max_gain']:
+            active_trades[sym]['max_gain'] = gain
+            
+        # إرسال تنبيه عند تحقيق أهداف (2%, 5%, 10%, 20%...)
+        for milestone in [2, 5, 10, 20, 50, 100]:
+            if gain >= milestone and milestone not in active_trades[sym]['milestones']:
+                active_trades[sym]['milestones'].append(milestone)
+                duration = int((time.time() - start_time) / 60) # بالدقائق
+                
+                msg = (
+                    f"✅ *{sym.replace('USDT','')} WIN confirmed +{milestone}% reached*\n"
+                    f"📊 Max gain: `+{active_trades[sym]['max_gain']:.2f}%` \n"
+                    f"💰 Price now: `${current_price:.8g}` \n"
+                    f"🏁 Entry: `${entry_price:.8g}` \n"
+                    f"⏱ Achieved in: `{duration}m`"
+                )
+                send_telegram(msg)
+                
+        # حذف من التتبع بعد 24 ساعة
+        if (time.time() - start_time) > 86400:
+            del active_trades[sym]
 
 def scan():
-    global last_signal_time
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if state["date"] != today:
         state.update({"date": today, "count": 0, "sent_coins": []})
 
     tickers = get_data("https://api.mexc.com/api/v3/ticker/24hr")
-    if not isinstance(tickers, list): return
+    if not tickers: return
 
     for t in tickers:
-        sym = t.get('symbol', '')
+        sym = t['symbol']
         if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
         
         try:
             price = float(t['lastPrice'])
-            high = float(t['highPrice'])
-            low = float(t['lowPrice'])
-            vol_24h = float(t['quoteVolume'])
-            chg_24h = float(t['priceChangePercent'])
+            high, low = float(t['highPrice']), float(t['lowPrice'])
+            vol_24h, open_p = float(t['quoteVolume']), float(t['openPrice'])
             
-            # 1. فلتر القاع الصارم: السعر يجب أن يكون في أول 25% من نطاق اليوم
             price_pos = (price - low) / (high - low) if (high - low) > 0 else 0.5
-            if price_pos > MAX_PRICE_POS: continue 
+            real_chg = ((price - open_p) / open_p) * 100
 
-            # 2. فلتر التغيير اليومي: لا ندخل في عملة "خضراء" جداً
-            if vol_24h < MIN_VOLUME_24H or chg_24h > MAX_24H_CHANGE: continue
-            
+            if price_pos > MAX_PRICE_POS or vol_24h < MIN_VOLUME_24H or real_chg > MAX_24H_CHANGE: continue
             if sym in state["sent_coins"] or state["count"] >= MAX_SIGNALS_PER_DAY: continue
-            if time.time() - last_signal_time < 900: continue # إشارة كل 15 دقيقة كحد أقصى
 
-            # 3. التحليل العميق للتجميع (Accumulation)
-            flow = analyze_bottom_accumulation(sym)
-            if not flow: continue
+            # تحليل السيولة (Flow)
+            kd = get_data("https://api.mexc.com/api/v3/klines", {"symbol": sym, "interval": "15m", "limit": 10})
+            if not kd or len(kd) < 5: continue
+            
+            in_f = 0; out_f = 0
+            for c in kd[-4:]:
+                c_vol = float(c[5]) * float(c[4])
+                if float(c[4]) > float(c[1]): in_f += c_vol
+                else: out_f += c_vol
+            
+            if out_f == 0: out_f = 1
+            ratio = in_f / out_f
+            net_f = in_f - out_f
+            move_1h = ((price - float(kd[-5][4])) / float(kd[-5][4])) * 100
 
-            # شرط الاقتناص: سيولة ضخمة + السعر لم ينفجر في 4 ساعات
-            if flow['ratio'] < MIN_FLOW_RATIO or flow['net'] < MIN_NET_FLOW_USD or flow['move_4h'] > 10.0: continue
+            if ratio < MIN_FLOW_RATIO or net_f < 5000: continue
 
             # إرسال الإشارة
             state["count"] += 1
             state["sent_coins"].append(sym)
-            last_signal_time = time.time()
+            active_trades[sym] = {'entry': price, 'time': time.time(), 'max_gain': 0, 'milestones': []}
             
             msg = (
-                "🐺 *MAFIO BOT - اقتناص من القاع* 🐺\n\n"
-                f"🆕 *#{sym.replace('USDT','')}* 🐺 · 🔔 Signal #{state['count']}\n"
-                f"💰 Price: `${flow['price']:.8g}`\n"
-                f"📈 1h Move: `+{flow['move_1h']:.2f}%` ⚡\n"
+                "💀 *MAFIO BOT - اقتناص من القاع* 💀\n\n"
+                f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
+                f"💰 Price: `${price:.8g}`\n"
+                f"📈 1h Move: `+{move_1h:.2f}%` ⚡\n"
                 f"📍 Position: `%{price_pos*100:.0f}` from Bottom ✅\n\n"
                 f"⚡ Volume: `Good ✅` \n"
                 f"🟡 Interest: `Institutional 🐋` \n"
                 "💹 *1h Flow:*\n"
-                f"  📥 In: `${flow['in']/1000:.1f}K` \n"
-                f"  📤 Out: `${flow['out']/1000:.1f}K` \n"
-                f"  ▲ Net: `+${flow['net']/1000:.1f}K` ✅\n"
+                f"  📥 In: `${in_f/1000:.1f}K` \n"
+                f"  📤 Out: `${out_f/1000:.1f}K` \n"
+                f"  ▲ Net: `+${net_f/1000:.1f}K` ✅\n"
                 "🟡 Funding: `Neutral` 📈 Longs\n\n"
                 f"🕒 {datetime.now().strftime('%d %b %Y %H:%M')}\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 "⚠️ _ادخل الآن - العملة في القاع والسيولة بدأت بالانفجار!_ 🚀"
             )
             send_telegram(msg)
-            logger.info(f"✅ Strict Catch: {sym} | Pos: {price_pos:.2f}")
+            logger.info(f"✅ Signal: {sym}")
             time.sleep(2)
         except: continue
 
 def main():
-    logger.info("🚀 MAFIO BOT 6.0 (Strict Bottom Hunter) Started")
-    send_telegram("✅ *MAFIO BOT 6.0* متصل.\nتم تفعيل فلاتر القاع الصارمة لمنع شراء القمم واقتناص الانفجارات من البداية.")
+    logger.info("🚀 MAFIO BOT 7.1 (Skull Edition) Started")
+    send_telegram("✅ *MAFIO BOT 7.1* متصل.\nتم استبدال الشعار برأس الجمجمة 💀 وتفعيل نظام تتبع الأرباح.")
     while True:
         try:
             scan()
+            track_profits() 
             time.sleep(60) 
         except Exception as e:
             logger.error(f"Error: {e}")
