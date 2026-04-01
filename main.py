@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 15.2 (GEM SNIPER EDITION)
-السر: اقتناص الانفجار السيولاتي (Liquidity Sniping)
-الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + تقاطع EMA
-المطور: MAFIO AI - نظام القناص الاحترافي
+MAFIO BOT - VERSION 15.3 (TREND SHIELD EDITION)
+السر: اقتناص الانفجار السيولاتي (Liquidity Sniping) + حماية الترند
+الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + تقاطع EMA + EMA50 Shield
+المطور: MAFIO AI - نظام القناص المطور
 """
 
 import os
@@ -20,17 +20,17 @@ TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
 # معايير "التجميع الساكن" (Static Accumulation)
-MIN_VOLUME_24H = 250000     # تخفيض لاقتناص العملات الواعدة (Gems) مثل BANK
+MIN_VOLUME_24H = 250000     
 MIN_24H_CHANGE = -5.0       
-MAX_24H_CHANGE = 12.0       # زيادة طفيفة للسماح بمرونة أكبر
-MAX_PRICE_POS = 0.50        # السماح بالدخول حتى لو ارتفعت قليلاً عن القاع
+MAX_24H_CHANGE = 12.0       
+MAX_PRICE_POS = 0.40        # تخفيض لضمان القرب من القاع الحقيقي
 
-# معايير الانفجار اللحظي (MAFIO Sniper 15.2)
-MIN_FLOW_RATIO = 3.5        
-MAX_FLOW_RATIO = 500.0      # منع النسب الخيالية (تلاعب)
-MIN_NET_FLOW_USD = 25000    # تخفيض الصافي المطلوب ليتناسب مع العملات الصغيرة
-MAX_1H_MOVE = 20.0          # منع الدخول المتأخر (أهم تعديل)
-MIN_VOL_ACCEL = 1.8         # يجب أن يكون هناك زخم حقيقي في الحجم
+# معايير الانفجار اللحظي (MAFIO Sniper 15.3 - Trend Shield)
+MIN_FLOW_RATIO = 3.8        # رفع النسبة قليلاً لزيادة الدقة
+MAX_FLOW_RATIO = 500.0      
+MIN_NET_FLOW_USD = 30000    # رفع الصافي المطلوب لتأكيد دخول الحيتان
+MAX_1H_MOVE = 18.0          
+MIN_VOL_ACCEL = 2.0         # رفع شرط الزخم لضمان قوة الدفع
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -115,8 +115,9 @@ def analyze_flow(sym, source):
         ema5 = calc_ema(closes, 5)
         ema10 = calc_ema(closes, 10)
         ema20 = calc_ema(closes, 20)
+        ema50 = calc_ema(closes, 50)
         
-        if not (closes[-1] > ema5 > ema10 > ema20): return "TREND_DOWN"
+        if not (closes[-1] > ema5 > ema10 > ema20 and closes[-1] > ema50): return "TREND_DOWN"
         
         avg_vol = sum(vols[-11:-1]) / 10
         vol_accel = vols[-1] / avg_vol if avg_vol > 0 else 1.0
@@ -132,13 +133,8 @@ def analyze_flow(sym, source):
         
         move_1h = ((closes[-1] - float(kd[-13][4])) / float(kd[-13][4])) * 100
         
-        # تصفية الدخول المتأخر (Late Entry)
         if move_1h > MAX_1H_MOVE: return "LATE_ENTRY"
-        
-        # تصفية النسب الخيالية (تلاعب)
         if ratio > MAX_FLOW_RATIO: return "FAKE_FLOW"
-        
-        # تصفية الحجم الضعيف (No Momentum)
         if vol_accel < MIN_VOL_ACCEL: return "LOW_MOMENTUM"
         
         return {
@@ -172,7 +168,6 @@ def scan():
         sym = t['symbol']
         if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
         
-        # تصفية العملات المستقرة (Stablecoins)
         stables = ["USDC", "BUSD", "USD1", "EUR", "GBP", "DAI", "FDUSD", "TUSD", "USDP", "PYUSD", "USDD", "ZUSD"]
         if any(s in sym for s in stables): continue
         
@@ -199,7 +194,7 @@ def scan():
         if sym in state["sent_coins"]: continue
 
         data = analyze_flow(sym, source)
-        if not data or isinstance(data, str): continue
+        if not data or data == "TREND_DOWN": continue
         
         if data['ratio'] >= MIN_FLOW_RATIO and data['net'] >= MIN_NET_FLOW_USD:
             if state["is_first_run"]:
@@ -214,7 +209,7 @@ def scan():
             
             msg = (
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"💀 *MAFIO SNIPER 15.2* 📡\n\n"
+                f"💀 *MAFIO SNIPER 15.3* 📡\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
@@ -239,8 +234,8 @@ def scan():
         logger.info("✅ Silent first scan complete. Sniper is active!")
 
 def main():
-    logger.info("🚀 MAFIO BOT 15.2 (Sniper Edition) Started")
-    send_telegram("💀 *MAFIO BOT 15.2* متصل.\nتم تفعيل نظام اقتناص الكنوز (Gem Sniper) بنجاح.")
+    logger.info("🚀 MAFIO BOT 15.3 (Trend Shield Edition) Started")
+    send_telegram("💀 *MAFIO BOT 15.3* متصل.\nتم تفعيل نظام درع الترند (Trend Shield) لتجنب الارتدادات الوهمية.")
     
     while True:
         try:
