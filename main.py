@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 14.0 (BINANCE FLOW ENGINE)
-السر: استخدام محرك Binance لرصد سيولة الحيتان الحقيقية
+MAFIO BOT - VERSION 14.1 (TRANSPARENCY & FLOW)
+السر: سجلات لحظية لكل خطوة + تحسين حساسية Binance
 المطور: MAFIO AI
 """
 
@@ -13,20 +13,20 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات الاحترافية - Binance Pro Settings
+# الإعدادات الاحترافية - Binance Settings
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير Binance (سيولة أعلى = دقة أكبر)
-MIN_VOLUME_24H = 1000000    # 1 مليون دولار كحد أدنى
-MIN_24H_CHANGE = -10.0      
-MAX_24H_CHANGE = 25.0      
-MAX_PRICE_POS = 0.60       
+# معايير Binance (تم تحسينها للحساسية)
+MIN_VOLUME_24H = 800000     # 800 ألف دولار
+MIN_24H_CHANGE = -12.0      
+MAX_24H_CHANGE = 30.0      
+MAX_PRICE_POS = 0.65       
 
-# معايير الانفجار (Flow Logic)
-MIN_FLOW_RATIO = 3.5       # سيولة داخلة 3.5 أضعاف الخارجة
-MIN_NET_FLOW_USD = 50000   # 50 ألف دولار صافي سيولة في 15 دقيقة
+# معايير الانفجار
+MIN_FLOW_RATIO = 3.2       
+MIN_NET_FLOW_USD = 30000   # 30 ألف دولار صافي سيولة
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -56,43 +56,40 @@ def calc_ema(prices, period):
     return ema
 
 def analyze_flow(sym):
-    """تحليل سيولة Binance"""
     try:
-        # طلب بيانات 15 دقيقة (30 شمعة)
+        time.sleep(0.2) # تجنب الحظر
         kd = get_binance_data("klines", {"symbol": sym, "interval": "15m", "limit": 30})
         if not kd: return None
         
         closes = [float(c[4]) for c in kd]; opens = [float(c[1]) for c in kd]; vols = [float(c[5]) for c in kd]
-        
-        # فلتر الترند (EMA 20)
         ema20 = calc_ema(closes, 20)
         if closes[-1] < ema20: return "TREND_DOWN"
         
         in_f = 0; out_f = 0
-        for i in range(-4, 0): # آخر ساعة (4 شموع 15د)
+        for i in range(-4, 0):
             c_val = vols[i] * closes[i]
             if closes[i] > opens[i]: in_f += c_val
             else: out_f += c_val
         
         if out_f == 0: out_f = 1
         ratio = in_f / out_f
-        net = in_f - out_f
-        
-        return {"in": in_f, "out": out_f, "net": net, "ratio": ratio, "price": closes[-1]}
+        return {"in": in_f, "out": out_f, "net": in_f - out_f, "ratio": ratio, "price": closes[-1]}
     except: return None
 
 def scan():
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if state["date"] != today: state.update({"date": today, "count": 0, "sent_coins": []})
 
-    # جلب كافة العملات من Binance
+    logger.info("🔍 Fetching market data from Binance...")
     tickers = get_binance_data("ticker/24hr")
-    if not tickers: return
+    if not tickers: 
+        logger.error("❌ Failed to fetch tickers from Binance")
+        return
 
     candidates = []
     for t in tickers:
         sym = t['symbol']
-        if not sym.endswith("USDT"): continue
+        if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
         try:
             chg_24h = float(t['priceChangePercent']); vol_24h = float(t['quoteVolume'])
             price = float(t['lastPrice']); high, low = float(t['highPrice']), float(t['lowPrice'])
@@ -104,12 +101,17 @@ def scan():
             candidates.append({'sym': sym, 'vol': vol_24h, 'price': price, 'chg': chg_24h})
         except: continue
 
-    # ترتيب حسب الحجم واختيار التوب 50
+    logger.info(f"📊 Found {len(candidates)} candidates matching basic filters.")
     candidates.sort(key=lambda x: x['vol'], reverse=True)
-    top_50 = candidates[:50]
+    top_40 = candidates[:40]
 
+    if not top_40:
+        logger.info("😴 No elite candidates found in this cycle.")
+        return
+
+    logger.info(f"🧪 Analyzing flow for top {len(top_40)} coins...")
     max_r = 0.0
-    for c in top_50:
+    for c in top_40:
         sym = c['sym']
         if sym in state["sent_coins"]: continue
 
@@ -118,10 +120,8 @@ def scan():
         
         if data['ratio'] > max_r: max_r = data['ratio']
         
-        # شروط الإرسال
         if data['ratio'] >= MIN_FLOW_RATIO and data['net'] >= MIN_NET_FLOW_USD:
             state["count"] += 1; state["sent_coins"].append(sym)
-            
             msg = (
                 "🐺 *MAFIO BOT - BINANCE FLOW* 🐺\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
@@ -131,29 +131,24 @@ def scan():
                 f"🌊 *Net Flow:* `+${data['net']/1000:.1f}K` \n"
                 f"🕒 {datetime.now().strftime('%H:%M UTC')}\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                "⚠️ _سيولة مؤسساتية ضخمة مرصودة على Binance!_ 🚀"
+                "⚠️ _سيولة مؤسساتية مرصودة على Binance!_ 🚀"
             )
             send_telegram(msg)
-            logger.info(f"✅ Binance Signal: {sym} | Ratio: {data['ratio']:.1f}")
+            logger.info(f"🎯 SIGNAL SENT: {sym} | Ratio: {data['ratio']:.1f}x")
             time.sleep(1)
 
-    logger.info(f"🔍 Binance Scan: {len(top_50)} elite coins | MaxR: {max_r:.1f}x")
+    logger.info(f"✅ Cycle complete. Max Ratio found: {max_r:.1f}x")
 
 def main():
-    logger.info("🚀 MAFIO BOT 14.0 (Binance Edition) Started")
-    send_telegram("💀 *MAFIO BOT 14.0* متصل.\nتم الانتقال إلى محرك Binance لرصد السيولة العالمية.")
+    logger.info("🚀 MAFIO BOT 14.1 (Transparency Edition) Started")
+    send_telegram("💀 *MAFIO BOT 14.1* متصل.\nنظام الشفافية والبحث اللحظي نشط الآن.")
     
-    last_heartbeat = time.time()
     while True:
         try:
             scan()
-            # نبض القلب كل ساعة
-            if time.time() - last_heartbeat > 3600:
-                send_telegram("💓 *MAFIO Heartbeat*: البوت يعمل ويبحث عن فرص...")
-                last_heartbeat = time.time()
             time.sleep(45) 
         except Exception as e:
-            logger.error(f"Error: {e}")
+            logger.error(f"⚠️ Loop Error: {e}")
             time.sleep(30)
 
 if __name__ == "__main__":
