@@ -2,18 +2,17 @@
 import os, time, requests
 from datetime import datetime
 
-# --- إعدادات الحساب ---
+# --- الإعدادات ---
 TOKEN = "your_token_here"
 CHAT_ID = "your_id_here"
 
-# --- استراتيجية Wolf-Mafio الهجينة ---
-MIN_VOLUME_24H = 5000000     # سيولة جيدة
-RATIO_STRENGTH = 2.0        # قوة شراء ضعف البيع
-MOMENTUM_STRENGTH = 0.3     # زخم بداية الانفجار
-ALERT_LEVEL_TARGET = 3      # لا ترسل تنبيه ذهبي إلا بعد رصد القوة 3 مرات (تشابه 🔔)
+# --- إعدادات القنص ---
+MIN_VOLUME_24H = 7000000
+RATIO_LIMIT = 2.2
+MOMENTUM_LIMIT = 0.5
 
-# مخزن لمتابعة تكرار التنبيهات لكل عملة
-market_watch = {} 
+# قاموس لمتابعة العملات المفتوحة وأعلى ربح حققته
+active_trades = {}
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -22,68 +21,71 @@ def send_telegram(text):
     except: pass
 
 def main():
-    print("💀 MAFIO V60: WOLF STALKER MODE ACTIVE")
-    send_telegram("💀 *Mafio V60: Wolf Stalker Mode*\nتم فك شفرة استراتيجية التنبيهات المتكررة. بدأ القنص..")
+    print("💀 MAFIO V70: PROFIT TRACKER MODE ACTIVE")
+    send_telegram("💀 *Mafio V70: Profit Tracker Started*\nنظام ملاحقة الأرباح والتنبيهات المتتالية متصل.")
 
     while True:
         try:
-            print(f"📡 Scanning for Accumulation... {datetime.now().strftime('%H:%M:%S')}")
-            
-            # جلب أقوى العملات سيولة
+            # 1. مرحلة البحث عن صفقات جديدة
             r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10).json()
             movers = [t for t in r if t['symbol'].endswith("USDT") and float(t['quoteVolume']) > MIN_VOLUME_24H]
-            movers = sorted(movers, key=lambda x: float(x['priceChangePercent']), reverse=True)[:40]
+            movers = sorted(movers, key=lambda x: float(x['priceChangePercent']), reverse=True)[:30]
 
             for t in movers:
-                symbol = t['symbol']
+                sym = t['symbol']
+                if sym in active_trades: continue # لا يدخل إذا كانت العملة مراقبة بالفعل
+
+                # تحليل الدخول
+                k = requests.get("https://api.binance.com/api/v3/klines", params={"symbol": sym, "interval": "1m", "limit": 1}).json()
+                if not k: continue
                 
-                # تحليل الشمعة اللحظية
-                k_data = requests.get("https://api.binance.com/api/v3/klines", 
-                                     params={"symbol": symbol, "interval": "1m", "limit": 1}, timeout=5).json()
-                if not k_data: continue
+                price_entry = float(k[-1][4])
+                vol_buy = float(k[-1][10])
+                ratio = vol_buy / (float(k[-1][7]) - vol_buy) if (float(k[-1][7]) - vol_buy) > 0 else 2.0
+                change = ((price_entry - float(k[-1][1])) / float(k[-1][1])) * 100
+
+                if ratio >= RATIO_LIMIT and change >= MOMENTUM_LIMIT:
+                    active_trades[sym] = {
+                        'entry': price_entry,
+                        'highest_reach': 0, # لتتبع مستويات 2%, 5%, 10%...
+                        'time': time.time()
+                    }
+                    msg = f"💀 *MAFIO NEW SIGNAL* 💀\n\n💵 *#{sym.replace('USDT','')}*\n🏁 Entry: `${price_entry:.8g}`\n🔥 Power: `{ratio:.2f}x`"
+                    send_telegram(msg)
+
+            # 2. مرحلة ملاحقة الأرباح (Tracking)
+            for sym in list(active_trades.keys()):
+                trade = active_trades[sym]
+                # جلب السعر الحالي بسرعة
+                curr_tick = requests.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": sym}).json()
+                curr_price = float(curr_tick['price'])
                 
-                candle = k_data[-1]
-                vol_total = float(candle[7])
-                vol_buy = float(candle[10])
-                ratio = vol_buy / (vol_total - vol_buy) if (vol_total - vol_buy) > 0 else 2.0
-                change = ((float(candle[4]) - float(candle[1])) / float(candle[1])) * 100
+                # حساب نسبة الربح الحالية
+                profit_pct = ((curr_price - trade['entry']) / trade['entry']) * 100
 
-                # --- نظام التنبيه المتكرر (The Alert System) ---
-                if ratio >= RATIO_STRENGTH and change >= MOMENTUM_STRENGTH:
-                    if symbol not in market_watch:
-                        market_watch[symbol] = {'count': 1, 'last_time': time.time()}
-                    else:
-                        market_watch[symbol]['count'] += 1
-                        market_watch[symbol]['last_time'] = time.time()
-
-                    count = market_watch[symbol]['count']
-                    print(f"🔔 Signal Level {count} for {symbol}")
-
-                    # إرسال تنبيه "ذهبي" فقط عند الوصول للمستوى المطلوب (تشابه 🔔3 فأعلى)
-                    if count >= ALERT_LEVEL_TARGET:
+                # تحديد "الجرس" بناءً على الربح المحقق
+                milestones = [2, 5, 10, 20, 50, 100]
+                for m in milestones:
+                    if profit_pct >= m and trade['highest_reach'] < m:
+                        trade['highest_reach'] = m
+                        bell_count = milestones.index(m) + 1
                         msg = (
-                            f"💀 *MAFIO GOLDEN SNIPE* 🔔{count}\n\n"
-                            f"💵 *#{symbol.replace('USDT','')}*\n"
-                            f"🏁 Entry: `${float(candle[4]):.8g}`\n"
-                            f"📈 Momentum: `{change:+.2f}%`\n"
-                            f"🔥 Ratio: `{ratio:.2f}x`\n"
-                            f"🏆 Status: *ACCUMULATION DETECTED*"
+                            f"💀 *MAFIO PROFIT ALERT* 🔔{bell_count}\n\n"
+                            f"🚀 *#{sym.replace('USDT','')}*\n"
+                            f"📈 Peak: `+{profit_pct:.2f}%` 🔥\n"
+                            f"💰 Current: `${curr_price:.8g}`"
                         )
                         send_telegram(msg)
-                        market_watch[symbol]['count'] = 0 # تصفير العداد بعد الإرسال
-                        print(f"✅ WINNING SIGNAL SENT: {symbol}")
 
-            # تنظيف العملات القديمة من الذاكرة كل دورة
-            current_time = time.time()
-            for s in list(market_watch.keys()):
-                if current_time - market_watch[s]['last_time'] > 1800: # حذف بعد 30 دقيقة خمول
-                    del market_watch[s]
+                # حذف الصفقة من المراقبة بعد 24 ساعة أو إذا نزل السعر تحت الدخول بـ 5% (وقف خسارة اختياري)
+                if time.time() - trade['time'] > 86400:
+                    del active_trades[sym]
 
-            time.sleep(15)
+            time.sleep(10)
 
         except Exception as e:
-            print(f"⚠️ Note: {e}")
-            time.sleep(10)
+            print(f"⚠️ Error: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
