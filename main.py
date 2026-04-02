@@ -1,100 +1,92 @@
 # -*- coding: utf-8 -*-
-import subprocess, sys, os
-
-# التثبيت الذاتي للمكتبات لضمان التشغيل على Railway
-def install_deps():
-    try:
-        import websocket, requests
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "websocket-client", "requests"])
-
-install_deps()
-
-import websocket, json, time, requests
+import os, time, requests
 from datetime import datetime
 
-# --- الإعدادات (ضع بياناتك هنا أو في Railway Variables) ---
-TOKEN = os.getenv("TELEGRAM_TOKEN", "your_token_here")
-CHAT_ID = os.getenv("CHAT_ID", "your_id_here")
+# --- الإعدادات (تعديل مباشر) ---
+TOKEN = "your_token_here"
+ADMIN_ID = "your_id_here"
 
-# --- منطق الاقتناص الاحترافي ---
-MIN_VOLUME_1M = 50000       # الحد الأدنى لسيولة الشمعة الحالية
-BUY_RATIO_THRESHOLD = 2.0   # يجب أن يكون الشراء ضعف البيع على الأقل
-PRICE_CHANGE_MIN = 0.5      # الحد الأدنى للارتفاع اللحظي (%)
+# --- الإعدادات الجديدة لتقليل الأخطاء ومنع الانعكاس ---
+MIN_VOL_USDT = 2000          # رفع الحد الأدنى لسيولة الشمعة (فلترة العملات الضعيفة)
+BUY_RATIO_REQUIRED = 2.5     # لن يرسل إشارة إلا إذا كان الشراء 2.5 ضعف البيع
+PRICE_PUMP_MIN = 0.8         # يجب أن تكون العملة صاعدة بنسبة 0.8% على الأقل في آخر دقيقة
+COOLDOWN = 600               # منع تكرار نفس العملة لمدة 10 دقائق
 
-sent_signals = {}
+state = {"sent": {}}
 
-def send_telegram(text):
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+        requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def on_message(ws, message):
+def get_data():
+    # استخدام التيكر المباشر للحصول على بيانات دقيقة
+    url = "https://api.binance.com/api/v3/ticker/24hr"
     try:
-        data = json.loads(message)
-        # استخدام بث kline للحصول على تفاصيل الشراء والبيع (Taker Buy Volume)
-        if data['e'] != 'kline': return
+        return requests.get(url, timeout=10).json()
+    except: return []
+
+def check_flow(sym):
+    # فحص تفصيلي للسيولة (Taker Buy/Sell)
+    url = "https://api.binance.com/api/v3/klines"
+    try:
+        r = requests.get(url, params={"symbol": sym, "interval": "1m", "limit": 2}, timeout=5).json()
+        if not r: return None
         
-        k = data['k']
-        if not k['x']: return # ننتظر إغلاق الشمعة أو تحديثها القوي
+        curr = r[-1]
+        total_v = float(curr[7]) # إجمالي السيولة بالدولار
+        buy_v = float(curr[10]) # سيولة الشراء الحقيقية
+        sell_v = total_v - buy_v
         
-        sym = data['s']
-        if not sym.endswith("USDT"): return
-
-        # --- تحليل البيانات ---
-        close_price = float(k['c'])
-        total_vol = float(k['q'])       # السيولة الإجمالية بالدولار
-        buy_vol = float(k['V'])         # سيولة الشراء (Taker Buy Asset Vol * Price)
-        buy_vol_usdt = buy_vol * close_price
-        sell_vol_usdt = total_vol - buy_vol_usdt
+        if sell_v == 0: return None
         
-        if sell_vol_usdt == 0: return
-        ratio = buy_vol_usdt / sell_vol_usdt
-        change = ((float(k['c']) - float(k['o'])) / float(k['o'])) * 100
+        ratio = buy_v / sell_v
+        price = float(curr[4])
+        change = ((float(curr[4]) - float(curr[1])) / float(curr[1])) * 100
+        
+        return {"ratio": ratio, "vol": total_v, "price": price, "change": change, "buy": buy_v}
+    except: return None
 
-        # --- شرط الدخول الذهبي 💀 ---
-        if ratio >= BUY_RATIO_THRESHOLD and total_vol >= MIN_VOLUME_1M and change >= PRICE_CHANGE_MIN:
+def main():
+    print("💀 SKULL FLOW REBORN - ACTIVE")
+    send_telegram("💀 *Skull Flow System Reborn*\nتم استعادة النسخة المستقرة مع تشديد فلاتر الدخول.")
+    
+    while True:
+        try:
+            tickers = get_data()
+            # ترتيب حسب العملات الأكثر صعوداً حالياً لسرعة الاقتناص
+            top_movers = [t for t in tickers if t['symbol'].endswith("USDT") and float(t['priceChangePercent']) > 2]
             
-            # منع تكرار نفس العملة في وقت قصير
-            current_time = time.time()
-            if sym in sent_signals and current_time - sent_signals[sym] < 300: return
+            for t in top_movers:
+                sym = t['symbol']
+                now = time.time()
+                
+                if sym in state["sent"] and now - state["sent"][sym] < COOLDOWN: continue
+                
+                f = check_flow(sym)
+                # --- الفلتر الجديد القوي ---
+                if f and f['ratio'] >= BUY_RATIO_REQUIRED and f['vol'] >= MIN_VOL_USDT and f['change'] >= PRICE_PUMP_MIN:
+                    
+                    state["sent"][sym] = now
+                    
+                    msg = (
+                        f"💀 *SKULL FLOW SIGNAL* 💀\n\n"
+                        f"💵 *#{sym.replace('USDT','')}* | 🟢 *Strong Buy*\n"
+                        f"💰 Price: `{f['price']:.8g}`\n\n"
+                        f"📊 *Flow Analysis:*\n"
+                        f"  📥 Buy Vol: `${f['buy']/1000:.1f}K` ✅\n"
+                        f"  📈 Ratio: `{f['ratio']:.2f}x` 🔥\n"
+                        f"  ⚡ 1m Change: `{f['change']:+.2f}%` \n\n"
+                        f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
+                    )
+                    send_telegram(msg)
+                    print(f"🎯 Signal: {sym} | Ratio: {f['ratio']:.2f}")
             
-            sent_signals[sym] = current_time
-            
-            # حساب الأهداف التقديرية (1% و 2%)
-            tp1 = close_price * 1.01
-            tp2 = close_price * 1.02
-
-            msg = (
-                f"💀 *SKULL PRO SIGNAL* 💀\n\n"
-                f"🚀 *Symbol:* `#{sym.replace('USDT','')}`\n"
-                f"💰 *Entry:* `{close_price:.8g}`\n"
-                f"📊 *Buy/Sell Ratio:* `{ratio:.2f}x` 🔥\n"
-                f"📈 *Momentum:* `{change:+.2f}%`\n"
-                f"💎 *Volume:* `${total_vol/1000:.1f}K` ✅\n\n"
-                f"🎯 *Targets:*\n"
-                f"  ∟ TP1: `{tp1:.8g}` (1%)\n"
-                f"  ∟ TP2: `{tp2:.8g}` (2%)\n\n"
-                f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
-            )
-            send_telegram(msg)
-            print(f"✅ Professional Signal Sent: {sym} | Ratio: {ratio:.2f}")
-
-    except Exception as e:
-        pass
-
-def on_error(ws, error): print(f"💀 Error: {error}")
-def on_close(ws, c, m): time.sleep(5); start_socket()
-
-def start_socket():
-    # نراقب شمعة الدقيقة (1m) لجميع العملات
-    # ملاحظة: لتقليل الضغط سنراقب أهم العملات أو نستخدم البث العام
-    socket_url = "wss://stream.binance.com:9443/ws/!kline_1m"
-    ws = websocket.WebSocketApp(socket_url, on_message=on_message, on_error=on_error, on_close=on_close)
-    ws.run_forever()
+            time.sleep(30)
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(10)
 
 if __name__ == "__main__":
-    print("💀 SKULL FLOW V37.0 - PROFESSIONAL MODE ACTIVE")
-    send_telegram("💀 *Skull Flow V37.0 Professional*\nتم تفعيل نظام تحليل السيولة المتقدم (Ratio Analysis).")
-    start_socket()
+    main()
