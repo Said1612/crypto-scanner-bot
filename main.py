@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 18.0 (WOLF IGNITION)
-السر: اشتعال الزخم (Momentum Ignition) + اقتناص الجواهر الصغيرة
-الاستراتيجية: ضغط التذبذب + انفجار السيولة المفاجئ (Flash Pump Detection)
-المطور: MAFIO AI - نظام اشتعال الذئب
+MAFIO BOT - VERSION 19.0 (THE ALPHA PREDATOR)
+السر: القوة النسبية المطلقة (Absolute Relative Strength) + مناعة السوق
+الاستراتيجية: رصد الانفصال عن البتكوين (BTC Decoupling) + السيولة المستدامة
+المطور: MAFIO AI - نظام المفترس الألفا
 """
 
 import os
@@ -14,22 +14,23 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات الاحترافية - Pro Settings (Wolf Ignition Style)
+# الإعدادات الاحترافية - Pro Settings (Alpha Predator Style)
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير "اشتعال الذئب" (Wolf Ignition 18.0)
-MIN_VOLUME_24H = 100000     # التركيز على العملات الصغيرة (Gems)
-MAX_VOLUME_24H = 10000000   # تجنب العملات الضخمة جداً التي تتبع البتكوين
-MIN_24H_CHANGE = -15.0      
-MAX_24H_CHANGE = 15.0       
-MAX_PRICE_POS = 0.45        
+# معايير "المفترس الألفا" (Alpha Predator 19.0)
+MIN_VOLUME_24H = 150000     
+MAX_VOLUME_24H = 15000000   
+MIN_24H_CHANGE = -12.0      
+MAX_24H_CHANGE = 20.0       
+MAX_PRICE_POS = 0.40        
 
-MIN_FLOW_RATIO = 8.0        
-MIN_NET_FLOW_BASE = 15000   # العملات الصغيرة يكفيها 15 ألف دولار لتنفجر
-MIN_VOL_ACCEL = 5.0         # طلب انفجار فوليوم ضخم (5 أضعاف)
-MAX_1H_MOVE = 10.0          
+MIN_FLOW_RATIO = 8.5        
+MIN_NET_FLOW_BASE = 20000   
+MIN_VOL_ACCEL = 4.5         
+MAX_1H_MOVE = 12.0          
+MIN_ALPHA_SCORE = 1.5       # مقدار تفوق العملة على البتكوين في ساعة
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -65,50 +66,63 @@ def get_btc_status():
     except: pass
     return 0
 
-def analyze_flow(sym, source, vol_24h):
+def get_btc_1h_move():
+    """حساب حركة البتكوين في آخر ساعة بدقة"""
+    try:
+        kd = get_data_from_anywhere("BINANCE", "klines", {"symbol": "BTCUSDT", "interval": "1h", "limit": 2})
+        if kd: return ((float(kd[-1][4]) - float(kd[-1][1])) / float(kd[-1][1])) * 100
+    except: pass
+    return 0
+
+def analyze_flow(sym, source, vol_24h, btc_1h):
     try:
         time.sleep(0.1)
         kd = get_data_from_anywhere(source, "klines", {"symbol": sym, "interval": "5m", "limit": 100})
         if not kd or len(kd) < 50: return None
         closes = [float(c[4]) for c in kd]; opens = [float(c[1]) for c in kd]; vols = [float(c[5]) for c in kd]
         
-        # 1. فلتر ضغط التذبذب (Volatility Squeeze)
+        # 1. القوة النسبية (Relative Strength Alpha)
+        move_1h = ((closes[-1] - closes[-13]) / closes[-13]) * 100
+        alpha_score = move_1h - btc_1h
+        if alpha_score < MIN_ALPHA_SCORE: return "LOW_ALPHA"
+
+        # 2. فلتر ضغط التذبذب (Volatility Squeeze)
         recent_prices = closes[-25:-5]
         avg_p = sum(recent_prices) / len(recent_prices)
-        variance = sum((x - avg_p) ** 2 for x in recent_prices) / len(recent_prices)
-        std_dev = variance ** 0.5
-        if (std_dev / avg_p) > 0.02: return "NOT_SQUEEZED"
+        std_dev = (sum((x - avg_p) ** 2 for x in recent_prices) / len(recent_prices)) ** 0.5
+        if (std_dev / avg_p) > 0.025: return "NOT_SQUEEZED"
 
-        # 2. شرط الاختراق العمودي (Vertical Breakout)
-        current_price = closes[-1]; max_24h = max(closes[:-1])
-        if current_price < (max_24h * 0.98): return "NO_BREAKOUT"
+        # 3. شرط الاختراق (Breakout Confirmation)
+        current_price = closes[-1]; max_recent = max(closes[-50:-1])
+        if current_price < (max_recent * 0.99): return "NO_BREAKOUT"
 
-        # 3. انفجار الحجم الخارق (Hyper Volume Surge)
-        avg_vol = sum(vols[-21:-1]) / 20; vol_accel = vols[-1] / avg_vol if avg_vol > 0 else 1.0
-        if vol_accel < MIN_VOL_ACCEL: return "LOW_VOLUME_SURGE"
-        
-        # 4. تدفق السيولة اللحظي
-        in_f = vols[-1] * closes[-1] if closes[-1] > opens[-1] else 0
-        out_f = vols[-1] * closes[-1] if closes[-1] <= opens[-1] else 0
-        if closes[-2] > opens[-2]: in_f += vols[-2] * closes[-2]
-        else: out_f += vols[-2] * closes[-2]
+        # 4. السيولة المستدامة (Sustained Flow - Last 15m)
+        in_f = 0; out_f = 0
+        for i in range(-3, 0):
+            c_val = vols[i] * closes[i]
+            if closes[i] > opens[i]: in_f += c_val
+            else: out_f += c_val
         
         if out_f == 0: out_f = 1
         ratio = in_f / out_f; net = in_f - out_f
-        if ratio < MIN_FLOW_RATIO or net < MIN_NET_FLOW_BASE: return "LOW_FLOW"
         
-        move_1h = ((current_price - closes[-13]) / closes[-13]) * 100
+        # 5. تسارع الحجم
+        avg_vol = sum(vols[-21:-1]) / 20; vol_accel = vols[-1] / avg_vol if avg_vol > 0 else 1.0
+        
+        if ratio < MIN_FLOW_RATIO or net < MIN_NET_FLOW_BASE or vol_accel < MIN_VOL_ACCEL: return "WEAK_FLOW"
         if move_1h > MAX_1H_MOVE: return "TOO_LATE"
-        return {"in": in_f, "out": out_f, "net": net, "ratio": ratio, "price": current_price, "move_1h": move_1h, "vol_accel": vol_accel}
+        
+        return {"in": in_f, "out": out_f, "net": net, "ratio": ratio, "price": current_price, "move_1h": move_1h, "vol_accel": vol_accel, "alpha": alpha_score}
     except: return None
 
 def scan():
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if state["date"] != today: state.update({"date": today, "count": 0, "sent_coins": []})
-    source = state["current_source"]; btc_change = get_btc_status()
+    source = state["current_source"]; btc_change = get_btc_status(); btc_1h = get_btc_1h_move()
     tickers = get_data_from_anywhere(source, "ticker/24hr")
     if not tickers or not isinstance(tickers, list):
         state["current_source"] = "MEXC" if source == "BINANCE" else "BINANCE"; return
+    
     candidates = []
     for t in tickers:
         if not isinstance(t, dict) or 'symbol' not in t: continue
@@ -123,39 +137,42 @@ def scan():
             if price_pos > MAX_PRICE_POS: continue
             candidates.append({'sym': sym, 'vol': vol_24h, 'price': price, 'chg': chg_24h, 'price_pos': price_pos})
         except: continue
+    
     candidates.sort(key=lambda x: x['vol'], reverse=True)
     for c in candidates[:40]:
         sym = c['sym']
         if sym in state["sent_coins"]: continue
-        data = analyze_flow(sym, source, c['vol'])
+        data = analyze_flow(sym, source, c['vol'], btc_1h)
         if not isinstance(data, dict): continue
         if state["is_first_run"]: state["sent_coins"].append(sym); continue
+        
         state["count"] += 1; state["sent_coins"].append(sym)
-        interest = "🔥 WOLF IGNITION 🔥"
-        if btc_change < -0.8: interest = "🐺 ANTI-MARKET ALPHA 🐺"
-        elif data['ratio'] > 15: interest = "🚀 HYPER PUMP DETECTED 🚀"
+        interest = "🐺 ALPHA PREDATOR 🐺"
+        if data['alpha'] > 3.0: interest = "💎 MARKET IMMUNITY (DECOUPLED) 💎"
+        elif data['ratio'] > 15: interest = "🚀 HYPER IGNITION 🚀"
+        
         msg = (f"━━━━━━━━━━━━━━━━━━━━\n"
-               f"🐺 *MAFIO WOLF IGNITION 18.0* 📡\n\n"
+               f"🐺 *MAFIO ALPHA PREDATOR 19.0* 📡\n\n"
                f"🆕 *#{sym.replace('USDT','')}* 🐺 · 🔔 Signal #{state['count']}\n"
                f"💰 Price: `${c['price']:.8g}`\n"
                f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
                f"📍 Position: `%{c['price_pos']*100:.0f}` from Bottom ✅\n\n"
+               f"🛡️ Alpha Score: `+{data['alpha']:.2f}%` (vs BTC)\n"
                f"⚡ Vol Surge: `{data['vol_accel']:.1f}x` 🔥\n"
                f"🟡 Interest: `{interest}` \n"
                f"📊 Ratio: `{data['ratio']:.1f}x` 💎\n"
-               f"📉 BTC Trend: `{btc_change:.2f}%` {'🔴' if btc_change < 0 else '🟢'}\n"
                "💹 *Flow Analysis:*\n"
                f"  📥 In: `${data['in']/1000:.1f}K` \n"
                f"  ▲ Net: `+${data['net']/1000:.1f}K` ✅\n\n"
                f"🕐 {datetime.now().strftime('%H:%M UTC')}\n"
                "━━━━━━━━━━━━━━━━━━━━\n"
-               f"⚠️ _اشتعال الذئب - تم رصد انفجار سيولة في جوهرة صغيرة!_ 🚀")
+               f"⚠️ _المفترس الألفا - تم رصد انفصال حقيقي وقوة نسبية مطلقة!_ 🚀")
         send_telegram(msg); time.sleep(1)
     if state["is_first_run"]: state["is_first_run"] = False
 
 def main():
-    logger.info("🚀 MAFIO BOT 18.0 (Wolf Ignition Edition) Started")
-    send_telegram("🐺 *MAFIO BOT 18.0* متصل.\nتم تفعيل نظام اشتعال الذئب (Wolf Ignition) لاقتناص الجواهر الصغيرة والانفجارات الحقيقية.")
+    logger.info("🚀 MAFIO BOT 19.0 (Alpha Predator Edition) Started")
+    send_telegram("🐺 *MAFIO BOT 19.0* متصل.\nتم تفعيل نظام المفترس الألفا (Alpha Predator) لاقتناص العملات المنفصلة عن البتكوين.")
     while True:
         try: scan(); time.sleep(35)
         except Exception as e: logger.error(f"⚠️ Loop Error: {e}"); time.sleep(30)
