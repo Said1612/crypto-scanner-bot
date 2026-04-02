@@ -1,109 +1,84 @@
 # -*- coding: utf-8 -*-
-import os, sys, time, requests
+import time, requests
 from datetime import datetime
 
-# --- إدخال الإعدادات مباشرة هنا إذا فشل Railway في قراءتها ---
-TOKEN = "ضع_التوكن_هنا" 
-ADMIN_ID = "ضع_الايدي_هنا"
+# --- الإعدادات المباشرة (ضع بياناتك هنا بين القوسين) ---
+TELEGRAM_TOKEN = "ضع_التوكن_الخاص_بك_هنا"
+CHAT_ID = "ضع_الايدي_الخاص_بك_هنا"
 
-# إذا كنت تستخدم Variables في Railway، اترك هذه الأسطر كما هي:
-TOKEN = os.getenv("TELEGRAM_TOKEN", TOKEN)
-ADMIN_ID = os.getenv("CHAT_ID", ADMIN_ID)
-
-# --- معايير الاقتناص اللحظي (Skull Logic) ---
-MIN_RATIO = 1.5              # نسبة الشراء مقابل البيع
-ACCEL_THRESHOLD = 2.5        # تسارع السيولة
-MIN_VOL_THRESHOLD = 800      # الحد الأدنى للسيولة بالدولار
-
-state = {"sent": []}
-
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+def send_msg(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
     try:
-        response = requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
-        if response.status_code == 401:
-            print("❌ الخطأ: توكن تليجرام غير صحيح (Unauthorized).")
-        return response
-    except Exception as e:
-        print(f"⚠️ Error sending to Telegram: {e}")
-        return None
+        r = requests.post(url, json=payload, timeout=10)
+        return r.status_code
+    except:
+        return 0
 
-def get_flow(sym):
-    url = "https://api.binance.com/api/v3/klines"
+def get_data(symbol):
     try:
-        # فحص الشمعة الحالية والماضية للمقارنة
-        r = requests.get(url, params={"symbol": sym, "interval": "1m", "limit": 5}, timeout=5).json()
-        if not r or len(r) < 5: return None
+        url = "https://api.binance.com/api/v3/klines"
+        params = {"symbol": symbol, "interval": "1m", "limit": 2}
+        r = requests.get(url, params=params, timeout=5).json()
         
-        curr = r[-1]
-        total_vol = float(curr[7])
-        in_vol = float(curr[10]) # Taker Buy Volume
-        out_vol = total_vol - in_vol
+        c = r[-1] # الشمعة الحالية
+        total_v = float(c[7])
+        buy_v = float(c[10]) # الشراء
+        sell_v = total_v - buy_v
         
-        # حساب متوسط السيولة للشموع السابقة
-        prev_avg = sum([float(x[7]) for x in r[:-1]]) / 4
-        accel = total_vol / prev_avg if prev_avg > 0 else 1.0
-        
-        ratio = in_vol / out_vol if out_vol > 0 else 2.0
-        price = float(curr[4])
+        if sell_v == 0: return None
         
         return {
-            "in": in_vol, "out": out_vol, "net": in_vol - out_vol,
-            "ratio": ratio, "accel": accel, "price": price, "total": total_vol
+            "p": float(c[4]),
+            "ratio": buy_v / sell_v,
+            "in": buy_v,
+            "net": buy_v - sell_v
         }
-    except: return None
-
-def scan():
-    print(f"💀 Skull Scanning... {datetime.now().strftime('%H:%M:%S')}", flush=True)
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10)
-        tickers = r.json()
-        
-        for t in tickers:
-            sym = t['symbol']
-            if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN"]): continue
-            if sym in state["sent"]: continue
-
-            data = get_flow(sym)
-            if not data: continue
-
-            # --- منطق الجمجمة (In > Out) ---
-            if data['in'] > data['out'] and data['ratio'] >= MIN_RATIO and data['total'] > MIN_VOL_THRESHOLD:
-                if data['accel'] > ACCEL_THRESHOLD or data['ratio'] > 4.0:
-                    
-                    state["sent"].append(sym)
-                    if len(state["sent"]) > 50: state["sent"].pop(0)
-
-                    msg = (
-                        f"💀 *SKULL FLOW ALERT* 💀\n\n"
-                        f"💵 *#{sym.replace('USDT','')}* | 💎 *Trend Start*\n"
-                        f"💰 Price: `{data['price']:.8g}`\n\n"
-                        f"📊 *Analysis:*\n"
-                        f"  📥 In: `${data['in']:.1f}`\n"
-                        f"  ▲ Net: `+${data['net']:.1f}` ✅\n\n"
-                        f"📈 Ratio: `{data['ratio']:.2f}x` \n"
-                        f"⚡ Accel: `{data['accel']:.1f}x` 🔥\n"
-                        f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
-                    )
-                    send_telegram(msg)
-                    print(f"🎯 Signal: {sym} Sent!")
-
-    except Exception as e:
-        print(f"⚠️ Scan error: {e}")
+    except:
+        return None
 
 def main():
-    print("💀 SKULL FLOW V31.0 STARTED")
-    # اختبار التوكن عند التشغيل
-    test = send_telegram("💀 *Skull Flow V31.0*\nنظام رصد السيولة متصل الآن.")
-    if test and test.status_code == 401:
-        print("🛑 توقف البوت: التوكن غير صحيح. يرجى التأكد من التوكن في إعدادات Railway.")
+    print("💀 SKULL V32 STARTED...")
+    status = send_msg("💀 *Skull Flow V32*\nتم التشغيل بنجاح.. جاري رصد السيولة.")
+    
+    if status == 401:
+        print("❌ خطأ: التوكن غير صحيح! تأكد من التوكن الذي وضعته داخل الكود.")
         return
+
+    sent_list = []
 
     while True:
         try:
-            scan()
-            time.sleep(30)
-        except:
+            # جلب أفضل 100 عملة من حيث الحجم لسرعة الفحص
+            tickers = requests.get("https://api.binance.com/api/v3/ticker/24hr").json()
+            # ترتيب حسب السيولة
+            tickers = sorted(tickers, key=lambda x: float(x['quoteVolume']), reverse=True)[:100]
+
+            for t in tickers:
+                sym = t['symbol']
+                if not sym.endswith("USDT") or sym in sent_list: continue
+
+                d = get_data(sym)
+                # شرط الدخول: الشراء أكبر من البيع بوضوح (Ratio > 1.8)
+                if d and d['ratio'] > 1.8 and d['in'] > 1000:
+                    
+                    msg = (
+                        f"💀 *SKULL SIGNAL* 💀\n\n"
+                        f"💵 *#{sym.replace('USDT','')}*\n"
+                        f"💰 Price: `{d['p']:.8g}`\n"
+                        f"📈 Ratio: `{d['ratio']:.2f}x` 🔥\n"
+                        f"▲ Net: `+${d['net']/1000:.1f}K` ✅\n\n"
+                        f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
+                    )
+                    
+                    if send_msg(msg) == 200:
+                        sent_list.append(sym)
+                        if len(sent_list) > 40: sent_list.pop(0)
+                        print(f"✅ Signal Sent: {sym}")
+            
+            time.sleep(30) # فحص كل 30 ثانية
+        except Exception as e:
+            print(f"⚠️ Error: {e}")
             time.sleep(10)
 
 if __name__ == "__main__":
