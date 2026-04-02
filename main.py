@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 15.6 (ULTRA STABLE EDITION)
-السر: اقتناص الانفجار السيولاتي (Liquidity Sniping) + استقرار كامل
-الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + EMA50 Shield
-المطور: MAFIO AI - نظام القناص المستقر
+MAFIO BOT - VERSION 16.0 (THE ALPHA WOLF)
+السر: اقتناص الانفجار السيولاتي (Liquidity Sniping) + بيانات العقود الآجلة (Futures)
+الاستراتيجية: ضغط السعر + انفجار الحجم + Funding Rate + Open Interest
+المطور: MAFIO AI - نظام الذئب الألفا
 """
 
 import os
@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 # ==========================================================
-# الإعدادات الاحترافية - Pro Settings (MAFIO Style)
+# الإعدادات الاحترافية - Pro Settings (Alpha Wolf Style)
 # ==========================================================
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
@@ -25,11 +25,11 @@ MIN_24H_CHANGE = -5.0
 MAX_24H_CHANGE = 12.0       
 MAX_PRICE_POS = 0.40        
 
-# معايير الانفجار اللحظي (MAFIO Sniper 15.6 - Flash Edition)
+# معايير الانفجار اللحظي (MAFIO Alpha 16.0)
 MIN_FLOW_RATIO = 3.8        
 MAX_FLOW_RATIO = 500.0      
-MIN_NET_FLOW_USD = 25000    # الصافي الافتراضي
-MIN_FLASH_NET_FLOW = 5000   # الصافي المطلوب في حالة النسبة الخارقة (>10x)
+MIN_NET_FLOW_USD = 25000    
+MIN_FLASH_NET_FLOW = 5000   
 MAX_1H_MOVE = 18.0          
 MIN_VOL_ACCEL = 2.0         
 # ==========================================================
@@ -48,21 +48,19 @@ def send_telegram(message):
 
 session = requests.Session()
 
-def get_data_from_anywhere(source, endpoint, params=None):
+def get_data_from_anywhere(source, endpoint, params=None, is_futures=False):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
         "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
     }
     if source == "BINANCE":
+        base = "fapi/v1" if is_futures else "api/v3"
         urls = [
-            f"https://api.binance.com/api/v3/{endpoint}",
-            f"https://api1.binance.com/api/v3/{endpoint}",
-            f"https://api2.binance.com/api/v3/{endpoint}",
-            f"https://api3.binance.com/api/v3/{endpoint}",
-            f"https://api4.binance.com/api/v3/{endpoint}",
-            f"https://data-api.binance.vision/api/v3/{endpoint}",
-            f"https://api.binance.me/api/v3/{endpoint}"
+            f"https://fapi.binance.com/{base}/{endpoint}" if is_futures else f"https://api.binance.com/api/v3/{endpoint}",
+            f"https://fapi1.binance.com/{base}/{endpoint}" if is_futures else f"https://api1.binance.com/api/v3/{endpoint}",
+            f"https://fapi2.binance.com/{base}/{endpoint}" if is_futures else f"https://api2.binance.com/api/v3/{endpoint}",
+            f"https://fapi3.binance.com/{base}/{endpoint}" if is_futures else f"https://api3.binance.com/api/v3/{endpoint}",
+            f"https://fapi4.binance.com/{base}/{endpoint}" if is_futures else f"https://api4.binance.com/api/v3/{endpoint}",
         ]
     else: # MEXC
         urls = [f"https://api.mexc.com/api/v3/{endpoint}"]
@@ -77,6 +75,20 @@ def get_data_from_anywhere(source, endpoint, params=None):
             if r.status_code == 429: time.sleep(10)
         except: continue
     return None
+
+def get_futures_data(sym):
+    """جلب بيانات التمويل والاهتمام المفتوح من بايننس"""
+    try:
+        fr_data = get_data_from_anywhere("BINANCE", "premiumIndex", {"symbol": sym}, is_futures=True)
+        oi_data = get_data_from_anywhere("BINANCE", "openInterest", {"symbol": sym}, is_futures=True)
+        
+        funding = float(fr_data.get('lastFundingRate', 0)) if fr_data else 0
+        oi = float(oi_data.get('openInterest', 0)) if oi_data else 0
+        
+        status = "Bullish 🟢" if funding > 0 else "Neutral 🟡" if funding == 0 else "Bearish 🔴"
+        return {"funding": funding, "oi": oi, "status": status}
+    except:
+        return {"funding": 0, "oi": 0, "status": "Unknown ⚪"}
 
 def calc_ema(prices, period):
     if len(prices) < period: return 0
@@ -131,11 +143,7 @@ def analyze_flow(sym, source):
         opens = [float(c[1]) for c in kd]
         vols = [float(c[5]) for c in kd]
         
-        ema5 = calc_ema(closes, 5)
-        ema10 = calc_ema(closes, 10)
-        ema20 = calc_ema(closes, 20)
-        ema50 = calc_ema(closes, 50)
-        
+        ema5 = calc_ema(closes, 5); ema10 = calc_ema(closes, 10); ema20 = calc_ema(closes, 20); ema50 = calc_ema(closes, 50)
         if not (closes[-1] > ema5 > ema10 > ema20 and closes[-1] > ema50): return "TREND_DOWN"
         
         avg_vol = sum(vols[-11:-1]) / 10
@@ -157,15 +165,7 @@ def analyze_flow(sym, source):
         if ratio > MAX_FLOW_RATIO: return "FAKE_FLOW"
         if vol_accel < MIN_VOL_ACCEL: return "LOW_MOMENTUM"
         
-        return {
-            "in": in_f, 
-            "out": out_f, 
-            "net": in_f - out_f, 
-            "ratio": ratio, 
-            "price": closes[-1],
-            "move_1h": move_1h,
-            "vol_accel": vol_accel
-        }
+        return {"in": in_f, "out": out_f, "net": in_f - out_f, "ratio": ratio, "price": closes[-1], "move_1h": move_1h, "vol_accel": vol_accel}
     except: return None
 
 def scan():
@@ -176,12 +176,9 @@ def scan():
     logger.info(f"🔍 MAFIO Scanning {source}...")
     
     tickers = get_data_from_anywhere(source, "ticker/24hr")
-    
     if not tickers or not isinstance(tickers, list):
         new_source = "MEXC" if source == "BINANCE" else "BINANCE"
-        logger.warning(f"⚠️ {source} failed or returned invalid data. Switching to {new_source}...")
-        state["current_source"] = new_source
-        return
+        state["current_source"] = new_source; return
 
     candidates = []
     for t in tickers:
@@ -193,37 +190,28 @@ def scan():
         if any(s in sym for s in stables): continue
         
         try:
-            chg_24h = float(t['priceChangePercent'])
-            vol_24h = float(t['quoteVolume'])
-            price = float(t['lastPrice'])
-            high, low = float(t['highPrice']), float(t['lowPrice'])
-            
+            chg_24h = float(t['priceChangePercent']); vol_24h = float(t['quoteVolume']); price = float(t['lastPrice']); high, low = float(t['highPrice']), float(t['lowPrice'])
             if vol_24h < MIN_VOLUME_24H or chg_24h < MIN_24H_CHANGE or chg_24h > MAX_24H_CHANGE: continue
-            
             price_pos = (price - low) / (high - low) if (high - low) > 0 else 0.5
             if price_pos > MAX_PRICE_POS: continue
-            
             candidates.append({'sym': sym, 'vol': vol_24h, 'price': price, 'chg': chg_24h, 'price_pos': price_pos})
         except: continue
 
-    logger.info(f"📊 {source}: Found {len(candidates)} coins in Accumulation phase.")
     candidates.sort(key=lambda x: x['vol'], reverse=True)
-    top_candidates = candidates[:40]
-
-    for c in top_candidates:
+    for c in candidates[:40]:
         sym = c['sym']
         if sym in state["sent_coins"]: continue
 
         data = analyze_flow(sym, source)
         if not isinstance(data, dict): continue
         
+        futures = get_futures_data(sym) if source == "BINANCE" else {"funding": 0, "oi": 0, "status": "N/A ⚪"}
+        
         is_flash = data['ratio'] >= 10.0 and data['net'] >= MIN_FLASH_NET_FLOW
         is_normal = data['ratio'] >= MIN_FLOW_RATIO and data['net'] >= MIN_NET_FLOW_USD
         
         if is_flash or is_normal:
-            if state["is_first_run"]:
-                state["sent_coins"].append(sym)
-                continue
+            if state["is_first_run"]: state["sent_coins"].append(sym); continue
 
             state["count"] += 1; state["sent_coins"].append(sym)
             active_trades[sym] = {'entry': c['price'], 'time': time.time(), 'max_gain': 0, 'milestones': []}
@@ -234,42 +222,33 @@ def scan():
             
             msg = (
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"💀 *MAFIO SNIPER 15.6* 📡\n\n"
-                f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
+                f"🐺 *MAFIO ALPHA WOLF 16.0* 📡\n\n"
+                f"🆕 *#{sym.replace('USDT','')}* 🐺 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
                 f"📍 Position: `%{c['price_pos']*100:.0f}` from Bottom ✅\n\n"
                 f"⚡ Volume: `{data['vol_accel']:.1f}x` above avg\n"
                 f"🟡 Interest: `{interest}` \n"
                 f"📊 Ratio: `{data['ratio']:.1f}x` 🔥\n"
+                f"🟢 Funding: `{futures['status']}` (`{futures['funding']:.4f}%`)\n"
                 "💹 *1h Flow:*\n"
                 f"  📥 In: `${data['in']/1000:.1f}K` \n"
                 f"  📤 Out: `${data['out']/1000:.1f}K` \n"
                 f"  ▲ Net: `+${data['net']/1000:.1f}K` ✅\n\n"
                 f"🕐 {datetime.now().strftime('%d %b %Y %H:%M UTC')}\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
-                f"⚠️ _اقتناص لحظي - تم رصد انفجار سيولة على {source}!_ 🚀"
+                f"⚠️ _اقتناص ألفا - تم رصد انفجار سيولة على {source}!_ 🚀"
             )
-            send_telegram(msg)
-            logger.info(f"🎯 SNIPED: {sym} | Ratio: {data['ratio']:.1f}x | Accel: {data['vol_accel']:.1f}x")
-            time.sleep(1)
+            send_telegram(msg); time.sleep(1)
 
-    if state["is_first_run"]:
-        state["is_first_run"] = False
-        logger.info("✅ Silent first scan complete. Sniper is active!")
+    if state["is_first_run"]: state["is_first_run"] = False
 
 def main():
-    logger.info("🚀 MAFIO BOT 15.6 (Ultra Stable Edition) Started")
-    send_telegram("💀 *MAFIO BOT 15.6* متصل.\nتم إصلاح أخطاء التوقف وتفعيل نظام الاستقرار الأقصى (Ultra Stable).")
-    
+    logger.info("🚀 MAFIO BOT 16.0 (Alpha Wolf Edition) Started")
+    send_telegram("🐺 *MAFIO BOT 16.0* متصل.\nتم تفعيل نظام الذئب الألفا (Alpha Wolf) مع مراقبة العقود الآجلة والسيولة الخارقة.")
     while True:
-        try:
-            scan()
-            track_profits()
-            time.sleep(35) 
-        except Exception as e:
-            logger.error(f"⚠️ Loop Error: {e}")
-            time.sleep(30)
+        try: scan(); track_profits(); time.sleep(35)
+        except Exception as e: logger.error(f"⚠️ Loop Error: {e}"); time.sleep(30)
 
 if __name__ == "__main__":
     main()
