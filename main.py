@@ -2,96 +2,91 @@
 import os, sys, time, requests
 from datetime import datetime
 
-# الإعدادات الأساسية
-TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
-ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
+# الإعدادات (تأكد من وضع التوكن الخاص بك في Railway)
+TOKEN = os.getenv("TELEGRAM_TOKEN", "your_bot_token")
+ADMIN_ID = os.getenv("CHAT_ID", "your_chat_id")
 
-# معايير "الوحش" المستوحاة من صفقاتك الأخيرة
-MIN_NET_FLOW = 50000         # الحد الأدنى لبداية الرصد
-EXTREME_NET_FLOW = 150000    # حد "الانفجار الحقيقي"
-MIN_RATIO = 3.5              
-MIN_VOLUME_24H = 100000      
+# --- معايير الـ WOLF FLOW (السر البرمجي) ---
+ACCELERATION_FACTOR = 3.5    # رصد العملة إذا تضاعف حجم التداول 3.5 مرات فجأة
+MIN_RATIO = 2.0              # يجب أن يكون الشراء ضعف البيع على الأقل
+MIN_VOL_USDT = 1500          # الحد الأدنى لسيولة الشمعة الواحدة لبدء التنبيه
 
-state = {"sent_coins": []}
+state = {"sent": []}
 
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+def get_wolf_flow_logic(sym):
+    url = "https://api.binance.com/api/v3/klines"
     try:
-        requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
-
-def get_analysis(sym, source="BINANCE"):
-    """تحليل السيولة العميقة - منطق ولف المتطور"""
-    base = "https://api.binance.com/api/v3/klines" if source == "BINANCE" else "https://api.mexc.com/api/v3/klines"
-    try:
-        # تحليل آخر 5 دقائق (دقيقة بدقيقة)
-        r = requests.get(base, params={"symbol": sym, "interval": "1m", "limit": 5}, timeout=5).json()
-        in_v, out_v = 0, 0
-        for c in r:
-            vol = float(c[7]) if source == "BINANCE" else float(c[10]) # Quote Volume
-            if float(c[4]) > float(c[1]): in_v += vol
-            else: out_v += vol
+        # فحص آخر 5 دقائق للمقارنة (دقيقة بدقيقة)
+        r = requests.get(url, params={"symbol": sym, "interval": "1m", "limit": 6}, timeout=3).json()
+        if len(r) < 6: return None
         
-        net = in_v - out_v
-        ratio = in_v / out_v if out_v > 0 else 10.0
-        # حساب التسارع في آخر شمعة
-        last_vol = float(r[-1][7]) if source == "BINANCE" else float(r[-1][10])
-        avg_v = sum([float(x[7]) for x in r[:-1]]) / 4
-        accel = last_vol / avg_v if avg_v > 0 else 1.0
+        # بيانات الشمعة الحالية (الانفجارية)
+        current_candle = r[-1]
+        current_vol = float(current_candle[7]) # حجم السيولة بالـ USDT
+        taker_buy_vol = float(current_candle[10]) # الشراء الحقيقي
         
-        return {"in": in_v, "out": out_v, "net": net, "ratio": ratio, "price": float(r[-1][4]), "accel": accel}
+        # بيانات الشموع السابقة (المتوسط الطبيعي)
+        prev_vols = [float(x[7]) for x in r[:-1]]
+        avg_prev_vol = sum(prev_vols) / len(prev_vols)
+        
+        # حساب التسارع (هل هناك دخول مفاجئ؟)
+        acceleration = current_vol / avg_prev_vol if avg_prev_vol > 0 else 1.0
+        
+        # حساب النسبة (هل الشراء مسيطر؟)
+        in_v = taker_buy_vol
+        out_v = current_vol - taker_buy_vol
+        ratio = in_v / out_v if out_v > 0 else 5.0
+        
+        price = float(current_candle[4])
+        
+        return {
+            "accel": acceleration,
+            "ratio": ratio,
+            "net": in_v - out_v,
+            "price": price,
+            "in": in_v,
+            "out": out_v
+        }
     except: return None
 
-def scan_market(source="BINANCE"):
-    print(f"🔍 Scanning {source}...", flush=True)
-    url = "https://api.binance.com/api/v3/ticker/24hr" if source == "BINANCE" else "https://api.mexc.com/api/v3/ticker/24hr"
+def scan():
+    print(f"🐺 Wolf Flow Scanning... {datetime.now().strftime('%H:%M:%S')}", flush=True)
     try:
-        tickers = requests.get(url, timeout=10).json()
+        tickers = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=5).json()
         for t in tickers:
             sym = t['symbol']
-            if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN"]): continue
-            if sym in state["sent_coins"]: continue
-            
-            vol_24h = float(t.get('quoteVolume', 0))
-            if vol_24h < MIN_VOLUME_24H: continue
+            if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
+            if sym in state["sent"]: continue
 
-            data = get_analysis(sym, source)
+            data = get_wolf_flow_logic(sym)
             if not data: continue
 
-            # شرط الدخول: صافي تدفق ضخم أو تسارع انفجاري
-            if data['net'] > MIN_NET_FLOW and (data['ratio'] > MIN_RATIO or data['accel'] > 5.0):
-                state["sent_coins"].append(sym)
-                if len(state["sent_coins"]) > 50: state["sent_coins"].pop(0)
+            # --- تطبيق منطق "أحمد عبد الناصر" (Wolf Flow Logic) ---
+            # 1. تسارع مفاجئ في السيولة (أكبر من المتوسط بـ 3.5 مرات)
+            # 2. الشراء أكبر من البيع بوضوح (Ratio > 2.0)
+            if data['accel'] > ACCELERATION_FACTOR and data['ratio'] > MIN_RATIO and data['in'] > MIN_VOL_USDT:
+                state["sent"].append(sym)
+                if len(state["sent"]) > 50: state["sent"].pop(0)
 
-                interest = "Extreme 🔥" if data['net'] > EXTREME_NET_FLOW else "Strong ✅"
-                
                 msg = (
-                    f"🐺 *Wolf Flow v23.0* 🛰️\n\n"
-                    f"💵 *#{sym.replace('USDT','')}/USDT* 🚀🚀\n"
-                    f"💰 Price: `${data['price']:.8g}`\n"
-                    f"⚡ Accel: `{data['accel']:.1f}x` | Source: `{source}`\n\n"
-                    f"🟢 Interest: `{interest}`\n"
-                    f"📊 *Net Flow Analysis:*\n"
-                    f"  📥 In: `${data['in']/1000:.1f}K` \n"
-                    f"  ▲ Net: `+${data['net']/1000:.1f}K` ✅\n"
-                    f"📈 Ratio: `{data['ratio']:.1f}x` \n\n"
-                    f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}\n"
-                    f"⚠️ _سيولة ذكية تم رصدها الآن!_"
+                    f"🐺 *WOLF FLOW SIGNAL* 🚀\n\n"
+                    f"💵 *#{sym.replace('USDT','')}* | *Explosion Alert*\n"
+                    f"💰 Price: `{data['price']:.8g}`\n\n"
+                    f"⚡ *Acceleration: `{data['accel']:.1f}x`* 🔥\n"
+                    f"📈 *Ratio: `{data['ratio']:.2f}x`* ✅\n"
+                    f"📊 *Net Flow: `+${data['net']:.1f}`*\n\n"
+                    f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
                 )
-                send_telegram(msg)
-                print(f"🎯 SIGNAL: {sym} Net: {data['net']}", flush=True)
-    except: pass
+                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                              data={"chat_id": ADMIN_ID, "text": msg, "parse_mode": "Markdown"})
+                print(f"🎯 BOOM: {sym} Accel: {data['accel']:.1f}x")
+
+    except Exception as e: print(f"Error: {e}")
 
 def main():
-    print("🚀 ULTIMATE WOLF V23.0 STARTED", flush=True)
-    send_telegram("🐺 *Ultimate Wolf V23.0 Online*\nجاهز لاصطياد الانفجارات السعرية.")
     while True:
-        try:
-            scan_market("BINANCE")
-            time.sleep(5)
-            scan_market("MEXC")
-            time.sleep(20)
-        except: time.sleep(10)
+        scan()
+        time.sleep(30) # فحص كل 30 ثانية كما في البوت الأصلي
 
 if __name__ == "__main__":
     main()
