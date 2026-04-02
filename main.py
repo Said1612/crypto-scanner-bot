@@ -1,85 +1,93 @@
 # -*- coding: utf-8 -*-
-import time, requests
+import time, requests, os
 from datetime import datetime
 
-# --- الإعدادات المباشرة (ضع بياناتك هنا بين القوسين) ---
-TELEGRAM_TOKEN = "ضع_التوكن_الخاص_بك_هنا"
-CHAT_ID = "ضع_الايدي_الخاص_بك_هنا"
+# --- الإعدادات ---
+# يفضل وضعها في Variables في Railway، أو كتابتها هنا مباشرة
+TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
+CHAT_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-def send_msg(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
+def send_telegram(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        return r.status_code
+        requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
     except:
-        return 0
+        pass
 
-def get_data(symbol):
+def get_valid_data(symbol):
+    """جلب البيانات مع فحص النوع لمنع خطأ string indices"""
+    url = "https://api.binance.com/api/v3/klines"
     try:
-        url = "https://api.binance.com/api/v3/klines"
-        params = {"symbol": symbol, "interval": "1m", "limit": 2}
-        r = requests.get(url, params=params, timeout=5).json()
+        r = requests.get(url, params={"symbol": symbol, "interval": "1m", "limit": 2}, timeout=5)
+        data = r.json()
         
-        c = r[-1] # الشمعة الحالية
-        total_v = float(c[7])
-        buy_v = float(c[10]) # الشراء
-        sell_v = total_v - buy_v
-        
-        if sell_v == 0: return None
-        
-        return {
-            "p": float(c[4]),
-            "ratio": buy_v / sell_v,
-            "in": buy_v,
-            "net": buy_v - sell_v
-        }
+        # التأكد من أن الرد هو قائمة (List) وليس رسالة خطأ (String/Dict)
+        if isinstance(data, list) and len(data) > 0:
+            candle = data[-1]
+            total_vol = float(candle[7])
+            buy_vol = float(candle[10])
+            sell_vol = total_vol - buy_vol
+            return {
+                "price": float(candle[4]),
+                "ratio": buy_vol / sell_vol if sell_vol > 0 else 2.0,
+                "in": buy_vol,
+                "net": buy_vol - sell_vol
+            }
     except:
         return None
+    return None
 
 def main():
-    print("💀 SKULL V32 STARTED...")
-    status = send_msg("💀 *Skull Flow V32*\nتم التشغيل بنجاح.. جاري رصد السيولة.")
+    print("💀 SKULL FLOW V33.0 - ANTI-ERROR SYSTEM ONLINE")
+    send_telegram("💀 *Skull Flow V33.0* \nتم تفعيل نظام الحماية وإصلاح أخطاء السجلات.")
     
-    if status == 401:
-        print("❌ خطأ: التوكن غير صحيح! تأكد من التوكن الذي وضعته داخل الكود.")
-        return
-
-    sent_list = []
+    sent_signals = []
 
     while True:
         try:
-            # جلب أفضل 100 عملة من حيث الحجم لسرعة الفحص
-            tickers = requests.get("https://api.binance.com/api/v3/ticker/24hr").json()
-            # ترتيب حسب السيولة
-            tickers = sorted(tickers, key=lambda x: float(x['quoteVolume']), reverse=True)[:100]
+            # 1. جلب قائمة الأسعار أولاً
+            resp = requests.get("https://api.binance.com/api/v3/ticker/price", timeout=10)
+            all_tickers = resp.json()
 
-            for t in tickers:
-                sym = t['symbol']
-                if not sym.endswith("USDT") or sym in sent_list: continue
+            # التأكد من أن الرد صحيح قبل البدء
+            if not isinstance(all_tickers, list):
+                print("⚠️ Binance API busy... retrying")
+                time.sleep(10)
+                continue
 
-                d = get_data(sym)
-                # شرط الدخول: الشراء أكبر من البيع بوضوح (Ratio > 1.8)
-                if d and d['ratio'] > 1.8 and d['in'] > 1000:
+            for t in all_tickers:
+                # فحص النوع للتأكد أن t هو Dictionary
+                if not isinstance(t, dict) or 'symbol' not in t: continue
+                
+                symbol = t['symbol']
+                if not symbol.endswith("USDT") or symbol in sent_signals: continue
+
+                # 2. تحليل تدفق السيولة للعملة
+                flow = get_valid_data(symbol)
+                
+                # شرط الاقتناص: سيولة شراء قوية جداً
+                if flow and flow['ratio'] > 2.0 and flow['in'] > 2000:
                     
                     msg = (
-                        f"💀 *SKULL SIGNAL* 💀\n\n"
-                        f"💵 *#{sym.replace('USDT','')}*\n"
-                        f"💰 Price: `{d['p']:.8g}`\n"
-                        f"📈 Ratio: `{d['ratio']:.2f}x` 🔥\n"
-                        f"▲ Net: `+${d['net']/1000:.1f}K` ✅\n\n"
+                        f"💀 *SKULL WHALE DETECTED* 💀\n\n"
+                        f"💵 *#{symbol.replace('USDT','')}*\n"
+                        f"💰 Price: `{flow['price']:.8g}`\n"
+                        f"📊 Ratio: `{flow['ratio']:.2f}x` 🔥\n"
+                        f"📥 Inflow: `${flow['in']/1000:.1f}K`\n"
+                        f"🟢 Net: `+${flow['net']/1000:.1f}K` ✅\n\n"
                         f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
                     )
                     
-                    if send_msg(msg) == 200:
-                        sent_list.append(sym)
-                        if len(sent_list) > 40: sent_list.pop(0)
-                        print(f"✅ Signal Sent: {sym}")
+                    send_telegram(msg)
+                    sent_signals.append(symbol)
+                    if len(sent_signals) > 50: sent_signals.pop(0)
+                    print(f"✅ Signal: {symbol}")
+
+            time.sleep(30)
             
-            time.sleep(30) # فحص كل 30 ثانية
         except Exception as e:
-            print(f"⚠️ Error: {e}")
-            time.sleep(10)
+            print(f"⚠️ Runtime Warning: {e}")
+            time.sleep(15)
 
 if __name__ == "__main__":
     main()
