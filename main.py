@@ -1,90 +1,74 @@
 # -*- coding: utf-8 -*-
 import os, time, requests
 from datetime import datetime
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # --- الإعدادات ---
 TOKEN = "your_token_here"
 CHAT_ID = "your_id_here"
 
-# --- إعدادات القنص ---
-MIN_VOLUME_24H = 7000000
-RATIO_LIMIT = 2.2
-MOMENTUM_LIMIT = 0.5
+# إنشاء جلسة اتصال ذكية (تُعيد المحاولة تلقائياً ولا تعلق)
+session = requests.Session()
+retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+session.mount('https://', HTTPAdapter(max_retries=retries))
 
-# قاموس لمتابعة العملات المفتوحة وأعلى ربح حققته
 active_trades = {}
 
 def send_telegram(text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=5)
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        session.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=5)
     except: pass
 
 def main():
-    print("💀 MAFIO V70: PROFIT TRACKER MODE ACTIVE")
-    send_telegram("💀 *Mafio V70: Profit Tracker Started*\nنظام ملاحقة الأرباح والتنبيهات المتتالية متصل.")
+    print("💀 MAFIO V80: IRONCLAD EDITION START")
+    send_telegram("💀 *Mafio V80: Ironclad Edition*\nتم تحديث محرك الاتصال. لن يعلق البوت بعد الآن.")
 
     while True:
         try:
-            # 1. مرحلة البحث عن صفقات جديدة
-            r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10).json()
-            movers = [t for t in r if t['symbol'].endswith("USDT") and float(t['quoteVolume']) > MIN_VOLUME_24H]
-            movers = sorted(movers, key=lambda x: float(x['priceChangePercent']), reverse=True)[:30]
+            print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Heartbeat: Engine is Running...")
+            
+            # جلب البيانات بمهلة صارمة (Timeout) لمنع التعليق
+            r = session.get("https://api.binance.com/api/v3/ticker/24hr", timeout=5).json()
+            
+            # فرز فوري لأقوى 20 عملة (تقليل العدد لزيادة السرعة القصوى)
+            movers = [t for t in r if t['symbol'].endswith("USDT") and float(t['quoteVolume']) > 10000000]
+            movers = sorted(movers, key=lambda x: float(x['priceChangePercent']), reverse=True)[:20]
 
             for t in movers:
                 sym = t['symbol']
-                if sym in active_trades: continue # لا يدخل إذا كانت العملة مراقبة بالفعل
+                if sym in active_trades: continue
 
-                # تحليل الدخول
-                k = requests.get("https://api.binance.com/api/v3/klines", params={"symbol": sym, "interval": "1m", "limit": 1}).json()
-                if not k: continue
+                # فحص السيولة اللحظية
+                k_data = session.get("https://api.binance.com/api/v3/klines", 
+                                    params={"symbol": sym, "interval": "1m", "limit": 1}, timeout=3).json()
+                if not k_data: continue
                 
-                price_entry = float(k[-1][4])
-                vol_buy = float(k[-1][10])
-                ratio = vol_buy / (float(k[-1][7]) - vol_buy) if (float(k[-1][7]) - vol_buy) > 0 else 2.0
-                change = ((price_entry - float(k[-1][1])) / float(k[-1][1])) * 100
-
-                if ratio >= RATIO_LIMIT and change >= MOMENTUM_LIMIT:
-                    active_trades[sym] = {
-                        'entry': price_entry,
-                        'highest_reach': 0, # لتتبع مستويات 2%, 5%, 10%...
-                        'time': time.time()
-                    }
-                    msg = f"💀 *MAFIO NEW SIGNAL* 💀\n\n💵 *#{sym.replace('USDT','')}*\n🏁 Entry: `${price_entry:.8g}`\n🔥 Power: `{ratio:.2f}x`"
-                    send_telegram(msg)
-
-            # 2. مرحلة ملاحقة الأرباح (Tracking)
-            for sym in list(active_trades.keys()):
-                trade = active_trades[sym]
-                # جلب السعر الحالي بسرعة
-                curr_tick = requests.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": sym}).json()
-                curr_price = float(curr_tick['price'])
+                candle = k_data[-1]
+                entry_p = float(candle[4])
+                ratio = float(candle[10]) / (float(candle[7]) - float(candle[10])) if float(candle[7]) > float(candle[10]) else 1.5
                 
-                # حساب نسبة الربح الحالية
-                profit_pct = ((curr_price - trade['entry']) / trade['entry']) * 100
+                if ratio >= 2.0:
+                    active_trades[sym] = {'entry': entry_p, 'peak': 0, 'time': time.time()}
+                    send_telegram(f"💀 *NEW SNIPE*: `#{sym.replace('USDT','')}`\n💰 Price: `{entry_p}`")
 
-                # تحديد "الجرس" بناءً على الربح المحقق
-                milestones = [2, 5, 10, 20, 50, 100]
-                for m in milestones:
-                    if profit_pct >= m and trade['highest_reach'] < m:
-                        trade['highest_reach'] = m
-                        bell_count = milestones.index(m) + 1
-                        msg = (
-                            f"💀 *MAFIO PROFIT ALERT* 🔔{bell_count}\n\n"
-                            f"🚀 *#{sym.replace('USDT','')}*\n"
-                            f"📈 Peak: `+{profit_pct:.2f}%` 🔥\n"
-                            f"💰 Current: `${curr_price:.8g}`"
-                        )
-                        send_telegram(msg)
+            # ملاحقة الأرباح
+            for s in list(active_trades.keys()):
+                curr = session.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": s}, timeout=3).json()
+                p_now = float(curr['price'])
+                gain = ((p_now - active_trades[s]['entry']) / active_trades[s]['entry']) * 100
+                
+                for milestone in [2, 5, 10, 20]:
+                    if gain >= milestone and active_trades[s]['peak'] < milestone:
+                        active_trades[s]['peak'] = milestone
+                        send_telegram(f"💀 *PROFIT ALERT* 🔔\n🚀 `#{s}`: `+{gain:.2f}%` ✅")
 
-                # حذف الصفقة من المراقبة بعد 24 ساعة أو إذا نزل السعر تحت الدخول بـ 5% (وقف خسارة اختياري)
-                if time.time() - trade['time'] > 86400:
-                    del active_trades[sym]
-
+            print("✅ Cycle Finished Successfully.")
             time.sleep(10)
 
         except Exception as e:
-            print(f"⚠️ Error: {e}")
+            print(f"⚠️ System Auto-Reset: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
