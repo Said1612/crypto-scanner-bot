@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-💀 Wolf Flow Liquidity Scanner
+🐺 Wolf Flow Liquidity Scanner
 Detects sudden liquidity entry on Binance + MEXC simultaneously.
 
 Pattern detected:
