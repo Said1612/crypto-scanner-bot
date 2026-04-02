@@ -42,20 +42,33 @@ active_trades = {}
 def send_telegram(message):
     if "ضع_" in TOKEN or not TOKEN: return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try: requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=15)
-    except: pass
+    try:
+        logger.info(f"📤 Sending Telegram message...")
+        requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
+    except Exception as e:
+        logger.error(f"❌ Telegram Send Error: {e}")
 
 session = requests.Session()
 
 def get_data_from_anywhere(source, endpoint, params=None, is_futures=False):
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
     if source == "BINANCE":
-        urls = [f"https://api.binance.com/api/v3/{endpoint}", f"https://api1.binance.com/api/v3/{endpoint}"]
+        urls = [
+            f"https://api.binance.com/api/v3/{endpoint}" if not is_futures else f"https://fapi.binance.com/fapi/v1/{endpoint}",
+            f"https://api1.binance.com/api/v3/{endpoint}" if not is_futures else f"https://fapi1.binance.com/fapi/v1/{endpoint}",
+        ]
     else: urls = [f"https://api.mexc.com/api/v3/{endpoint}"]
+
     for url in urls:
         try:
-            r = session.get(url, params=params, headers=headers, timeout=12)
-            if r.status_code == 200: return r.json()
+            r = session.get(url, params=params, headers=headers, timeout=5)
+            if r.status_code == 200: 
+                data = r.json()
+                if isinstance(data, dict) and "code" in data: continue
+                return data
+            if r.status_code == 429: 
+                logger.warning("⚠️ Rate limited (429). Sleeping...")
+                time.sleep(10)
         except: continue
     return None
 
@@ -108,6 +121,8 @@ def scan():
     tickers = get_data_from_anywhere(source, "ticker/24hr")
     if not tickers or not isinstance(tickers, list):
         state["current_source"] = "MEXC" if source == "BINANCE" else "BINANCE"; return
+    
+    logger.info(f"🔍 Scanning {source} | BTC 1h: {btc_1h:.2f}%")
     candidates = []
     for t in tickers:
         if not isinstance(t, dict) or 'symbol' not in t: continue
@@ -122,17 +137,26 @@ def scan():
             if price_pos > MAX_PRICE_POS: continue
             candidates.append({'sym': sym, 'vol': vol_24h, 'price': price, 'chg': chg_24h, 'price_pos': price_pos})
         except: continue
+    
+    logger.info(f"📊 {source}: Found {len(candidates)} coins in Accumulation. Analyzing top 30...")
     candidates.sort(key=lambda x: x['vol'], reverse=True)
-    for c in candidates[:40]:
+    top_candidates = candidates[:30]
+
+    for idx, c in enumerate(top_candidates):
         sym = c['sym']
         if sym in state["sent_coins"]: continue
+        if idx % 5 == 0: logger.info(f"🔄 Progress: {idx}/{len(top_candidates)} analyzed...")
         data = analyze_flow(sym, source, c['vol'], btc_1h)
         if not isinstance(data, dict): continue
-        if state["is_first_run"]: state["sent_coins"].append(sym); continue
+        if state["is_first_run"]:
+            logger.info(f"👻 First Run: Skipping {sym} (Silent Mode)")
+            state["sent_coins"].append(sym); continue
+        
         state["count"] += 1; state["sent_coins"].append(sym)
         interest = "💀 PHANTOM SKULL 💀"
         if data['alpha'] > 3.0: interest = "💎 MARKET IMMUNITY (DECOUPLED) 💎"
         elif data['ratio'] > 15: interest = "🚀 HYPER IGNITION 🚀"
+        
         msg = (f"━━━━━━━━━━━━━━━━━━━━\n"
                f"💀 *MAFIO PHANTOM SKULL 19.0* 📡\n\n"
                f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
