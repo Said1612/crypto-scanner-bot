@@ -2,91 +2,103 @@
 import os, time, requests
 from datetime import datetime
 
-# --- الإعدادات (تعديل مباشر) ---
+# --- الإعدادات الخاصة بـ Mafio Bot ---
 TOKEN = "your_token_here"
-ADMIN_ID = "your_id_here"
+CHAT_ID = "your_id_here"
 
-# --- الإعدادات الجديدة لتقليل الأخطاء ومنع الانعكاس ---
-MIN_VOL_USDT = 2000          # رفع الحد الأدنى لسيولة الشمعة (فلترة العملات الضعيفة)
-BUY_RATIO_REQUIRED = 2.5     # لن يرسل إشارة إلا إذا كان الشراء 2.5 ضعف البيع
-PRICE_PUMP_MIN = 0.8         # يجب أن تكون العملة صاعدة بنسبة 0.8% على الأقل في آخر دقيقة
-COOLDOWN = 600               # منع تكرار نفس العملة لمدة 10 دقائق
+# --- إعدادات الاستراتيجية المتقدمة (الفلترة الذكية) ---
+MIN_24H_VOL = 10000000      # 10 مليون دولار كحد أدنى للسيولة اليومية (للأمان)
+RATIO_THRESHOLD = 2.4       # قوة الشراء يجب أن تفوق البيع بـ 2.4 مرة
+MIN_PUMP_1M = 0.6           # يجب أن يكون السعر في حالة صعود فعلي بنسبة 0.6%
+COOLDOWN = 600              # تكرار العملة الواحدة كل 10 دقائق فقط
 
-state = {"sent": {}}
+state = {"sent_signals": {}}
 
-def send_telegram(message):
+def send_telegram(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def get_data():
-    # استخدام التيكر المباشر للحصول على بيانات دقيقة
-    url = "https://api.binance.com/api/v3/ticker/24hr"
+def get_market_movers():
+    """جلب العملات التي تشهد حركة غير عادية"""
     try:
-        return requests.get(url, timeout=10).json()
+        r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10).json()
+        # نركز فقط على العملات الصاعدة التي لديها سيولة محترمة
+        return [t for t in r if t['symbol'].endswith("USDT") and float(t['priceChangePercent']) > 1.0]
     except: return []
 
-def check_flow(sym):
-    # فحص تفصيلي للسيولة (Taker Buy/Sell)
-    url = "https://api.binance.com/api/v3/klines"
+def analyze_mafio_logic(symbol):
+    """تحليل تدفق السيولة اللحظي (Mafio Strategy)"""
     try:
-        r = requests.get(url, params={"symbol": sym, "interval": "1m", "limit": 2}, timeout=5).json()
+        url = "https://api.binance.com/api/v3/klines"
+        # فحص آخر شمعة دقيقة واحدة
+        params = {"symbol": symbol, "interval": "1m", "limit": 1}
+        r = requests.get(url, params=params, timeout=5).json()
         if not r: return None
         
-        curr = r[-1]
-        total_v = float(curr[7]) # إجمالي السيولة بالدولار
-        buy_v = float(curr[10]) # سيولة الشراء الحقيقية
-        sell_v = total_v - buy_v
+        candle = r[-1]
+        close_p = float(candle[4])
+        open_p = float(candle[1])
         
-        if sell_v == 0: return None
+        total_q_vol = float(candle[7])    # إجمالي السيولة بالدولار
+        taker_buy_vol = float(candle[10]) # سيولة الشراء العنيفة (Market Buys)
+        sell_vol = total_q_vol - taker_buy_vol
         
-        ratio = buy_v / sell_v
-        price = float(curr[4])
-        change = ((float(curr[4]) - float(curr[1])) / float(curr[1])) * 100
+        if sell_vol <= 0: return None
         
-        return {"ratio": ratio, "vol": total_v, "price": price, "change": change, "buy": buy_v}
+        ratio = taker_buy_vol / sell_vol
+        change = ((close_p - open_p) / open_p) * 100
+        
+        return {
+            "price": close_p,
+            "ratio": ratio,
+            "change": change,
+            "vol": total_q_vol
+        }
     except: return None
 
 def main():
-    print("💀 SKULL FLOW REBORN - ACTIVE")
-    send_telegram("💀 *Skull Flow System Reborn*\nتم استعادة النسخة المستقرة مع تشديد فلاتر الدخول.")
+    print("💀 MAFIO BOT ONLINE - READY TO HUNT")
+    send_telegram("💀 *Mafio Bot System Online*\nتم تفعيل استراتيجية اقتناص السيولة المتقدمة.")
     
     while True:
         try:
-            tickers = get_data()
-            # ترتيب حسب العملات الأكثر صعوداً حالياً لسرعة الاقتناص
-            top_movers = [t for t in tickers if t['symbol'].endswith("USDT") and float(t['priceChangePercent']) > 2]
+            movers = get_market_movers()
             
-            for t in top_movers:
-                sym = t['symbol']
+            for m in movers:
+                sym = m['symbol']
                 now = time.time()
                 
-                if sym in state["sent"] and now - state["sent"][sym] < COOLDOWN: continue
+                # 1. فحص الكول داون والسيولة اليومية
+                if sym in state["sent_signals"] and now - state["sent_signals"][sym] < COOLDOWN: continue
+                if float(m['quoteVolume']) < MIN_24H_VOL: continue
+
+                # 2. تحليل Mafio للسيولة اللحظية
+                analysis = analyze_mafio_logic(sym)
                 
-                f = check_flow(sym)
-                # --- الفلتر الجديد القوي ---
-                if f and f['ratio'] >= BUY_RATIO_REQUIRED and f['vol'] >= MIN_VOL_USDT and f['change'] >= PRICE_PUMP_MIN:
+                # 3. الشرط القاطع للدخول (الدقة العالية)
+                if analysis and analysis['ratio'] >= RATIO_THRESHOLD and analysis['change'] >= MIN_PUMP_1M:
                     
-                    state["sent"][sym] = now
+                    state["sent_signals"][sym] = now
                     
                     msg = (
-                        f"💀 *SKULL FLOW SIGNAL* 💀\n\n"
-                        f"💵 *#{sym.replace('USDT','')}* | 🟢 *Strong Buy*\n"
-                        f"💰 Price: `{f['price']:.8g}`\n\n"
-                        f"📊 *Flow Analysis:*\n"
-                        f"  📥 Buy Vol: `${f['buy']/1000:.1f}K` ✅\n"
-                        f"  📈 Ratio: `{f['ratio']:.2f}x` 🔥\n"
-                        f"  ⚡ 1m Change: `{f['change']:+.2f}%` \n\n"
+                        f"💀 *MAFIO ALERT* 💀\n\n"
+                        f"💵 *#{sym.replace('USDT','')}* | 🎯 *Snipe Target*\n"
+                        f"💰 Price: `{analysis['price']:.8g}`\n\n"
+                        f"📊 *Strategy Metrics:*\n"
+                        f"  🔥 Buy Power: `{analysis['ratio']:.2f}x` \n"
+                        f"  ⚡ 1m Momentum: `{analysis['change']:+.2f}%` \n"
+                        f"  💎 Candle Flow: `${analysis['vol']/1000:.1f}K` ✅\n\n"
                         f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
                     )
                     send_telegram(msg)
-                    print(f"🎯 Signal: {sym} | Ratio: {f['ratio']:.2f}")
-            
-            time.sleep(30)
+                    print(f"✅ Mafio Snipe: {sym}")
+
+            time.sleep(25) # توازن مثالي لمنع حظر الـ IP
         except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(10)
+            print(f"⚠️ Warning: {e}")
+            time.sleep(15)
 
 if __name__ == "__main__":
     main()
