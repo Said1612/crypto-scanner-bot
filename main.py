@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 15.5 (FLASH SNIPER - STABLE)
-السر: اقتناص الانفجار السيولاتي (Liquidity Sniping) + حماية الترند + بايننس المستقر
+MAFIO BOT - VERSION 15.6 (ULTRA STABLE EDITION)
+السر: اقتناص الانفجار السيولاتي (Liquidity Sniping) + استقرار كامل
 الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + EMA50 Shield
-المطور: MAFIO AI - نظام القناص المطور
+المطور: MAFIO AI - نظام القناص المستقر
 """
 
 import os
@@ -25,7 +25,7 @@ MIN_24H_CHANGE = -5.0
 MAX_24H_CHANGE = 12.0       
 MAX_PRICE_POS = 0.40        
 
-# معايير الانفجار اللحظي (MAFIO Sniper 15.5 - Flash Edition)
+# معايير الانفجار اللحظي (MAFIO Sniper 15.6 - Flash Edition)
 MIN_FLOW_RATIO = 3.8        
 MAX_FLOW_RATIO = 500.0      
 MIN_NET_FLOW_USD = 25000    # الصافي الافتراضي
@@ -46,28 +46,35 @@ def send_telegram(message):
     try: requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=15)
     except: pass
 
+session = requests.Session()
+
 def get_data_from_anywhere(source, endpoint, params=None):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
     }
     if source == "BINANCE":
         urls = [
             f"https://api.binance.com/api/v3/{endpoint}",
             f"https://api1.binance.com/api/v3/{endpoint}",
             f"https://api2.binance.com/api/v3/{endpoint}",
-            f"https://api3.binance.com/api/v3/{endpoint}"
+            f"https://api3.binance.com/api/v3/{endpoint}",
+            f"https://api4.binance.com/api/v3/{endpoint}",
+            f"https://data-api.binance.vision/api/v3/{endpoint}",
+            f"https://api.binance.me/api/v3/{endpoint}"
         ]
     else: # MEXC
         urls = [f"https://api.mexc.com/api/v3/{endpoint}"]
 
     for url in urls:
         try:
-            r = requests.get(url, params=params, headers=headers, timeout=10)
+            r = session.get(url, params=params, headers=headers, timeout=12)
             if r.status_code == 200: 
                 data = r.json()
                 if isinstance(data, dict) and "code" in data: continue
                 return data
-            if r.status_code == 429: time.sleep(5)
+            if r.status_code == 429: time.sleep(10)
         except: continue
     return None
 
@@ -199,6 +206,7 @@ def scan():
             candidates.append({'sym': sym, 'vol': vol_24h, 'price': price, 'chg': chg_24h, 'price_pos': price_pos})
         except: continue
 
+    logger.info(f"📊 {source}: Found {len(candidates)} coins in Accumulation phase.")
     candidates.sort(key=lambda x: x['vol'], reverse=True)
     top_candidates = candidates[:40]
 
@@ -207,7 +215,7 @@ def scan():
         if sym in state["sent_coins"]: continue
 
         data = analyze_flow(sym, source)
-        if not data or data == "TREND_DOWN": continue
+        if not isinstance(data, dict): continue
         
         is_flash = data['ratio'] >= 10.0 and data['net'] >= MIN_FLASH_NET_FLOW
         is_normal = data['ratio'] >= MIN_FLOW_RATIO and data['net'] >= MIN_NET_FLOW_USD
@@ -226,7 +234,7 @@ def scan():
             
             msg = (
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"💀 *MAFIO SNIPER 15.5* 📡\n\n"
+                f"💀 *MAFIO SNIPER 15.6* 📡\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
@@ -251,8 +259,8 @@ def scan():
         logger.info("✅ Silent first scan complete. Sniper is active!")
 
 def main():
-    logger.info("🚀 MAFIO BOT 15.5 (Flash Sniper Edition) Started")
-    send_telegram("💀 *MAFIO BOT 15.5* متصل.\nتم تفعيل نظام الاقتناص الخاطف (Flash Sniper) لاصطياد ومضات السيولة السريعة.")
+    logger.info("🚀 MAFIO BOT 15.6 (Ultra Stable Edition) Started")
+    send_telegram("💀 *MAFIO BOT 15.6* متصل.\nتم إصلاح أخطاء التوقف وتفعيل نظام الاستقرار الأقصى (Ultra Stable).")
     
     while True:
         try:
