@@ -90,4 +90,129 @@ def track_gains():
 def check_flow(sym, source):
     try:
         klines = api_call(source, "klines", {"symbol": sym, "interval": "5m", "limit": 40})
-        if not klines or 
+        if not klines or len(klines) < 15: return None
+        
+        closes = [float(c[4]) for c in klines[-15:]]
+        opens_ = [float(c[1]) for c in klines[-15:]]
+        volumes = [float(c[5]) for c in klines[-15:]]
+        
+        ema5 = ema(closes, 5); ema10 = ema(closes, 10); ema20 = ema(closes, 20)
+        if not (closes[-1] > ema5 > ema10 > ema20): return None
+        
+        avg_vol = sum(volumes[-8:])/8 or 1
+        vol_mult = volumes[-1]/avg_vol
+        
+        inflow, outflow = 0, 0
+        for o,c,v in zip(opens_[-4:], closes[-4:], volumes[-4:]):
+            val = v * c
+            if c > o: inflow += val
+            else: outflow += val
+        
+        ratio = inflow/(outflow or 1)
+        if len(klines) < 12: return None
+        h1_move = (closes[-1] - float(klines[-12][4]))/float(klines[-12][4])*100
+        
+        if h1_move > MAX_1H_MOVE or ratio > 1000 or vol_mult < MIN_VOL_ACCEL:
+            return None
+            
+        return {
+            "in": inflow, "out": outflow, "net": inflow-outflow,
+            "ratio": ratio, "price": closes[-1], "h1": h1_move, "vol": vol_mult
+        }
+    except: return None
+
+def scan():
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if state["date"] != today:
+        state.update({"date": today, "count": 0, "coins": deque(maxlen=150)})
+        telegram(f"📊 *Daily Report* {today[:-4]}
+نظام WOLF FLOW يعمل 24/7 🐺")
+    
+    source = state["exchange"]
+    log.info(f"Scanning {source}...")
+    
+    tickers = api_call(source, "ticker/24hr")
+    if not tickers:
+        state["exchange"] = "MEXC" if source == "BINANCE" else "BINANCE"
+        return
+    
+    candidates = []
+    stables = {"USDC","BUSD","DAI","FDUSD","TUSD","USDP","USDD"}
+    
+    for t in tickers:
+        sym = t["symbol"]
+        if (not sym.endswith("USDT") or sym in BLACKLIST or 
+            any(x in sym for x in ["UP","DOWN","BEAR","BULL"]) or 
+            sym.split("USDT")[0] in stables): continue
+            
+        try:
+            chg = float(t["priceChangePercent"])
+            vol = float(t["quoteVolume"])
+            price = float(t["lastPrice"])
+            high, low = float(t["highPrice"]), float(t["lowPrice"])
+            
+            if not (MIN_VOL_24H <= vol and MIN_CHG_24H <= chg <= MAX_CHG_24H): continue
+            
+            pos = (price-low)/(high-low) if high > low else 0.5
+            if pos > MAX_PRICE_POS: continue
+            
+            candidates.append({"sym": sym, "price": price, "pos": pos, "vol": vol})
+        except: continue
+    
+    candidates.sort(key=lambda x: x["vol"], reverse=True)
+    for coin in candidates[:50]:
+        sym = coin["sym"]
+        if sym in state["coins"]: continue
+        
+        flow = check_flow(sym, source)
+        if not flow: continue
+        
+        if flow["ratio"] >= MIN_FLOW_RATIO and flow["net"] >= MIN_NET_FLOW:
+            if state["first"]:
+                state["coins"].append(sym)
+                continue
+            
+            state["count"] += 1
+            state["coins"].append(sym)
+            trades[sym] = {"entry": coin["price"], "start": time.time(), "max": 0, "hits": []}
+            
+            alert = "🟢 SHORT SQUEEZE" if flow["vol"] > 2.2 else "🐋 Whale Flow"
+            msg = f"""━━━━━━━━━━━━━━━━━━━━━━━━━
+🐺 *Wolf Flow* 📡
+
+💵 *#{sym[:-4]}* 📡 · 🔔 Signal #{state['count']}
+💰 Price: `${coin['price']:.6g}`
+📈 1h Move: `+{flow['h1']:.1f}%`
+
+⚡️ Volume: `{flow['vol']:.1f}x` above avg
+🟡 Order flow: {alert}
+▲ Flow (60m): `{flow['ratio']:.1f}x`
+💹 1h Flow:
+ 📥 In: `${flow['in']/1000:.0f}K`
+ 📤 Out: `${flow['out']/1000:.0f}K`
+ ▲ Net: `+${flow['net']/1000:.0f}K`
+
+🕐 {datetime.now(timezone.utc).strftime('%d %b %H:%M UTC')}
+━━━━━━━━━━━━━━━━━━━━━━━━━"""
+            
+            telegram(msg)
+            log.info(f"SNIPE: {sym} | Ratio: {flow['ratio']:.1f}x")
+            time.sleep(0.3)
+    
+    state["first"] = False
+
+def main():
+    log.info("🚀 WOLF LIQUIDITY SNIPER v1.2 - LIVE")
+    telegram("🐺 *Wolf Flow Bot v1.2* ✅
+نظام تتبع السيولة يعمل بكفاءة 100%")
+    
+    while True:
+        try:
+            scan()
+            track_gains()
+            time.sleep(28)  # كل 30 ثانية تقريباً
+        except Exception as e:
+            log.error(f"Error: {e}")
+            time.sleep(60)
+
+if __name__ == "__main__": main()
