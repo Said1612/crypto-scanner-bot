@@ -3,91 +3,93 @@ import time, requests, os
 from datetime import datetime
 
 # --- الإعدادات ---
-# يفضل وضعها في Variables في Railway، أو كتابتها هنا مباشرة
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 CHAT_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
+
+# روابط بديلة لـ Binance لتجاوز الحظر
+BINANCE_ENDPOINTS = [
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com"
+]
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
         requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
-    except:
-        pass
+    except: pass
 
-def get_valid_data(symbol):
-    """جلب البيانات مع فحص النوع لمنع خطأ string indices"""
-    url = "https://api.binance.com/api/v3/klines"
+def get_data_safe(symbol, endpoint):
+    """جلب بيانات السيولة من رابط محدد"""
     try:
+        url = f"{endpoint}/api/v3/klines"
         r = requests.get(url, params={"symbol": symbol, "interval": "1m", "limit": 2}, timeout=5)
-        data = r.json()
-        
-        # التأكد من أن الرد هو قائمة (List) وليس رسالة خطأ (String/Dict)
-        if isinstance(data, list) and len(data) > 0:
-            candle = data[-1]
-            total_vol = float(candle[7])
-            buy_vol = float(candle[10])
-            sell_vol = total_vol - buy_vol
-            return {
-                "price": float(candle[4]),
-                "ratio": buy_vol / sell_vol if sell_vol > 0 else 2.0,
-                "in": buy_vol,
-                "net": buy_vol - sell_vol
-            }
-    except:
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list) and len(data) > 0:
+                c = data[-1]
+                total = float(c[7])
+                buy = float(c[10])
+                sell = total - buy
+                if sell == 0: return None
+                return {"p": float(c[4]), "ratio": buy/sell, "in": buy}
         return None
-    return None
+    except: return None
 
 def main():
-    print("💀 SKULL FLOW V33.0 - ANTI-ERROR SYSTEM ONLINE")
-    send_telegram("💀 *Skull Flow V33.0* \nتم تفعيل نظام الحماية وإصلاح أخطاء السجلات.")
+    print("💀 SKULL FLOW V34.0 - ANTI-BAN SYSTEM")
+    send_telegram("💀 *Skull Flow V34.0*\nتم تفعيل نظام تخطي الحظر وتبديل الـ API.")
     
-    sent_signals = []
+    sent_list = []
+    current_api_idx = 0
 
     while True:
         try:
-            # 1. جلب قائمة الأسعار أولاً
-            resp = requests.get("https://api.binance.com/api/v3/ticker/price", timeout=10)
-            all_tickers = resp.json()
-
-            # التأكد من أن الرد صحيح قبل البدء
-            if not isinstance(all_tickers, list):
-                print("⚠️ Binance API busy... retrying")
-                time.sleep(10)
+            # اختيار رابط API مختلف في كل دورة لتوزيع الضغط
+            api_base = BINANCE_ENDPOINTS[current_api_idx]
+            
+            # جلب الأسعار
+            r = requests.get(f"{api_base}/api/v3/ticker/price", timeout=10)
+            
+            if r.status_code != 200:
+                print(f"⚠️ API {current_api_idx} Busy, switching...")
+                current_api_idx = (current_api_idx + 1) % len(BINANCE_ENDPOINTS)
+                time.sleep(5)
                 continue
 
-            for t in all_tickers:
-                # فحص النوع للتأكد أن t هو Dictionary
-                if not isinstance(t, dict) or 'symbol' not in t: continue
-                
-                symbol = t['symbol']
-                if not symbol.endswith("USDT") or symbol in sent_signals: continue
+            tickers = r.json()
+            # فحص أهم 150 عملة فقط لتقليل عدد الطلبات ومنع الحظر
+            active_tickers = [t for t in tickers if t['symbol'].endswith("USDT")][:150]
 
-                # 2. تحليل تدفق السيولة للعملة
-                flow = get_valid_data(symbol)
+            for t in active_tickers:
+                sym = t['symbol']
+                if any(x in sym for x in ["UP", "DOWN", "BULL", "BEAR"]) or sym in sent_list: continue
+
+                # فحص السيولة
+                d = get_data_safe(sym, api_base)
                 
-                # شرط الاقتناص: سيولة شراء قوية جداً
-                if flow and flow['ratio'] > 2.0 and flow['in'] > 2000:
-                    
+                if d and d['ratio'] > 2.2 and d['in'] > 3000:
                     msg = (
-                        f"💀 *SKULL WHALE DETECTED* 💀\n\n"
-                        f"💵 *#{symbol.replace('USDT','')}*\n"
-                        f"💰 Price: `{flow['price']:.8g}`\n"
-                        f"📊 Ratio: `{flow['ratio']:.2f}x` 🔥\n"
-                        f"📥 Inflow: `${flow['in']/1000:.1f}K`\n"
-                        f"🟢 Net: `+${flow['net']/1000:.1f}K` ✅\n\n"
-                        f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
+                        f"💀 *SKULL SIGNAL* 💀\n\n"
+                        f"💵 *#{sym.replace('USDT','')}*\n"
+                        f"💰 Price: `{d['p']:.8g}`\n"
+                        f"📈 Ratio: `{d['ratio']:.2f}x` 🔥\n"
+                        f"📥 Inflow: `${d['in']/1000:.1f}K` ✅"
                     )
-                    
                     send_telegram(msg)
-                    sent_signals.append(symbol)
-                    if len(sent_signals) > 50: sent_signals.pop(0)
-                    print(f"✅ Signal: {symbol}")
+                    sent_list.append(sym)
+                    if len(sent_list) > 30: sent_list.pop(0)
+                    print(f"🎯 Signal: {sym}")
+                    time.sleep(0.5) # تأخير بسيط بين فحص عملة وأخرى لمنع الـ Rate Limit
 
-            time.sleep(30)
-            
+            # تبديل الـ API للدورة القادمة
+            current_api_idx = (current_api_idx + 1) % len(BINANCE_ENDPOINTS)
+            time.sleep(40) # زيادة وقت الراحة بين الدورات لتجنب حظر الـ IP
+
         except Exception as e:
-            print(f"⚠️ Runtime Warning: {e}")
-            time.sleep(15)
+            print(f"❌ Error: {e}")
+            time.sleep(20)
 
 if __name__ == "__main__":
     main()
