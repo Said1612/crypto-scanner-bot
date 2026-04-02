@@ -27,50 +27,41 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.getenv("CHAT_ID", "")
 GROUP_ID       = os.getenv("GROUP_ID", "")
 
-# Redis (Upstash) — optional, for state persistence across restarts
 REDIS_URL   = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
 REDIS_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY   = "wolf_state_v1"
 
-# Scan intervals
-FAST_SCAN_S  = 30    # check tickers every 30s (fast loop)
-SLOW_SCAN_S  = 300   # check 1h klines every 5 min (slow loop)
+FAST_SCAN_S  = 30
+SLOW_SCAN_S  = 300
+COOLDOWN     = 7200
 
-# Cooldown: don't re-alert same coin within N seconds
-COOLDOWN     = 7200  # 2 hours
+FAST_VOL_SPIKE   = 5.0
+FAST_PRICE_MOVE  = 2.0
+FAST_TICKER_MOVE = 1.5
 
-# ── Fast scanner (5m candles) ──────────────────────────
-FAST_VOL_SPIKE   = 5.0   # last 5m candle vol >= 5× recent avg
-FAST_PRICE_MOVE  = 2.0   # price moved >= 2% on that candle
-FAST_TICKER_MOVE = 1.5   # 30s price delta to trigger klines check
+SLOW_VOL_SPIKE   = 3.0
+SLOW_PRICE_MOVE  = 3.0
 
-# ── Slow scanner (1h candles) ─────────────────────────
-SLOW_VOL_SPIKE   = 3.0   # last 1h candle vol >= 3× recent avg
-SLOW_PRICE_MOVE  = 3.0   # price moved >= 3% on that 1h candle
+FLOW_RATIO    = 1.3
+FLOW_CANDLES  = 3
 
-# ── Flow filter ────────────────────────────────────────
-FLOW_RATIO    = 1.3       # buy_vol / sell_vol must be >= 1.3
-FLOW_CANDLES  = 3         # look at last 3 candles for flow
+MIN_VOL_24H   = 300_000
+MEXC_MIN_VOL  = 50_000
+MAX_PUMP_24H  = 60.0
+LATE_ENTRY_PCT = 0.85
 
-# ── Coin filters ───────────────────────────────────────
-MIN_VOL_24H   = 300_000   # minimum 24h USD volume
-MAX_PUMP_24H  = 60.0      # skip coins already up 60%+
-LATE_ENTRY_PCT = 0.85     # skip if price > 85% of 24h range
-
-# ── Milestone tracking ─────────────────────────────────
 MILESTONES    = [2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
-TRACK_HOURS   = 24        # track milestones for 24h after signal
+TRACK_HOURS   = 24
 
-# ── Blocklist ──────────────────────────────────────────
 STABLECOINS = {
     "USDC", "BUSD", "DAI", "TUSD", "USDD", "FDUSD",
     "USDP", "PYUSD", "USDB", "USDX", "EURC", "USDT"
 }
 SKIP_KEYWORDS = {"UP", "DOWN", "BULL", "BEAR", "3L", "3S", "2L", "2S", "HEDGE"}
 
-# ── API base URLs ──────────────────────────────────────
-BINANCE_BASE = "https://api.binance.com/api/v3"
-MEXC_BASE    = "https://api.mexc.com/api/v3"
+BINANCE_SPOT    = "https://api.binance.com/api/v3"
+BINANCE_FUTURES = "https://fapi.binance.com/fapi/v1"
+MEXC_BASE       = "https://api.mexc.com/api/v3"
 
 # ══════════════════════════════════════════════════════
 #  STATE
@@ -94,10 +85,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("wolf")
 
-# ══════════════════════════════════════════════════════
-#  HTTP SESSION
-# ══════════════════════════════════════════════════════
-
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "WolfFlowBot/2.0"})
 
@@ -108,12 +95,12 @@ def _get(url: str, params: dict = None, timeout: int = 10) -> Optional[object]:
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        log.debug("GET %s params=%s → %s", url, params, e)
+        log.debug("GET %s → %s", url, e)
         return None
 
 
 # ══════════════════════════════════════════════════════
-#  REDIS STATE (optional)
+#  REDIS STATE
 # ══════════════════════════════════════════════════════
 
 def _redis(method: str, path: str, body=None) -> Optional[dict]:
@@ -128,7 +115,7 @@ def _redis(method: str, path: str, body=None) -> Optional[dict]:
             r = SESSION.post(url, headers=headers, json=body, timeout=5)
         return r.json()
     except Exception as e:
-        log.debug("Redis %s %s: %s", method, path, e)
+        log.debug("Redis %s: %s", path, e)
         return None
 
 
@@ -137,10 +124,7 @@ def save_state():
         return
     state = {
         "alerted":  {k: v for k, v in alerted.items()},
-        "tracking": {
-            k: {**v, "hit": list(v["hit"])}
-            for k, v in tracking.items()
-        },
+        "tracking": {k: {**v, "hit": list(v["hit"])} for k, v in tracking.items()},
     }
     _redis("POST", f"/set/{REDIS_KEY}", {"value": json.dumps(state)})
 
@@ -180,46 +164,55 @@ def _is_valid_sym(sym: str) -> bool:
     return True
 
 
-def fetch_tickers(base_url: str, exchange: str) -> Dict[str, dict]:
-    data = _get(f"{base_url}/ticker/24hr")
-    if not isinstance(data, list):
-        log.warning("%s ticker returned no data (blocked or down)", exchange)
-        return {}
+def _parse_tickers(data: list, exchange: str, base_url: str) -> Dict[str, dict]:
     out = {}
     for t in data:
         sym = t.get("symbol", "")
         if not _is_valid_sym(sym):
             continue
         try:
-            price = float(t["lastPrice"])
+            price = float(t.get("lastPrice") or 0)
             if price <= 0:
                 continue
-
-            # Volume: use quoteVolume (USDT), fallback to base_vol * price
-            # MEXC sometimes returns quoteVolume=0 — must fallback
             quote_vol = float(t.get("quoteVolume") or 0)
             base_vol  = float(t.get("volume")      or 0)
-            vol = quote_vol if quote_vol > 1 else base_vol * price
-
+            vol    = quote_vol if quote_vol > 1 else base_vol * price
             change = float(t.get("priceChangePercent") or 0)
             high24 = float(t.get("highPrice") or price)
             low24  = float(t.get("lowPrice")  or price)
-
             out[sym] = {
-                "price":    price,
-                "vol":      vol,
-                "change":   change,
-                "high24":   high24,
-                "low24":    low24,
-                "exchange": exchange,
-                "base_url": base_url,
+                "price": price, "vol": vol, "change": change,
+                "high24": high24, "low24": low24,
+                "exchange": exchange, "base_url": base_url,
             }
         except (KeyError, ValueError, TypeError):
             continue
+    return out
 
-    if len(out) < 100:
-        log.warning("%s: only %d valid tickers — API may be blocked or degraded",
-                    exchange, len(out))
+
+def fetch_tickers_binance() -> Dict[str, dict]:
+    data = _get(f"{BINANCE_SPOT}/ticker/24hr")
+    if isinstance(data, list) and len(data) > 100:
+        out = _parse_tickers(data, "Binance", BINANCE_SPOT)
+        log.info("Binance Spot: %d tickers", len(out))
+        return out
+    log.warning("Binance Spot blocked — trying Futures...")
+    data = _get(f"{BINANCE_FUTURES}/ticker/24hr")
+    if isinstance(data, list) and len(data) > 100:
+        out = _parse_tickers(data, "Binance", BINANCE_FUTURES)
+        log.info("Binance Futures: %d tickers", len(out))
+        return out
+    log.warning("Binance unavailable — MEXC only mode")
+    return {}
+
+
+def fetch_tickers_mexc() -> Dict[str, dict]:
+    data = _get(f"{MEXC_BASE}/ticker/24hr")
+    if not isinstance(data, list):
+        log.warning("MEXC ticker returned no data")
+        return {}
+    out = _parse_tickers(data, "MEXC", MEXC_BASE)
+    log.info("MEXC: %d tickers", len(out))
     return out
 
 
@@ -233,11 +226,10 @@ def fetch_klines(sym: str, base_url: str, interval: str = "5m", limit: int = 25)
 # ══════════════════════════════════════════════════════
 
 def _quote_vol(candle: list) -> float:
-    """Extract USDT volume from kline (Binance/MEXC index 7 = quote asset vol)."""
     try:
         v = float(candle[7])
         return v if v > 0 else float(candle[5]) * float(candle[4])
-    except (IndexError, ValueError):
+    except Exception:
         try:
             return float(candle[5]) * float(candle[4])
         except Exception:
@@ -247,24 +239,19 @@ def _quote_vol(candle: list) -> float:
 def vol_spike_and_move(candles: List[list]) -> Tuple[float, float]:
     if len(candles) < 8:
         return 0.0, 0.0
-
-    vols = [_quote_vol(c) for c in candles]
+    vols     = [_quote_vol(c) for c in candles]
     last_vol = vols[-1]
     baseline = vols[:-2]
     avg_vol  = sum(baseline) / len(baseline) if baseline else 0.0
-
     if avg_vol <= 0:
         return 0.0, 0.0
-
     spike = last_vol / avg_vol
-
     try:
-        o = float(candles[-1][1])
-        c = float(candles[-1][4])
+        o    = float(candles[-1][1])
+        c    = float(candles[-1][4])
         move = (c - o) / o * 100.0 if o > 0 else 0.0
     except Exception:
         move = 0.0
-
     return spike, move
 
 
@@ -272,9 +259,7 @@ def calc_flow(candles: List[list]) -> Tuple[float, float]:
     buy = sell = 0.0
     for c in candles[-FLOW_CANDLES:]:
         try:
-            h   = float(c[2])
-            lo  = float(c[3])
-            cl  = float(c[4])
+            h, lo, cl = float(c[2]), float(c[3]), float(c[4])
             vol = _quote_vol(c)
             rng = h - lo
             b   = (cl - lo) / rng if rng > 0 else 0.5
@@ -305,74 +290,46 @@ def send(text: str):
         return
     for cid in filter(None, [CHAT_ID, GROUP_ID]):
         try:
-            SESSION.post(
-                f"{_TG}/sendMessage",
-                json={"chat_id": cid, "text": text, "parse_mode": "Markdown"},
-                timeout=10,
-            )
+            SESSION.post(f"{_TG}/sendMessage",
+                         json={"chat_id": cid, "text": text, "parse_mode": "Markdown"},
+                         timeout=10)
         except Exception as e:
-            log.error("Telegram error: %s", e)
+            log.error("Telegram: %s", e)
 
 
 def _fv(v: float) -> str:
-    if v >= 1_000_000:
-        return f"{v / 1_000_000:.1f}M$"
-    if v >= 1_000:
-        return f"{v / 1_000:.1f}K$"
+    if v >= 1_000_000: return f"{v/1e6:.1f}M$"
+    if v >= 1_000:     return f"{v/1e3:.1f}K$"
     return f"{v:.0f}$"
 
 
-def _fmt_price(price: float) -> str:
-    if price >= 1000:
-        return f"{price:.2f}"
-    if price >= 1:
-        return f"{price:.4f}"
-    if price >= 0.001:
-        return f"{price:.6f}"
+def _fp(price: float) -> str:
+    if price >= 1000:  return f"{price:.2f}"
+    if price >= 1:     return f"{price:.4f}"
+    if price >= 0.001: return f"{price:.6f}"
     return f"{price:.8f}"
 
 
-def build_signal_msg(sym, price, change, buy_v, sell_v,
-                     spike, candle_move, exchange) -> str:
-    base     = sym[:-4]
-    net      = buy_v - sell_v
-    ratio    = buy_v / sell_v if sell_v > 0 else 99.0
+def build_signal_msg(sym, price, change, buy_v, sell_v, spike, move, exchange) -> str:
+    base, net, ratio = sym[:-4], buy_v - sell_v, buy_v / sell_v if sell_v > 0 else 99.0
     ex_icon  = "🔶" if exchange == "MEXC" else "🔷"
-
-    if spike >= 15:
-        vol_tag = "💥 EXPLOSIVE"
-    elif spike >= 10:
-        vol_tag = "🔥🔥 Very High"
-    elif spike >= 7:
-        vol_tag = "🔥 High"
-    else:
-        vol_tag = "⚡ Spike"
-
-    if ratio >= 3.0:
-        flow_tag = "🟢🟢 Very Bullish"
-    elif ratio >= 2.0:
-        flow_tag = "🟢 Bullish"
-    elif ratio >= 1.5:
-        flow_tag = "🟡 Mildly Bullish"
-    else:
-        flow_tag = "🟡 Bullish"
-
-    p = _fmt_price(price)
-
+    vol_tag  = ("💥 EXPLOSIVE" if spike >= 15 else "🔥🔥 Very High" if spike >= 10
+                else "🔥 High" if spike >= 7 else "⚡ Spike")
+    flow_tag = ("🟢🟢 Very Bullish" if ratio >= 3.0 else "🟢 Bullish" if ratio >= 2.0
+                else "🟡 Mildly Bullish" if ratio >= 1.5 else "🟡 Bullish")
     return (
-        f"🚀 *LIQUIDITY ENTRY DETECTED*\n"
-        f"{'━' * 20}\n"
+        f"🚀 *LIQUIDITY ENTRY DETECTED*\n{'━'*20}\n"
         f"💎 *#{base}USDT*  {ex_icon} _{exchange}_\n"
-        f"💰 Price: `${p}`\n"
-        f"📈 Candle Move: `+{candle_move:.2f}%`\n"
+        f"💰 Price: `${_fp(price)}`\n"
+        f"📈 Candle Move: `+{move:.2f}%`\n"
         f"📊 24h Change:  `+{change:.2f}%`\n"
-        f"{'━' * 20}\n"
+        f"{'━'*20}\n"
         f"📦 Vol Spike: `{spike:.1f}×` — {vol_tag}\n"
         f"  ▶️ In:  `{_fv(buy_v)}`\n"
         f"  ◀️ Out: `{_fv(sell_v)}`\n"
         f"  ⚡ Net: `+{_fv(net)}`\n"
         f"  Flow: {flow_tag}\n"
-        f"{'━' * 20}\n"
+        f"{'━'*20}\n"
         f"✅ *السيولة تدخل — ادخل الآن* 🐺💜"
     )
 
@@ -382,70 +339,58 @@ def build_signal_msg(sym, price, change, buy_v, sell_v,
 # ══════════════════════════════════════════════════════
 
 def check_milestones(all_tickers: Dict[str, dict]):
-    now     = time.time()
-    expired = []
-
+    now, expired = time.time(), []
     for sym, info in tracking.items():
         if now - info["t0"] > TRACK_HOURS * 3600:
             expired.append(sym)
             continue
-
         t = all_tickers.get(sym)
         if not t:
             continue
-
         gain = (t["price"] - info["entry"]) / info["entry"] * 100.0
         if gain > info.get("max", 0.0):
             info["max"] = gain
-
         for ms in MILESTONES:
-            if ms in info["hit"]:
-                continue
-            if gain >= ms:
+            if ms not in info["hit"] and gain >= ms:
                 info["hit"].add(ms)
                 _fire_milestone(sym, ms, gain, t["price"], info["entry"],
                                 int(now - info["t0"]), info["exchange"])
-
     for s in expired:
         tracking.pop(s, None)
 
 
 def _fire_milestone(sym, ms, gain, price_now, entry, elapsed, exchange):
-    base    = sym[:-4]
     elapsed = max(elapsed, 0)
-    t_str   = (f"{elapsed // 3600}h {(elapsed % 3600) // 60}m" if elapsed >= 3600
-               else f"{elapsed // 60}m {elapsed % 60}s" if elapsed >= 60
+    t_str   = (f"{elapsed//3600}h {(elapsed%3600)//60}m" if elapsed >= 3600
+               else f"{elapsed//60}m {elapsed%60}s" if elapsed >= 60
                else f"{elapsed}s")
     icon    = "🚀" if ms >= 50 else ("🔥" if ms >= 25 else ("📈" if ms >= 10 else "✅"))
     ex_icon = "🔶" if exchange == "MEXC" else "🔷"
-
     send(
-        f"{icon} *{base}USDT*  +{ms}% milestone reached\n"
+        f"{icon} *{sym[:-4]}USDT*  +{ms}% milestone reached\n"
         f"📊 Max gain:   +{gain:.2f}%\n"
-        f"💰 Price now:  ${_fmt_price(price_now)}\n"
-        f"🏁 Entry:      ${_fmt_price(entry)}\n"
+        f"💰 Price now:  ${_fp(price_now)}\n"
+        f"🏁 Entry:      ${_fp(entry)}\n"
         f"⏱ Achieved in: {t_str}\n"
         f"{ex_icon} {exchange}"
     )
-    log.info("MILESTONE  %-14s +%d%%  (max=+%.2f%%)  in %s  [%s]",
-             sym, ms, gain, t_str, exchange)
+    log.info("MILESTONE  %-14s +%d%%  in %s  [%s]", sym, ms, t_str, exchange)
 
 
 # ══════════════════════════════════════════════════════
 #  CORE SIGNAL CHECK
 # ══════════════════════════════════════════════════════
 
-def _check_coin(sym: str, ticker: dict, interval: str,
-                spike_min: float, move_min: float):
-    now = time.time()
-
+def _check_coin(sym: str, ticker: dict, interval: str, spike_min: float, move_min: float):
+    now      = time.time()
     price    = ticker["price"]
     vol_24h  = ticker["vol"]
     change   = ticker["change"]
     exchange = ticker["exchange"]
     base_url = ticker["base_url"]
 
-    if vol_24h < MIN_VOL_24H:
+    min_vol = MEXC_MIN_VOL if exchange == "MEXC" else MIN_VOL_24H
+    if vol_24h < min_vol:
         return
     if not (1.0 <= change <= MAX_PUMP_24H):
         return
@@ -467,31 +412,20 @@ def _check_coin(sym: str, ticker: dict, interval: str,
         return
 
     alerted[sym] = now
-    tracking[sym] = {
-        "entry":    price,
-        "t0":       now,
-        "hit":      set(),
-        "max":      0.0,
-        "exchange": exchange,
-    }
+    tracking[sym] = {"entry": price, "t0": now, "hit": set(), "max": 0.0, "exchange": exchange}
     save_state()
 
-    msg = build_signal_msg(sym, price, change, buy_v, sell_v, spike, move, exchange)
-    send(msg)
-
-    log.info(
-        "SIGNAL  %-14s spike=%.1fx  move=+%.1f%%  flow=%.1fx  [%s %s]",
-        sym, spike, move, buy_v / max(sell_v, 1), exchange, interval
-    )
+    send(build_signal_msg(sym, price, change, buy_v, sell_v, spike, move, exchange))
+    log.info("SIGNAL  %-14s spike=%.1fx  move=+%.1f%%  flow=%.1fx  [%s %s]",
+             sym, spike, move, buy_v / max(sell_v, 1), exchange, interval)
 
 
 # ══════════════════════════════════════════════════════
-#  FAST SCANNER — every 30s, uses 5m klines
+#  FAST SCANNER — every 30s
 # ══════════════════════════════════════════════════════
 
 def fast_scan(all_tickers: Dict[str, dict]):
     global prev_prices
-
     movers = []
     for sym, t in all_tickers.items():
         prev = prev_prices.get(sym, 0)
@@ -499,12 +433,9 @@ def fast_scan(all_tickers: Dict[str, dict]):
             delta = (t["price"] - prev) / prev * 100.0
             if delta >= FAST_TICKER_MOVE:
                 movers.append((sym, delta, t))
-
     prev_prices = {sym: t["price"] for sym, t in all_tickers.items()}
-
     if not movers:
         return
-
     movers.sort(key=lambda x: -x[1])
     for sym, delta, ticker in movers[:30]:
         _check_coin(sym, ticker, "5m", FAST_VOL_SPIKE, FAST_PRICE_MOVE)
@@ -512,52 +443,35 @@ def fast_scan(all_tickers: Dict[str, dict]):
 
 
 # ══════════════════════════════════════════════════════
-#  SLOW SCANNER — every 5 min, uses 1h klines
+#  SLOW SCANNER — every 5 min
 # ══════════════════════════════════════════════════════
 
 def slow_scan(all_tickers: Dict[str, dict]):
-    total = len(all_tickers)
-
-    # Any slight positive change + minimum volume
-    candidates = [
-        (sym, t) for sym, t in all_tickers.items()
-        if t["change"] >= 0.5           # lowered from 2.0
-        and t["change"] <= MAX_PUMP_24H
-        and t["vol"] >= MIN_VOL_24H     # removed * 1.5
-    ]
-
-    if not candidates:
-        no_vol    = sum(1 for t in all_tickers.values() if t["vol"] < MIN_VOL_24H)
-        no_change = sum(1 for t in all_tickers.values()
-                        if not (0.5 <= t["change"] <= MAX_PUMP_24H))
-        log.warning(
-            "slow_scan: 0 candidates — vol_filtered=%d  change_filtered=%d  total=%d",
-            no_vol, no_change, total
-        )
-        return
-
-    # Binance first, then MEXC, top 200
+    total      = len(all_tickers)
+    candidates = []
+    for sym, t in all_tickers.items():
+        min_vol = MEXC_MIN_VOL if t["exchange"] == "MEXC" else MIN_VOL_24H
+        if t["vol"] < min_vol:
+            continue
+        if t["change"] > MAX_PUMP_24H:
+            continue
+        candidates.append((sym, t))
     candidates.sort(key=lambda x: (-int(x[1]["exchange"] == "Binance"), -x[1]["vol"]))
-    candidates = candidates[:200]
-
+    candidates = candidates[:300]
     log.info("slow_scan: checking %d/%d candidates (1h klines)", len(candidates), total)
-
     for sym, ticker in candidates:
         _check_coin(sym, ticker, "1h", SLOW_VOL_SPIKE, SLOW_PRICE_MOVE)
         time.sleep(0.08)
 
 
 # ══════════════════════════════════════════════════════
-#  MAIN LOOP
+#  MAIN
 # ══════════════════════════════════════════════════════
 
 def main():
     global last_fast, last_slow
-
     log.info("🐺 Wolf Flow Liquidity Scanner v2.0 — starting")
-
     load_state()
-
     send(
         "🐺 *Wolf Flow Liquidity Scanner v2.0*\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -568,40 +482,28 @@ def main():
         "🎯 Detects: Liquidity spike on ANY USDT pair\n"
         f"🔕 Cooldown: {COOLDOWN // 3600}h per coin"
     )
-
     while True:
         try:
             now = time.time()
-
             if now - last_fast < FAST_SCAN_S:
                 time.sleep(1)
                 continue
-
             last_fast = now
-
-            b_tickers = fetch_tickers(BINANCE_BASE, "Binance")
-            m_tickers = fetch_tickers(MEXC_BASE,    "MEXC")
-
-            # Binance wins for duplicate symbols
-            all_t = {**m_tickers, **b_tickers}
-
-            log.info(
-                "Tickers fetched: Binance=%d  MEXC=%d  Total=%d  Tracking=%d",
-                len(b_tickers), len(m_tickers), len(all_t), len(tracking)
-            )
-
+            b_tickers = fetch_tickers_binance()
+            m_tickers = fetch_tickers_mexc()
+            all_t     = {**m_tickers, **b_tickers}
+            log.info("Tickers: Binance=%d  MEXC=%d  Total=%d  Tracking=%d",
+                     len(b_tickers), len(m_tickers), len(all_t), len(tracking))
             check_milestones(all_t)
             fast_scan(all_t)
-
             if now - last_slow >= SLOW_SCAN_S:
                 last_slow = now
                 slow_scan(all_t)
-
         except KeyboardInterrupt:
-            log.info("Stopped by user.")
+            log.info("Stopped.")
             break
         except Exception as e:
-            log.error("Main loop error: %s", e, exc_info=True)
+            log.error("Loop error: %s", e, exc_info=True)
             time.sleep(5)
 
 
