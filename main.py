@@ -1,91 +1,87 @@
 # -*- coding: utf-8 -*-
-import os, sys, time, requests, logging
+import os, time, requests
 from datetime import datetime
 
-# --- الإعدادات ---
+# --- الإعدادات (تأكد من وضع بياناتك) ---
 TOKEN = "YOUR_TELEGRAM_TOKEN"
-ADMIN_ID = "YOUR_CHAT_ID"
+CHAT_ID = "YOUR_CHAT_ID"
 
-# معايير الجمجمة الشبح (Phantom Skull)
-MIN_VOLUME_24H = 150000     
-MIN_ALPHA_SCORE = 1.0       # تقليل النسبة قليلاً لزيادة الفرص
+# --- فلاتر الصيد (إعدادات حذرة لمنع الانعكاس) ---
+MIN_VOL_24H = 300000        # سيولة كافية للحركة
+TARGET_CHANGE = 1.5         # صعود 1.5% كحد أدنى
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
-logger = logging.getLogger("MAFIO_V19")
-
-# محرك الجلسة مع معالجة الحظر الجغرافي
-session = requests.Session()
-
-def get_data_safe(url, params=None):
+def send_telegram(message):
     try:
-        # إضافة Headers لتبدو كمتصفح حقيقي لتجنب خطأ 451
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = session.get(url, params=params, headers=headers, timeout=10)
-        if r.status_code == 200:
-            return r.json()
-        return None
-    except: return None
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}, timeout=5)
+    except: pass
 
-def get_btc_1h():
-    # محاولة جلب BTC من باينانس، وإذا فشل نجلب من MEXC
-    data = get_data_safe("https://api.binance.com/api/v3/klines", {"symbol": "BTCUSDT", "interval": "1h", "limit": 2})
-    if not data:
-        data = get_data_safe("https://api.mexc.com/api/v3/klines", {"symbol": "BTC_USDT", "interval": "1h", "limit": 2})
-    
-    if data and len(data) > 1:
-        return ((float(data[-1][4]) - float(data[-1][1])) / float(data[-1][1])) * 100
-    return 0
+def get_mexc_data():
+    """جلب البيانات باستخدام محرك V3 الجديد والأكثر استقراراً"""
+    try:
+        # الرابط الرسمي المحدث لـ MEXC
+        url = "https://api.mexc.com/api/v3/ticker/24hr"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # التأكد أن البيانات قائمة (List) وليست نصاً لمنع خطأ TypeError
+            if isinstance(data, list):
+                return data
+        return None
+    except:
+        return None
 
 def main():
-    logger.info("💀 MAFIO V19.2: DEPLOYED & PROTECTED")
-    sent_coins = []
+    print("🚀 MAFIO V100: MEXC ULTIMATE - ONLINE")
+    send_telegram("💀 *Mafio V100: MEXC Ultimate*\nتم تحديث المحرك لروابط V3 الرسمية. بدأ الفحص الآمن..")
     
+    sent_signals = []
+
     while True:
         try:
-            btc_move = get_btc_1h()
-            # جلب البيانات من MEXC لأنها أكثر استقراراً في السجلات الخاصة بك
-            url = "https://api.mexc.com/api/v3/ticker/24hr"
-            tickers = get_data_safe(url)
+            print(f"🔍 [{datetime.now().strftime('%H:%M:%S')}] Heartbeat: Scanning MEXC...")
+            tickers = get_mexc_data()
             
-            if not tickers or not isinstance(tickers, list):
-                logger.warning("⚠️ API Error: Switching source or retrying...")
-                time.sleep(30); continue
+            if not tickers:
+                print("⚠️ API Response Error. Retrying in 20s...")
+                time.sleep(20)
+                continue
 
-            # تصفية العملات القوية فقط
+            # تصفية العملات
             for t in tickers:
+                # التأكد من وجود المفاتيح المطلوبة قبل القراءة
+                if 'symbol' not in t or 'lastPrice' not in t: continue
+                
                 sym = t['symbol']
-                if not sym.endswith("USDT") or sym in sent_coins: continue
+                if not sym.endswith("USDT") or sym in sent_signals: continue
                 
-                vol = float(t.get('quoteVolume', 0))
-                chg = float(t.get('priceChangePercent', 0))
-                
-                if vol > MIN_VOLUME_24H and 1.0 < chg < 15.0:
-                    # فحص القوة النسبية (Alpha)
-                    # ملاحظة: MEXC تستخدم 'lastPrice' بدلاً من 'last' في بعض الإصدارات
-                    price = float(t['lastPrice'])
-                    alpha = chg - btc_move
-                    
-                    if alpha > MIN_ALPHA_SCORE:
-                        msg = (f"💀 *MAFIO PHANTOM 19.2*\n\n"
-                               f"🚀 *#{sym.replace('_USDT','')}*\n"
-                               f"💰 Price: `{price}`\n"
-                               f"🛡️ Alpha: `+{alpha:.2f}%` (vs BTC)\n"
-                               f"📊 24h Vol: `${vol/1000:.1f}K` ✅\n\n"
-                               f"🔔 _رصد انفصال إيجابي عن السوق!_")
-                        
-                        # إرسال التنبيه
-                        tel_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-                        requests.post(tel_url, data={"chat_id": ADMIN_ID, "text": msg, "parse_mode": "Markdown"})
-                        
-                        sent_coins.append(sym)
-                        if len(sent_coins) > 100: sent_coins.pop(0)
+                price = float(t['lastPrice'])
+                change = float(t['priceChangePercent'])
+                volume = float(t['quoteVolume'])
 
-            logger.info(f"✅ Cycle Complete. BTC 1h: {btc_move:.2f}%")
-            time.sleep(40)
+                # شرط الدخول: صعود حقيقي مع سيولة
+                if change >= TARGET_CHANGE and volume >= MIN_VOL_24H:
+                    sent_signals.append(sym)
+                    if len(sent_signals) > 50: sent_signals.pop(0)
+
+                    msg = (
+                        f"💀 *MAFIO MEXC SIGNAL* 💀\n\n"
+                        f"💵 *#{sym.replace('USDT','')}*\n"
+                        f"💰 Price: `{price:.8g}`\n"
+                        f"📈 24h Change: `+{change:.2f}%` 🔥\n"
+                        f"💎 24h Vol: `${volume/1000:.1f}K` ✅\n\n"
+                        f"🕒 {datetime.now().strftime('%H:%M UTC')}"
+                    )
+                    send_telegram(msg)
+                    print(f"✅ Signal Sent: {sym}")
+
+            time.sleep(30) # دورة فحص متزنة
 
         except Exception as e:
-            logger.error(f"⚠️ System Error: {e}")
-            time.sleep(20)
+            print(f"⚠️ Warning: {e}")
+            time.sleep(15)
 
 if __name__ == "__main__":
     main()
