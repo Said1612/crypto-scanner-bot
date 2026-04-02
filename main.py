@@ -1,66 +1,45 @@
 # -*- coding: utf-8 -*-
 import requests, time
 
-TOKEN = "YOUR_TOKEN"
-CHAT_ID = "YOUR_ID"
+# --- ضع بياناتك هنا لمرة واحدة ---
+TOKEN = "ضـع_التـوكـن_هـنـا".strip()
+CHAT_ID = "ضـع_الآي_دي_هـنـا".strip()
 
-def get_btc_trend():
-    """فحص نبض البتكوين في آخر 15 دقيقة"""
+# فلاتر "الجودة المطلقة" لمنع فخاخ الـ 20k وهبوط السوق
+MIN_LIQUIDITY_USD = 400000  # لن ينظر لأي عملة سيولتها أقل من 400 ألف دولار
+MIN_CHG_PERCENT = 4.0       # العملة يجب أن تكون في حالة انفجار حقيقي
+BTC_PROTECTION = -0.15      # حارس السوق: إذا هبط البتكوين، يصمت البوت فوراً
+
+sent_signals = []
+
+def send_telegram(text):
     try:
-        url = "https://api.binance.com/api/v3/klines"
-        params = {"symbol": "BTCUSDT", "interval": "15m", "limit": 1}
-        data = requests.get(url, params=params, timeout=10).json()
-        open_p = float(data[0][1])
-        close_p = float(data[0][4])
-        # إذا كان البتكوين هابطاً بأكثر من 0.2% في 15 دقيقة، السوق خطر
-        change = ((close_p - open_p) / open_p) * 100
-        return change
-    except: return 0
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
 
-def is_perfect_signal(symbol, chg_24h, btc_chg):
-    """تحديد ما إذا كانت الإشارة مثالية أم لا"""
-    # 1. إذا كان البتكوين ينهار، الإشارة ليست مثالية
-    if btc_chg < -0.15: 
-        return False, "BTC_FALLING"
-    
-    # 2. قوة العملة مقابل البتكوين (العملة يجب أن تكون أقوى بـ 3 أضعاف على الأقل)
-    if chg_24h < 3.0: 
-        return False, "LOW_MOMENTUM"
-        
-    return True, "PERFECT"
+def get_btc_15m_move():
+    """قياس نبض السوق لضمان عدم تكرار فخ ENA"""
+    try:
+        # رابط باينانس الرسمي والسريع
+        r = requests.get("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=1", timeout=5).json()
+        if isinstance(r, list) and len(r) > 0:
+            open_p, close_p = float(r[0][1]), float(r[0][4])
+            return ((close_p - open_p) / open_p) * 100
+    except: return 0
+    return 0
 
 def main():
-    print("🎯 MAFIO V105: PERFECT STRIKE MODE")
+    print("🛡️ MAFIO FINAL STABLE: SYSTEM START")
+    send_telegram("🚀 *MAFIO SYSTEM ONLINE*\nتم تفعيل نظام الحماية الثلاثي. المحرك مستقر تماماً الآن.")
+
     while True:
         try:
-            btc_15m = get_btc_trend()
-            
-            # جلب بيانات MEXC
-            res = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10).json()
-            
-            for t in res:
-                sym = t['symbol']
-                if not sym.endswith("USDT"): continue
-                
-                chg = float(t['priceChangePercent'])
-                vol = float(t['quoteVolume'])
-                
-                # فحص المثالية
-                perfect, reason = is_perfect_signal(sym, chg, btc_15m)
-                
-                if perfect and vol > 1000000: # سيولة أعلى من مليون لضمان الجودة
-                    msg = (f"🎯 *PERFECT SIGNAL DETECTED* 🎯\n\n"
-                           f"🔥 العملة: *#{sym.replace('USDT','')}*\n"
-                           f"📈 صعود العملة: `+{chg}%` \n"
-                           f"📉 وضع البتكوين: `{btc_15m:+.2f}%` (آمن ✅)\n"
-                           f"💰 السيولة: `${vol/1000:.1f}K` \n\n"
-                           f"⚠️ هذه الإشارة فلترت هبوط السوق.")
-                    # إرسال تلغرام هنا
-                    print(f"✅ Perfect Match: {sym}")
-            
-            time.sleep(60) # فحص هادئ ودقيق
-        except Exception as e:
-            time.sleep(20)
+            # 1. فحص حارس البتكوين
+            btc_move = get_btc_15m_move()
+            if btc_move < BTC_PROTECTION:
+                print(f"⚠️ وضع الانتظار: البتكوين يهبط ({btc_move:.2f}%)")
+                time.sleep(60); continue
 
-if __name__ == "__main__":
-    main()
+            # 2. جلب بيانات MEXC V3 المستقرة
+            response = requests.get("https://api.mexc.
