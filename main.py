@@ -2,17 +2,14 @@
 import os, time, requests
 from datetime import datetime
 
-# --- الإعدادات الأساسية ---
+# --- إعداداتك ---
 TOKEN = "your_token_here"
 CHAT_ID = "your_id_here"
 
-# --- إعدادات الاستراتيجية (معدلة للسرعة والدقة) ---
-MIN_VOLUME_24H = 10000000   # 10 مليون دولار (لضمان وجود حيتان)
-BUY_RATIO_LIMIT = 2.2       # نسبة الشراء
-MOMENTUM_REQUIRED = 0.5     # زخم الصعود اللحظي
-CHECK_LIMIT = 50            # فحص أقوى 50 عملة فقط في كل دورة (للسرعة القصوى)
-
-sent_list = {}
+# --- إعدادات القنص (معدلة لتجلب أرباحاً حقيقية) ---
+MIN_VOLUME_24H = 8000000    # 8 مليون دولار (سيولة تضمن الحركة)
+RATIO_TARGET = 2.0          # قوة شراء ضعف البيع
+MOMENTUM_REQUIRED = 0.4     # صعود 0.4% في دقيقة (تأكيد الانفجار)
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -21,66 +18,73 @@ def send_telegram(text):
     except: pass
 
 def main():
-    print("💀 MAFIO BOT V42.0 - FAST SCAN STARTING")
-    send_telegram("💀 *Mafio Bot V42.0*\nالنسخة السريعة قيد التشغيل... بدأت المراقبة.")
+    print("🚀 MAFIO V50: ENGINE INITIALIZED...")
+    send_telegram("🚀 *Mafio V50 Activated*\nنظام القنص الجديد متصل الآن. لن نضيع أي فرصة بعد اليوم.")
+    
+    sent_signals = {}
 
     while True:
         try:
-            # 1. جلب العملات وفرزها فوراً حسب السيولة
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Scanning Market...")
-            resp = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10).json()
+            # رسالة حية للسجلات
+            print(f"🔍 [{datetime.now().strftime('%H:%M:%S')}] Scanning Market Peaks...")
             
-            # فلترة العملات القوية فقط (USDT وصعود > 1% وسيولة عالية)
-            active_symbols = [
-                t for t in resp 
-                if t['symbol'].endswith("USDT") and float(t['quoteVolume']) > MIN_VOLUME_24H
-            ]
-            # ترتيب حسب نسبة التغير واختيار القمة فقط
-            active_symbols = sorted(active_symbols, key=lambda x: float(x['priceChangePercent']), reverse=True)[:CHECK_LIMIT]
+            # جلب البيانات مع مهلة زمنية قصيرة لعدم التعليق
+            r = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=7).json()
+            
+            # فلترة فورية لأقوى 30 عملة فقط (السرعة هي الأهم)
+            top_movers = [t for t in r if t['symbol'].endswith("USDT") and float(t['quoteVolume']) > MIN_VOLUME_24H]
+            top_movers = sorted(top_movers, key=lambda x: float(x['priceChangePercent']), reverse=True)[:30]
 
-            for t in active_symbols:
-                sym = t['symbol']
-                
-                # فحص الكول داون
-                if sym in sent_list and time.time() - sent_list[sym] < 600: continue
+            if not top_movers:
+                print("💤 No high-volume movers found. Retrying...")
+                time.sleep(10)
+                continue
 
-                # 2. تحليل السيولة اللحظية (السر الحقيقي)
-                klines_url = "https://api.binance.com/api/v3/klines"
-                k_resp = requests.get(klines_url, params={"symbol": sym, "interval": "1m", "limit": 1}, timeout=5).json()
+            for t in top_movers:
+                symbol = t['symbol']
                 
-                if not k_resp: continue
-                candle = k_resp[-1]
-                
-                total_q_vol = float(candle[7])    # إجمالي السيولة بالدولار في الدقيقة
-                buy_q_vol = float(candle[10])     # سيولة الشراء
-                sell_q_vol = total_q_vol - buy_q_vol
-                
-                if sell_q_vol <= 0: continue
-                ratio = buy_q_vol / sell_q_vol
-                change = ((float(candle[4]) - float(candle[1])) / float(candle[1])) * 100
+                # منع التكرار (Cooldown)
+                if symbol in sent_signals and time.time() - sent_signals[symbol] < 600:
+                    continue
 
-                # 3. شرط الاقتناص 🎯
-                if ratio >= BUY_RATIO_LIMIT and change >= MOMENTUM_REQUIRED:
-                    sent_list[sym] = time.time()
+                # تحليل الشمعة اللحظية
+                k_url = "https://api.binance.com/api/v3/klines"
+                k_data = requests.get(k_url, params={"symbol": symbol, "interval": "1m", "limit": 1}, timeout=5).json()
+                
+                if not k_data: continue
+                candle = k_data[-1]
+                
+                # حساب النسبة والزخم
+                vol_total = float(candle[7])
+                vol_buy = float(candle[10])
+                vol_sell = vol_total - vol_buy
+                
+                if vol_sell <= 0: vol_sell = 0.001 # تجنب القسمة على صفر
+                
+                ratio = vol_buy / vol_sell
+                price_change = ((float(candle[4]) - float(candle[1])) / float(candle[1])) * 100
+
+                # --- قرار القنص 🎯 ---
+                if ratio >= RATIO_TARGET and price_change >= MOMENTUM_REQUIRED:
+                    sent_signals[symbol] = time.time()
                     
                     msg = (
-                        f"💀 *MAFIO SNIPE* 💀\n\n"
-                        f"💵 *#{sym.replace('USDT','')}*\n"
+                        f"💀 *MAFIO GOLDEN SNIPE* 💀\n\n"
+                        f"💵 *#{symbol.replace('USDT','')}*\n"
                         f"💰 Price: `{float(candle[4]):.8g}`\n"
-                        f"🔥 Ratio: `{ratio:.2f}x` 🔥\n"
-                        f"📈 1m: `{change:+.2f}%` \n"
-                        f"💎 Candle Vol: `${total_q_vol/1000:.1f}K` ✅"
+                        f"🔥 Ratio: `{ratio:.2f}x` (Heavy Buying)\n"
+                        f"📈 Momentum: `{price_change:+.2f}%` \n"
+                        f"💎 Vol 1m: `${vol_total/1000:.1f}K` ✅"
                     )
                     send_telegram(msg)
-                    print(f"✅ SIGNAL: {sym} | Ratio: {ratio:.2f}")
+                    print(f"✅ TARGET LOCKED: {symbol} - Sending to Telegram!")
 
-            # رسالة نبض القلب في السجل لتعرف أن البوت لم يتوقف
-            print(f"✨ Cycle Complete. Sleeping 15s...")
-            time.sleep(15)
+            print("✨ Scan Finished. Cooling down for 10 seconds...")
+            time.sleep(10)
 
         except Exception as e:
-            print(f"⚠️ Error: {e}")
-            time.sleep(10)
+            print(f"⚠️ System Note: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
