@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-MAFIO BOT - VERSION 15.3 (TREND SHIELD EDITION)
-السر: اقتناص الانفجار السيولاتي (Liquidity Sniping) + حماية الترند
-الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + تقاطع EMA + EMA50 Shield
+MAFIO BOT - VERSION 15.4 (MICRO-GEM SNIPER)
+السر: اقتناص الانفجار السيولاتي (Liquidity Sniping) في العملات الصغيرة
+الاستراتيجية: ضغط السعر (Static Accumulation) + انفجار الحجم + EMA50 Shield
 المطور: MAFIO AI - نظام القناص المطور
 """
 
@@ -20,17 +20,17 @@ TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
 # معايير "التجميع الساكن" (Static Accumulation)
-MIN_VOLUME_24H = 250000     
+MIN_VOLUME_24H = 150000     # تخفيض لاقتناص العملات الصغيرة جداً (Micro-Gems) قبل انفجارها
 MIN_24H_CHANGE = -5.0       
 MAX_24H_CHANGE = 12.0       
-MAX_PRICE_POS = 0.40        # تخفيض لضمان القرب من القاع الحقيقي
+MAX_PRICE_POS = 0.40        
 
-# معايير الانفجار اللحظي (MAFIO Sniper 15.3 - Trend Shield)
-MIN_FLOW_RATIO = 3.8        # رفع النسبة قليلاً لزيادة الدقة
+# معايير الانفجار اللحظي (MAFIO Sniper 15.4 - Micro-Gem Edition)
+MIN_FLOW_RATIO = 3.8        
 MAX_FLOW_RATIO = 500.0      
-MIN_NET_FLOW_USD = 30000    # رفع الصافي المطلوب لتأكيد دخول الحيتان
+MIN_NET_FLOW_USD = 25000    # تعديل ليتناسب مع العملات الصغيرة
 MAX_1H_MOVE = 18.0          
-MIN_VOL_ACCEL = 2.0         # رفع شرط الزخم لضمان قوة الدفع
+MIN_VOL_ACCEL = 2.0         
 # ==========================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
@@ -209,7 +209,7 @@ def scan():
             
             msg = (
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"💀 *MAFIO SNIPER 15.3* 📡\n\n"
+                f"💀 *MAFIO SNIPER 15.4* 📡\n\n"
                 f"🆕 *#{sym.replace('USDT','')}* 💀 · 🔔 Signal #{state['count']}\n"
                 f"💰 Price: `${c['price']:.8g}`\n"
                 f"📈 1h Move: `+{data['move_1h']:.2f}%` ⚡\n"
@@ -234,8 +234,8 @@ def scan():
         logger.info("✅ Silent first scan complete. Sniper is active!")
 
 def main():
-    logger.info("🚀 MAFIO BOT 15.3 (Trend Shield Edition) Started")
-    send_telegram("💀 *MAFIO BOT 15.3* متصل.\nتم تفعيل نظام درع الترند (Trend Shield) لتجنب الارتدادات الوهمية.")
+    logger.info("🚀 MAFIO BOT 15.4 (Micro-Gem Sniper) Started")
+    send_telegram("💀 *MAFIO BOT 15.4* متصل.\nتم تفعيل نظام اقتناص العملات الصغيرة (Micro-Gem Sniper) بناءً على نمط DUSDT.")
     
     while True:
         try:
