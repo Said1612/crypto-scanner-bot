@@ -1,18 +1,10 @@
 # -*- coding: utf-8 -*-
-import time, requests, os
+import websocket, json, time, requests, os
 from datetime import datetime
 
 # --- الإعدادات ---
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 CHAT_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
-
-# روابط بديلة لـ Binance لتجاوز الحظر
-BINANCE_ENDPOINTS = [
-    "https://api.binance.com",
-    "https://api1.binance.com",
-    "https://api2.binance.com",
-    "https://api3.binance.com"
-]
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -20,76 +12,53 @@ def send_telegram(text):
         requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def get_data_safe(symbol, endpoint):
-    """جلب بيانات السيولة من رابط محدد"""
+def on_message(ws, message):
     try:
-        url = f"{endpoint}/api/v3/klines"
-        r = requests.get(url, params={"symbol": symbol, "interval": "1m", "limit": 2}, timeout=5)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list) and len(data) > 0:
-                c = data[-1]
-                total = float(c[7])
-                buy = float(c[10])
-                sell = total - buy
-                if sell == 0: return None
-                return {"p": float(c[4]), "ratio": buy/sell, "in": buy}
-        return None
-    except: return None
+        data = json.loads(message)
+        # استخراج البيانات من البث المباشر (Individual Symbol Ticker)
+        sym = data['s']
+        if not sym.endswith("USDT"): return
 
-def main():
-    print("💀 SKULL FLOW V34.0 - ANTI-BAN SYSTEM")
-    send_telegram("💀 *Skull Flow V34.0*\nتم تفعيل نظام تخطي الحظر وتبديل الـ API.")
-    
-    sent_list = []
-    current_api_idx = 0
+        price = float(data['c'])
+        total_vol = float(data['q']) # Volume in USDT
+        
+        # في الـ WebSocket لا نحصل على حجم الشراء/البيع فوراً بنفس الطريقة
+        # لذا سنراقب التغير السعري المفاجئ مع الحجم الكبير
+        change = float(data['P']) # 24h price change percentage
 
-    while True:
-        try:
-            # اختيار رابط API مختلف في كل دورة لتوزيع الضغط
-            api_base = BINANCE_ENDPOINTS[current_api_idx]
-            
-            # جلب الأسعار
-            r = requests.get(f"{api_base}/api/v3/ticker/price", timeout=10)
-            
-            if r.status_code != 200:
-                print(f"⚠️ API {current_api_idx} Busy, switching...")
-                current_api_idx = (current_api_idx + 1) % len(BINANCE_ENDPOINTS)
-                time.sleep(5)
-                continue
+        if change > 5.0 and total_vol > 500000: # فلتر أولي للعملات النشطة جداً
+            msg = (
+                f"💀 *LIVE SKULL ALERT* 💀\n\n"
+                f"💵 *#{sym.replace('USDT','')}*\n"
+                f"💰 Price: `{price:.8g}`\n"
+                f"📊 24h Change: `{change:+.2f}%` 🔥\n"
+                f"💎 24h Vol: `${total_vol/1000000:.1f}M` ✅\n\n"
+                f"🕒 {datetime.now().strftime('%H:%M:%S UTC')}"
+            )
+            # إضافة نظام منع تكرار بسيط هنا إذا لزم الأمر
+            print(f"🎯 Signal Detected: {sym}")
+            send_telegram(msg)
+    except Exception as e:
+        print(f"Error processing message: {e}")
 
-            tickers = r.json()
-            # فحص أهم 150 عملة فقط لتقليل عدد الطلبات ومنع الحظر
-            active_tickers = [t for t in tickers if t['symbol'].endswith("USDT")][:150]
+def on_error(ws, error):
+    print(f"💀 Connection Error: {error}")
 
-            for t in active_tickers:
-                sym = t['symbol']
-                if any(x in sym for x in ["UP", "DOWN", "BULL", "BEAR"]) or sym in sent_list: continue
+def on_close(ws, close_status_code, close_msg):
+    print("💀 Connection Closed. Retrying in 5s...")
+    time.sleep(5)
+    start_socket()
 
-                # فحص السيولة
-                d = get_data_safe(sym, api_base)
-                
-                if d and d['ratio'] > 2.2 and d['in'] > 3000:
-                    msg = (
-                        f"💀 *SKULL SIGNAL* 💀\n\n"
-                        f"💵 *#{sym.replace('USDT','')}*\n"
-                        f"💰 Price: `{d['p']:.8g}`\n"
-                        f"📈 Ratio: `{d['ratio']:.2f}x` 🔥\n"
-                        f"📥 Inflow: `${d['in']/1000:.1f}K` ✅"
-                    )
-                    send_telegram(msg)
-                    sent_list.append(sym)
-                    if len(sent_list) > 30: sent_list.pop(0)
-                    print(f"🎯 Signal: {sym}")
-                    time.sleep(0.5) # تأخير بسيط بين فحص عملة وأخرى لمنع الـ Rate Limit
-
-            # تبديل الـ API للدورة القادمة
-            current_api_idx = (current_api_idx + 1) % len(BINANCE_ENDPOINTS)
-            time.sleep(40) # زيادة وقت الراحة بين الدورات لتجنب حظر الـ IP
-
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            time.sleep(20)
+def start_socket():
+    # الاتصال ببث جميع العملات (All Market Tickers) لتقليل عدد الطلبات
+    socket_url = "wss://stream.binance.com:9443/ws/!ticker@arr"
+    ws = websocket.WebSocketApp(socket_url,
+                                on_message=on_message,
+                                on_error=on_error,
+                                on_close=on_close)
+    ws.run_forever()
 
 if __name__ == "__main__":
-    main()
+    print("💀 SKULL FLOW V35.0 - WEBSOCKET MODE ONLINE")
+    send_telegram("💀 *Skull Flow V35.0*\nتم التحول لنظام البث المباشر (WebSocket) لتخطي الحظر.")
+    start_socket()
