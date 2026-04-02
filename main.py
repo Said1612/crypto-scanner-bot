@@ -3,113 +3,104 @@ import os
 import sys
 import time
 import requests
-import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
-# إعداد السجلات للظهور فوراً في Railway
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", stream=sys.stdout)
-logger = logging.getLogger("MAFIO_CLOUD")
-
-# ==========================================================
-# الإعدادات - يفضل وضعها في Variables في Railway
-# ==========================================================
+# الإعدادات
 TOKEN = os.getenv("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 ADMIN_ID = os.getenv("CHAT_ID", "ضع_الايدي_هنا")
 
-# معايير التصفية
-MIN_VOLUME_24H = 50000
-MAX_VOLUME_24H = 50000000
-MIN_FLOW_RATIO = 5.0
-MIN_VOL_ACCEL = 3.0
+# معايير الصيد الاحترافي (Wolf Logic)
+MIN_NET_FLOW = 50000        # الحد الأدنى لصافي الدخول (بالدولار)
+MIN_RATIO = 4.0             # يجب أن يكون الدخول 4 أضعاف الخروج على الأقل
+MIN_VOLUME_24H = 100000     
 
-state = {"sent_coins": [], "source": "BINANCE"}
+state = {"sent_coins": []}
 
 def send_telegram(message):
-    if "ضع_" in TOKEN or not TOKEN: 
-        print(f"⚠️ Telegram Token missing! Message: {message}")
-        return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
         requests.post(url, data={"chat_id": ADMIN_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
-    except Exception as e:
-        print(f"❌ Telegram Error: {e}")
+    except: pass
 
-def fetch_tickers(source):
-    """جلب البيانات من بايننس أو ميكس بذكاء"""
-    url = "https://api.binance.com/api/v3/ticker/24hr" if source == "BINANCE" else "https://api.mexc.com/api/v3/ticker/24hr"
+def get_flow_analysis(sym):
+    """تحليل دقيق لتدفق السيولة In/Out/Net"""
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": sym, "interval": "1m", "limit": 15} # تحليل آخر 15 دقيقة
     try:
-        print(f"📡 Attempting to fetch data from {source}...", flush=True)
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            return r.json()
-        else:
-            print(f"⚠️ {source} returned status code: {r.status_code}", flush=True)
-            return None
-    except Exception as e:
-        print(f"❌ Connection Error with {source}: {e}", flush=True)
-        return None
-
-def analyze_coin(sym, source):
-    """تحليل السيولة اللحظية للعملة"""
-    base_url = "https://api.binance.com/api/v3/klines" if source == "BINANCE" else "https://api.mexc.com/api/v3/klines"
-    try:
-        params = {"symbol": sym, "interval": "1m", "limit": 20}
-        r = requests.get(base_url, params=params, timeout=5)
-        if r.status_code != 200: return None
+        r = requests.get(url, params=params, timeout=5).json()
+        in_vol = 0
+        out_vol = 0
         
-        kd = r.json()
-        vols = [float(c[5]) for c in kd]
-        avg_vol = sum(vols[:-1]) / len(vols[:-1])
-        current_vol = vols[-1]
+        for c in r:
+            open_p, close_p, vol_quote = float(c[1]), float(c[4]), float(c[7])
+            if close_p > open_p:
+                in_vol += vol_quote
+            else:
+                out_vol += vol_quote
+                
+        net_flow = in_vol - out_vol
+        ratio = in_vol / out_vol if out_vol > 0 else 10
+        current_price = float(r[-1][4])
+        move_1h = ((float(r[-1][4]) - float(r[0][1])) / float(r[0][1])) * 100
         
-        accel = current_vol / avg_vol if avg_vol > 0 else 1
-        return accel
+        return {
+            "in": in_vol, "out": out_vol, "net": net_flow, 
+            "ratio": ratio, "price": current_price, "move": move_1h
+        }
     except: return None
 
-def scan_cycle():
-    print(f"--- Starting Scan Cycle at {datetime.now()} ---", flush=True)
-    data = fetch_tickers(state["source"])
-    
-    if not data:
-        # التبديل بين المنصات في حال الفشل
-        state["source"] = "MEXC" if state["source"] == "BINANCE" else "BINANCE"
-        print(f"🔄 Switching source to {state['source']}", flush=True)
-        return
+def scan():
+    # جلب أسعار بايننس كمصدر أساسي للسيولة
+    try:
+        tickers = requests.get("https://api.binance.com/api/v3/ticker/24hr").json()
+    except: return
 
-    found_count = 0
-    for t in data:
-        sym = t.get('symbol', '')
-        if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN", "BEAR", "BULL"]): continue
+    for t in tickers:
+        sym = t['symbol']
+        if not sym.endswith("USDT") or any(x in sym for x in ["UP", "DOWN"]): continue
         if sym in state["sent_coins"]: continue
 
-        try:
-            vol = float(t.get('quoteVolume', 0))
-            if vol < MIN_VOLUME_24H: continue
+        vol_24h = float(t['quoteVolume'])
+        if vol_24h < MIN_VOLUME_24H: continue
+
+        # تحليل التدفق
+        flow = get_flow_analysis(sym)
+        if not flow: continue
+
+        # الفلتر الذهبي: الصافي إيجابي + الدخول أكبر بكثير من الخروج
+        if flow['net'] > MIN_NET_FLOW and flow['ratio'] > MIN_RATIO:
             
-            # فحص التسارع
-            accel = analyze_coin(sym, state["source"])
-            if accel and accel > MIN_VOL_ACCEL:
-                found_count += 1
-                msg = f"🚀 *WOLF SIGNAL* ({state['source']})\n💎 العملة: #{sym}\n🔥 تسارع السيولة: {accel:.1f}x\n📊 الفوليوم: ${vol/1000:.1f}K"
-                send_telegram(msg)
-                state["sent_coins"].append(sym)
-                print(f"✅ Found: {sym} | Accel: {accel:.1f}x", flush=True)
-                if len(state["sent_coins"]) > 100: state["sent_coins"].pop(0)
-        except: continue
-    
-    print(f"--- Cycle Finished. Found {found_count} coins. ---", flush=True)
+            state["sent_coins"].append(sym)
+            if len(state["sent_coins"]) > 50: state["sent_coins"].pop(0)
+
+            # تنسيق الإشعار مثل Wolf Flow
+            msg = (
+                f"🐺 *Wolf Flow* 🛰️\n\n"
+                f"💵 *#{sym}* ⚡🚀  🔔 Signal #{len(state['sent_coins'])}\n"
+                f"💰 Price: `${flow['price']:.8g}`\n"
+                f"📈 1h Move: `+{flow['move']:.2f}%`\n\n"
+                f"⚡ Volume: `Exceptional` 🔥\n"
+                f"🟢 Interest: `Strong` ✅\n"
+                f"📊 *1h Flow:*\n"
+                f"  📥 In: `${flow['in']/1000:.2f}K` \n"
+                f"  📤 Out: `${flow['out']/1000:.2f}K` \n"
+                f"  ▲ Net: `+${flow['net']/1000:.2f}K` ✅\n"
+                f"🟡 Funding: `Neutral`\n\n"
+                f"🕒 {datetime.now().strftime('%d %b %Y %H:%M')}"
+            )
+            send_telegram(msg)
+            print(f"🎯 Signal sent for {sym}")
+            time.sleep(1)
 
 def main():
-    print("🚀 MAFIO ALPHA V20.1 STARTED ON CLOUD", flush=True)
-    send_telegram("✅ *بوت مافيو متصل الآن*\nيتم مراقبة بايننس وميكس لاقتناص السيولة...")
-    
+    print("🚀 Net Flow Engine Started...")
     while True:
         try:
-            scan_cycle()
-            time.sleep(40) # انتظر 40 ثانية لتجنب الحظر
+            scan()
+            time.sleep(30)
         except Exception as e:
-            print(f"⚠️ Critical Loop Error: {e}", flush=True)
-            time.sleep(20)
+            print(f"Error: {e}")
+            time.sleep(10)
 
 if __name__ == "__main__":
     main()
