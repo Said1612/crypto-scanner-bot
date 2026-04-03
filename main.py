@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-WOLF LIQUIDITY SNIPER v2.0 - 100% CLEAN & WORKING
-نظام تتبع السيولة قبل الانفجار النهائي
+🐺 WOLF LIQUIDITY SNIPER v2.1 - MEXC API ✅
+نظام تتبع السيولة - MEXC Global API
 """
 
 import os
@@ -12,65 +12,82 @@ import logging
 from datetime import datetime, timezone
 from collections import deque
 
+# الإعدادات
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
 
-SETTINGS = {
-    'min_vol': 50000,
-    'min_change': -12,
-    'max_change': 20,
-    'max_price_pos': 0.7,
-    'min_flow': 2.5,
-    'min_net': 5000
+# إعدادات MEXC
+MEXC_SETTINGS = {
+    'min_vol': 30000,      # حجم أقل لـ MEXC
+    'min_change': -15,     # قيعان أعمق
+    'max_change': 25,      # مرونة أكبر
+    'max_price_pos': 0.75,
+    'min_flow': 2.2,
+    'min_net': 3000
 }
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-log = logging.getLogger('WOLF')
+log = logging.getLogger('WOLF_MEXC')
 
 state = {'date': '', 'count': 0, 'coins': deque(maxlen=100), 'first': True}
 trades = {}
 
 def send(msg):
-    if not TELEGRAM_TOKEN or "YOUR" in TELEGRAM_TOKEN:
-        print(f"[TELEGRAM] {msg[:100]}...")
-        return
+    if not TELEGRAM_TOKEN:
+        print(f"[TG] {msg[:80]}...")
+        return True
     try:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                     data={'chat_id': CHAT_ID, 'text': msg, 'parse_mode': 'Markdown'}, timeout=10)
+            data={'chat_id': CHAT_ID, 'text': msg, 'parse_mode': 'Markdown'}, timeout=8)
+        return True
+    except:
+        return False
+
+def mexc_tickers():
+    """MEXC 24hr ticker - API v3"""
+    try:
+        url = "https://api.mexc.com/api/v3/ticker/24hr"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            return r.json()
     except:
         pass
-
-def api(endpoint, params=None):
-    urls = [
-        f"https://api.binance.com/api/v3/{endpoint}",
-        f"https://api1.binance.com/api/v3/{endpoint}"
-    ]
-    for url in urls:
-        try:
-            r = requests.get(url, params=params, timeout=10)
-            if r.status_code == 200:
-                return r.json()
-        except:
-            continue
     return None
 
-def scan():
+def mexc_klines(symbol, limit=30):
+    """MEXC klines 5m"""
+    try:
+        url = "https://api.mexc.com/api/v3/klines"
+        params = {'symbol': symbol, 'interval': '5m', 'limit': str(limit)}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+    except:
+        pass
+    return None
+
+def scan_mexc():
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     if state['date'] != today:
         state.update({'date': today, 'count': 0, 'coins': deque(maxlen=100)})
-        send(f"🐺 *Wolf Flow* يعمل - {today}")
+        send(f"🐺 *MEXC Wolf Flow* - {today}")
 
-    tickers = api('ticker/24hr')
+    tickers = mexc_tickers()
     if not tickers:
+        log.error("❌ MEXC API offline")
         return
 
     candidates = []
     for t in tickers:
         try:
-            s = t['symbol']
-            if (not s.endswith('USDT') or 
-                any(x in s for x in ['UP', 'DOWN']) or
-                any(sc in s for sc in ['USDC', 'BUSD', 'DAI'])):
+            symbol = t['symbol']
+            if (not symbol.endswith('USDT') or 
+                len(symbol) < 6 or 
+                any(x in symbol for x in ['UP', 'DOWN', 'BEAR'])):
+                continue
+
+            # تجاهل stablecoins
+            if any(sc in symbol for sc in ['USDC', 'BUSD', 'TUSD', 'USDP']):
                 continue
 
             chg = float(t['priceChangePercent'])
@@ -79,121 +96,164 @@ def scan():
             high = float(t['highPrice'])
             low = float(t['lowPrice'])
 
-            if (vol < SETTINGS['min_vol'] or 
-                chg < SETTINGS['min_change'] or 
-                chg > SETTINGS['max_change']):
+            # فلاتر MEXC
+            if (vol < MEXC_SETTINGS['min_vol'] or 
+                chg < MEXC_SETTINGS['min_change'] or 
+                chg > MEXC_SETTINGS['max_change']):
                 continue
 
-            pos = (price - low) / (high - low) if high > low else 0.5
-            if pos > SETTINGS['max_price_pos']:
+            pos = (price - low) / (high - low) if high > low + 0.0001 else 0.5
+            if pos > MEXC_SETTINGS['max_price_pos']:
                 continue
 
-            candidates.append({'sym': s, 'price': price})
+            candidates.append({'sym': symbol, 'price': price, 'chg': chg, 'vol': vol})
         except:
             continue
 
-    candidates = candidates[:30]
-    for c in candidates:
-        s = c['sym']
-        if s in state['coins']:
+    # أفضل 25 مرشح
+    candidates.sort(key=lambda x: x['vol'], reverse=True)
+    for c in candidates[:25]:
+        symbol = c['sym']
+        if symbol in state['coins']:
             continue
 
-        klines = api('klines', {'symbol': s, 'interval': '5m', 'limit': 30})
-        if not klines or len(klines) < 15:
+        # تحليل klines MEXC
+        klines = mexc_klines(symbol, 25)
+        if not klines or len(klines) < 12:
             continue
 
-        closes = [float(k[4]) for k in klines[-15:]]
-        opens_ = [float(k[1]) for k in klines[-15:]]
-        vols = [float(k[5]) for k in klines[-15:]]
+        closes = [float(k[4]) for k in klines[-12:]]
+        opens_ = [float(k[1]) for k in klines[-12:]]
+        volumes = [float(k[5]) for k in klines[-12:]]
 
-        ema5 = sum(closes[-5:]) / 5
-        ema10 = sum(closes[-10:]) / 10
-        if closes[-1] <= ema5 or ema5 <= ema10:
+        # EMA بسيط
+        ema_fast = sum(closes[-4:]) / 4
+        ema_slow = sum(closes[-8:-4]) / 4
+        if closes[-1] <= ema_fast or ema_fast <= ema_slow:
             continue
 
-        avg_vol = sum(vols[-8:-1]) / 7
-        vol_ratio = vols[-1] / (avg_vol or 1)
+        # تدفق السيولة
+        inflow, outflow = 0, 0
+        for i in range(-4, 0):
+            o, c, v = opens_[i], closes[i], volumes[i]
+            val = v * c
+            if c > o:
+                inflow += val
+            else:
+                outflow += val
 
-        inflow = sum(v * closes[i] for i, (o, c, v) in enumerate(zip(opens_[-5:], closes[-5:], vols[-5:])) if c > o)
-        outflow = sum(v * closes[i] for i, (o, c, v) in enumerate(zip(opens_[-5:], closes[-5:], vols[-5:])) if c <= o)
-        flow_ratio = inflow / (outflow or 1)
+        flow_ratio = inflow / max(outflow, 1)
+        net_flow = inflow - outflow
 
-        if len(klines) < 12:
-            continue
+        # حركة الساعة
         h1_move = (closes[-1] - float(klines[-12][4])) / float(klines[-12][4]) * 100
 
-        if (flow_ratio >= SETTINGS['min_flow'] and 
-            inflow - outflow >= SETTINGS['min_net'] and 
-            vol_ratio > 1.3 and h1_move < 30):
-            
+        # شروط الإشارة MEXC
+        if (flow_ratio >= MEXC_SETTINGS['min_flow'] and 
+            net_flow >= MEXC_SETTINGS['min_net'] and 
+            h1_move < 35):
+
             if state['first']:
-                state['coins'].append(s)
+                state['coins'].append(symbol)
                 continue
 
+            # 🎯 إشارة جديدة!
             state['count'] += 1
-            state['coins'].append(s)
-            trades[s] = {'entry': c['price'], 'time': time.time(), 'max': 0}
+            state['coins'].append(symbol)
+            trades[symbol] = {
+                'entry': c['price'], 
+                'time': time.time(), 
+                'max': 0
+            }
 
-            msg = f"""🐺 *Wolf Flow* #{state['count']}
-💵 *{s[:-4]}USDT*
-💰 ${c['price']:.6g}
-📈 1h: +{h1_move:.1f}%
-⚡️ Vol: {vol_ratio:.1f}x
-💹 Flow: {flow_ratio:.1f}x
-📥 In: ${inflow/1000:.0f}K | 📤 Out: ${outflow/1000:.0f}K
-
-{datetime.now(timezone.utc).strftime('%H:%M UTC')}"""
+            alert_type = "🟢 SQUEEZE" if inflow > outflow * 3 else "🐋 WHALE"
             
+            msg = f"""━━━━━━━━━━━━━━━━━━━
+🐺 *MEXC Wolf Flow* #{state['count']}
+
+💵 `{symbol}`
+💰 Price: `${c['price']:.7g}`
+📈 1h: `+{h1_move:.1f}%`
+📊 24h: `+{c['chg']:.1f}%`
+
+⚡️ Vol Ratio: `{volumes[-1]/max(sum(volumes[-7:-1])/6,1):.1f}x`
+{alert_type}
+💹 Flow: `{flow_ratio:.1f}x`
+
+📥 In: `${inflow/1000:.0f}K`
+📤 Out: `${outflow/1000:.0f}K`
+▲ Net: `+${net_flow/1000:.0f}K`
+
+🕐 {datetime.now(timezone.utc).strftime('%H:%M UTC')}
+━━━━━━━━━━━━━━━━━━━"""
+
             send(msg)
-            log.info(f"SIGNAL: {s} ratio={flow_ratio:.1f}x")
-            time.sleep(0.5)
+            log.info(f"🎯 MEXC: {symbol} | Flow: {flow_ratio:.1f}x | Net: ${net_flow/1000:.0f}K")
+            time.sleep(0.8)
 
     state['first'] = False
 
-def track():
+def track_profits():
+    """تتبع الأرباح على MEXC"""
     if not trades:
         return
-        
-    prices = api('ticker/24hr')
-    if not prices:
+
+    tickers = mexc_tickers()
+    if not tickers:
         return
 
-    price_map = {t['symbol']: float(t['lastPrice']) for t in prices}
-    
-    for s in list(trades):
-        if s not in price_map:
+    prices = {}
+    for t in tickers:
+        try:
+            prices[t['symbol']] = float(t['lastPrice'])
+        except:
             continue
-            
-        curr = price_map[s]
-        entry = trades[s]['entry']
-        gain = (curr - entry) / entry * 100
-        
-        if gain > trades[s]['max']:
-            trades[s]['max'] = gain
-            
-        if gain >= 5 and 5 not in trades[s]:
-            trades[s][5] = True
-            dur = int((time.time() - trades[s]['time']) / 60)
-            send(f"📈 *{s[:-4]} +5%*
-💰 ${curr:.6g} | Entry: ${entry:.6g}
-⏱️ {dur}m")
-            
-        if time.time() - trades[s]['time'] > 86400:
-            del trades[s]
+
+    for symbol in list(trades):
+        if symbol not in prices:
+            continue
+
+        current = prices[symbol]
+        entry = trades[symbol]['entry']
+        gain = (current - entry) / entry * 100
+
+        if gain > trades[symbol]['max']:
+            trades[symbol]['max'] = gain
+
+        # إشعارات المعالم
+        for target in [5, 10, 20]:
+            key = f"hit_{target}"
+            if gain >= target and not trades[symbol].get(key):
+                trades[symbol][key] = True
+                minutes = int((time.time() - trades[symbol]['time']) / 60)
+                dur = f"{minutes//60}h {minutes%60}m" if minutes > 60 else f"{minutes}m"
+                
+                msg = f"""🚀 *{symbol[:-4]} +{target}%*
+📊 Max: `+{gain:.1f}%`
+💰 Now: `${current:.7g}`
+🏁 Entry: `${entry:.7g}`
+⏱️ Time: `{dur}`"""
+                send(msg)
+
+        # تنظيف القديم
+        if time.time() - trades[symbol]['time'] > 86400:
+            del trades[symbol]
 
 def main():
-    log.info("🐺 WOLF LIQUIDITY SNIPER v2.0 STARTED")
-    send("🐺 *Wolf Flow v2.0* ✅ LIVE")
+    log.info("🚀 MEXC WOLF LIQUIDITY SNIPER v2.1")
+    send("🐺 *MEXC Wolf Flow v2.1* ✅
+📡 MEXC Global API - Live Scanning")
     
     while True:
         try:
-            scan()
-            track()
-            time.sleep(30)
+            scan_mexc()
+            track_profits()
+            time.sleep(25)  # كل 25 ثانية
         except KeyboardInterrupt:
+            log.info("🛑 Stopped")
             break
         except Exception as e:
-            log.error(f"Error: {e}")
+            log.error(f"❌ {e}")
             time.sleep(60)
 
 if __name__ == "__main__":
