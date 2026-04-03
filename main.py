@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -42,7 +43,7 @@ TIERS = [
 FAST_TICKER_MOVE = 1.5   # 30s price delta to trigger 5m klines fetch
 FLOW_CANDLES     = 3     # candles for flow calculation
 MAX_PUMP_24H     = 60.0  # skip already-pumped coins
-LATE_ENTRY_PCT   = 0.92  # skip if price in top 8% of 24h range
+LATE_ENTRY_PCT   = 0.85  # skip if price in top 15% of 24h range
 
 MILESTONES  = [2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
 TRACK_HOURS = 24
@@ -212,11 +213,11 @@ def _qvol(c):
         except Exception: return 0.0
 
 def vol_spike_and_move(candles):
-    """Returns (spike_ratio, candle_move_pct)"""
-    if len(candles) < 8: return 0.0, 0.0
+    """Returns (spike_ratio, candle_move_pct, avg_vol_usdt)"""
+    if len(candles) < 8: return 0.0, 0.0, 0.0
     vols    = [_qvol(c) for c in candles]
     avg_vol = sum(vols[:-2]) / max(len(vols) - 2, 1)
-    if avg_vol <= 0: return 0.0, 0.0
+    if avg_vol <= 0: return 0.0, 0.0, 0.0
     spike = vols[-1] / avg_vol
     try:
         o  = float(candles[-1][1])
@@ -224,7 +225,7 @@ def vol_spike_and_move(candles):
         move = (cl - o) / o * 100 if o > 0 else 0.0
     except Exception:
         move = 0.0
-    return spike, move
+    return spike, move, avg_vol
 
 def calc_flow(candles):
     """Returns (buy_usdt, sell_usdt) from last FLOW_CANDLES candles"""
@@ -307,7 +308,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
     # Position from bottom (% of 24h range)
     rng = high24 - low24
     pos_from_bottom = int((price - low24) / rng * 100) if rng > 0 else 0
-    pos_ok = pos_from_bottom <= 50   # in lower half = good entry
+    pos_ok = pos_from_bottom <= 60   # in lower 60% of range = good entry
 
     # Interest / Short Squeeze detection
     if ratio >= 8.0:
@@ -427,15 +428,35 @@ def _check(sym, ticker, interval):
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
-    # Minimum absolute volume filter (avoid dust)
-    if vol_24h < 30_000: return
+    # Minimum 24h volume — ensure coin is actively traded on its exchange
+    min_vol = 2_000_000 if exchange == "Binance" else 300_000
+    if vol_24h < min_vol:
+        log.debug("Low 24h vol skip %s vol=%s [%s]", sym, _fv(vol_24h), exchange)
+        return
 
     # Fetch klines
     candles = fetch_klines(sym, base_url, interval=interval, limit=25)
     if len(candles) < 10: return
 
-    spike, move = vol_spike_and_move(candles)
+    spike, move, avg_vol = vol_spike_and_move(candles)
     if spike < spike_min or move < 1.5: return
+
+    # Minimum base liquidity — reject zombie coins with thin candles
+    # Binance 1h: avg candle must be >$50K | Binance 5m: >$5K | MEXC: >$3K
+    if interval == "1h":
+        min_candle = 50_000 if exchange == "Binance" else 8_000
+    else:
+        min_candle = 5_000  if exchange == "Binance" else 3_000
+    if avg_vol < min_candle:
+        log.debug("Zombie coin skip %s avg=%s [%s %s]", sym, _fv(avg_vol), exchange, interval)
+        return
+
+    # Skip late entry: big move already happened AND price near top of range
+    rng24 = ticker["high24"] - ticker["low24"]
+    pos24 = (price - ticker["low24"]) / rng24 if rng24 > 0 else 0.5
+    if move > 4.0 and pos24 > 0.70:
+        log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24*100)
+        return
 
     buy_v, sell_v = calc_flow(candles)
     if sell_v <= 0: return
