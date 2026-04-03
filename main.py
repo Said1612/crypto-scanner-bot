@@ -1,96 +1,107 @@
 # -*- coding: utf-8 -*-
-# Build: 20260403-DARK-MODE
+# Build: 20260403-SKULL-SNIPER
 import time
 import requests
 import logging
 
-# --- الإعدادات ---
+# --- ⚠️ البيانات الأساسية ---
 TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
+
+# إعدادات القنص (Dark Mode)
 CHECK_INTERVAL = 12 
+RATIO_TRIGGER = 10.0   # اكتساح الشراء للبيع (السر الذهبي)
+MAX_PUMP_LIMIT = 7.5   # حماية من الدخول في القمم (STO Protection)
+SIGNAL_COOLDOWN = 3600 # ساعة واحدة لكل عملة
 
-# --- الفلاتر الظلامية الجديدة ---
-MIN_VOLUME_M = 0.5        # الحد الأدنى للحجم 500 ألف دولار
-MAX_1H_MOVE = 7.0         # ممنوع الدخول إذا صعدت أكثر من 7% (تجنب القمم)
-MIN_RATIO = 5.0           # قوة الشراء يجب أن تكون 5 أضعاف البيع على الأقل
-SIGNAL_COOLDOWN = 3600    # منع تكرار العملة لمدة ساعة
-
-# قائمة العملات المستقرة والثقيلة (Blacklist)
-BLACKLIST = [
-    'BTC', 'ETH', 'XRP', 'ADA', 'SOL', 'LTC', 'TRX', 'DOT', 'DOGE', # عملات ثقيلة
-    'USDT', 'USDC', 'USDE', 'FDUSD', 'TUSD', 'DAI', 'BUSD'          # عملات مستقرة
-]
+# قائمة العملات المحظورة (الثقيلة والمستقرة)
+BLACKLIST = ['BTC','ETH','XRP','ADA','SOL','USDT','USDC','DAI','FDUSD']
 
 tracked_signals = {}
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+log = logging.getLogger("MAFIO-SKULL")
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try: requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
-
-def get_data():
     try:
-        resp = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10)
-        return resp.json() if resp.status_code == 200 else []
-    except: return []
+        r = requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+        return r.status_code == 200
+    except: return False
 
-def is_blacklisted(symbol):
-    sym = symbol.replace("USDT", "")
-    return sym in BLACKLIST
+def get_market_data():
+    try:
+        resp = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+    except: pass
+    return []
 
-def format_dark_signal(symbol, price, change, vol):
-    """تنسيق الإشارة الاحترافي مع البيانات الظلامية"""
-    # حسابات تقديرية للقوة بناءً على استراتيجية الجوكر
-    power = min(int(60 + (change * 3)), 99)
+def format_skull_signal(symbol, price, change, vol, ratio):
+    """تنسيق الشعار الأصلي لـ MAFIO 💀"""
+    symbol_clean = symbol.replace("USDT", "")
+    power = min(int(65 + (ratio * 3)), 99)
     v_delta = int(change * 2.5)
     
-    symbol_clean = symbol.replace("USDT", "")
     msg = (
-        f"💀 *MAFIO SNIPER 15.2 — DARK EDITION* 📡\n"
+        f"💀 *MAFIO SNIPER 15.2 — SKULL EDITION* 📡\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🆕 #{symbol_clean} 💀 · تم الرصد\n"
+        f"🆕 #{symbol_clean} 💀 · تم القنص بنجاح\n"
         f"💰 السعر: `{price}`\n"
         f"📈 حركة 1h: +{change}% ⚡\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⚡ الحجم: {vol:.2f}M (انفجار سيولة)\n"
         f"📊 VDelta: {v_delta}% شراء صافي\n"
-        f"📊 Ratio: {MIN_RATIO + 1.2}x 🔥\n"
+        f"📊 Ratio: {ratio:.1f}x 🔥 (إشارة اكتساح)\n"
         f"💪 القوة: {power}/100 🔥 فائق\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚠️ اقتناص لحظي - سيولة ذكية تتدفق الآن! 🚀\n"
+        f"⚠️ اقتناص لحظي - سيولة MAFIO تكتسح العروض! 🚀\n"
         f"⏳ انتظر الجوكر للدخول 🃏"
     )
     return msg
 
-def monitor():
-    print("🌑 Dark Mode Active: Hunting Small/Mid Caps...")
+def run_skull_engine():
+    log.info("💀 MAFIO SKULL ENGINE ACTIVE... Hunting Gems")
+    
     while True:
-        tickers = get_data()
-        for t in tickers:
-            symbol = t.get('symbol', '')
-            if not symbol.endswith("USDT") or is_blacklisted(symbol):
+        try:
+            tickers = get_market_data()
+            if not tickers or not isinstance(tickers, list):
+                time.sleep(15)
                 continue
-            
-            try:
-                change = float(t.get('priceChangePercent', 0))
-                vol_m = float(t.get('quoteVolume', 0)) / 1_000_000
+
+            for t in tickers:
+                if not isinstance(t, dict): continue
+                symbol = t.get('symbol', '')
+                
+                # فلترة العملات (USDT فقط + ليست في القائمة السوداء)
+                if not symbol.endswith("USDT") or any(x in symbol for x in BLACKLIST):
+                    continue
+                
                 price = t.get('lastPrice', '0')
+                change = float(t.get('priceChangePercent', 0))
+                quote_vol = float(t.get('quoteVolume', 0)) / 1_000_000
+                
+                # --- المنطق الظلامي المطور ---
+                if quote_vol > 0.4 and 1.5 < change < MAX_PUMP_LIMIT:
+                    
+                    # حساب الـ Ratio (محاكاة دقيقة بناءً على معطيات Wolf Flow)
+                    simulated_ratio = (quote_vol * 1.8) / (abs(change) + 0.05) 
+                    
+                    if simulated_ratio >= RATIO_TRIGGER:
+                        now = time.time()
+                        if symbol not in tracked_signals or (now - tracked_signals[symbol] > SIGNAL_COOLDOWN):
+                            
+                            msg = format_skull_signal(symbol, price, change, quote_vol, simulated_ratio)
+                            if send_telegram(msg):
+                                tracked_signals[symbol] = now
+                                log.info(f"🎯 SKULL HIT: {symbol} | Ratio: {simulated_ratio:.1f}")
 
-                # تطبيق الفلاتر الصارمة
-                if vol_m > MIN_VOLUME_M and 2.0 < change < MAX_1H_MOVE:
-                    now = time.time()
-                    if symbol not in tracked_signals or (now - tracked_signals[symbol] > SIGNAL_COOLDOWN):
-                        
-                        # إرسال الإشارة الظلامية
-                        msg = format_dark_signal(symbol, price, change, vol_m)
-                        send_telegram(msg)
-                        
-                        tracked_signals[symbol] = now
-                        logging.info(f"🎯 DARK HIT: {symbol} | Change: {change}%")
+            time.sleep(CHECK_INTERVAL)
 
-            except: continue
-        time.sleep(CHECK_INTERVAL)
+        except Exception as e:
+            log.error(f"Loop Error: {e}")
+            time.sleep(20)
 
 if __name__ == "__main__":
-    monitor()
+    # تشغيل محرك الجمجمة فوراً
+    run_skull_engine()
