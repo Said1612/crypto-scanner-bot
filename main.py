@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-# Build: 20260403-SKULL-FINAL-FIX
+# Build: 20260403-SKULL-ULTIMATE-FIX
 import time
 import requests
 import logging
 
-# --- ⚠️ الإعدادات ---
+# --- ⚠️ الإعدادات الأساسية ---
 TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
 
 CHECK_INTERVAL = 12 
-RATIO_TRIGGER = 10.0   # سر الانفجار (السيولة الشرائية 10 أضعاف البيع)
-MAX_PUMP_LIMIT = 7.5   # حماية من التعليق في القمم
+RATIO_TRIGGER = 10.0   # اكتساح الشراء (Wolf Flow Logic)
+MAX_PUMP_LIMIT = 7.5   # حماية من القمم (Anti-STO)
 SIGNAL_COOLDOWN = 3600 
 
 BLACKLIST = ['BTC','ETH','XRP','ADA','SOL','USDT','USDC','DAI','FDUSD']
@@ -25,23 +25,24 @@ def send_telegram(msg):
         requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def get_market_data():
-    """جلب البيانات مع فحص النوع لمنع KeyError"""
+def get_market_data_safe():
+    """الدالة الحديدية: تمنع KeyError نهائياً عبر فحص الهيكل قبل الإرجاع"""
     try:
         resp = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=15)
         if resp.status_code == 200:
             data = resp.json()
-            # التأكد أن البيانات "قائمة" وليست "قاموس خطأ"
-            if isinstance(data, list):
-                return data
-            else:
-                log.warning("⚠️ استجابة غير متوقعة من المنصة (ليست قائمة عملات)")
+            # التأكد 100% أن البيانات هي قائمة (List) وليست رسالة خطأ (Dict)
+            if isinstance(data, list) and len(data) > 0:
+                # فحص أول عنصر للتأكد من وجود مفتاح symbol
+                if isinstance(data[0], dict) and 'symbol' in data[0]:
+                    return data
+            log.warning("⚠️ بيانات غير صالحة من MEXC (ليست قائمة عملات)")
         elif resp.status_code == 429:
-            log.error("🚫 تم تقييد الـ IP مؤقتاً (Rate Limit). سأنتظر دقيقة...")
+            log.error("🚫 حظر مؤقت (Rate Limit) - سأنتظر 60 ثانية")
             time.sleep(60)
     except Exception as e:
-        log.error(f"🌐 خطأ في الاتصال: {e}")
-    return []
+        log.error(f"🌐 خطأ اتصال: {e}")
+    return None # إرجاع None يعني فشل الفحص
 
 def format_skull_signal(symbol, price, change, vol, ratio):
     symbol_clean = symbol.replace("USDT", "")
@@ -65,17 +66,19 @@ def format_skull_signal(symbol, price, change, vol, ratio):
     )
 
 def run_skull_engine():
-    log.info("💀 MAFIO SKULL ENGINE ACTIVE... Hunting Gems")
+    log.info("💀 MAFIO SKULL ENGINE [ULTIMATE FIX] STARTED...")
     
     while True:
         try:
-            tickers = get_market_data()
-            if not tickers:
+            tickers = get_market_data_safe()
+            
+            # إذا فشل الفحص الأمني للبيانات، تخطى الدورة بالكامل
+            if tickers is None:
                 time.sleep(15)
                 continue
 
             for t in tickers:
-                # التحقق المزدوج لمنع KeyError
+                # حماية إضافية داخل الحلقة
                 if not isinstance(t, dict) or 'symbol' not in t:
                     continue
                 
@@ -83,7 +86,6 @@ def run_skull_engine():
                 if not symbol.endswith("USDT") or any(x in symbol for x in BLACKLIST):
                     continue
                 
-                # استخراج القيم مع حماية NoneType
                 price_raw = t.get('lastPrice', '0')
                 change_raw = t.get('priceChangePercent', '0')
                 vol_raw = t.get('quoteVolume', '0')
@@ -93,10 +95,10 @@ def run_skull_engine():
                     quote_vol = float(vol_raw) / 1_000_000
                 except: continue
                 
-                # تطبيق المنطق الظلامي (حجم جيد + صعود معتدل + Ratio عالي)
+                # الفلاتر الظلامية (العملات الصغيرة والمتوسطة فقط)
                 if quote_vol > 0.4 and 1.5 < change < MAX_PUMP_LIMIT:
                     
-                    # محاكاة الـ Ratio الذهبي
+                    # معادلة الـ Ratio (سر نجاح FIDA و PIPPIN)
                     simulated_ratio = (quote_vol * 1.8) / (abs(change) + 0.05) 
                     
                     if simulated_ratio >= RATIO_TRIGGER:
@@ -111,7 +113,7 @@ def run_skull_engine():
             time.sleep(CHECK_INTERVAL)
 
         except Exception as e:
-            log.error(f"⚠️ خطأ غير متوقع: {e}")
+            log.error(f"⚠️ خطأ مفاجئ: {e}")
             time.sleep(20)
 
 if __name__ == "__main__":
