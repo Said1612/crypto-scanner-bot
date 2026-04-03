@@ -1,106 +1,67 @@
 # -*- coding: utf-8 -*-
-import os
+# SNIPER BOT - CLEAN & STABLE VERSION
+
 import time
-import json
+import random
 import logging
-import requests
-import math
 from datetime import datetime
 
-# --- الإعدادات الأساسية ---
-TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
-CHECK_INTERVAL = 12  # نظام Anti-Rate-Limit
+# === LOGGING SETUP ===
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
 
-# لضمان عدم تكرار الإشارات
-tracked_signals = {}
+logging.info("🚀 SNIPER BOT STARTED SUCCESSFULLY")
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-log = logging.getLogger("MAFIO")
+# === CONFIG ===
+TPS_MIN = 1.08
+VDELTA_MIN = 0.52
+VOL_RATIO_MIN = 1.4
+MAX_SIGNALS_PER_DAY = 10
 
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+signals_sent = 0
+current_day = datetime.utcnow().date()
 
+# === MOCK DATA (replace with real market data later) ===
 def get_market_data():
-    """جلب بيانات السوق من MEXC مع معالجة الأخطاء"""
-    try:
-        resp = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=10)
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception as e:
-        log.error(f"API Error: {e}")
-    return []
-
-def calculate_vdelta_logic(symbol):
-    """محاكاة حساب VDelta و TPS بناءً على الصفقات الأخيرة"""
-    # في النسخة الكاملة يتم جلب الـ Trades، هنا نضع قيم افتراضية ذكية بناءً على الحجم
-    # لضمان استقرار السكريبت وسرعته
     return {
-        "tps": 1.25, 
-        "ats": 350,
-        "vdelta": 28,
-        "power": 72,
-        "sector": "Layer 1"
+        "tps": random.uniform(0.9, 1.3),
+        "vdelta": random.uniform(0.4, 0.7),
+        "vol_ratio": random.uniform(1.0, 2.0),
+        "ats_now": random.uniform(100, 200),
+        "ats_prev": random.uniform(90, 190)
     }
 
-def format_signal(symbol, price, change, vol):
-    """تنسيق الرسالة بالشكل الصحيح الذي طلبته"""
-    data = calculate_vdelta_logic(symbol)
-    
-    # تحديد إيموجي القوة بناءً على السعر والحجم
-    power_emoji = "🔥 قوي" if data['power'] > 70 else "⚡ متوسط"
-    symbol_clean = symbol.replace("USDT", "")
-    
-    msg = (
-        f"👁️ *WATCH ALERT*\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔍 {symbol_clean} — نشاط مشبوه! راقب 👀\n"
-        f"💵 السعر: `{price}`\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"⚡ نشاط متصاعد\n"
-        f"📡 TPS:    {data['tps']:.2f} | ATS: {data['ats']}$ 🦐 أفراد\n"
-        f"📊 VDelta: {data['vdelta']}% شراء\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💪 القوة: {data['power']}/100 {power_emoji}\n"
-        f"📉 24h: {change}% | حجم: {vol:.2f}M\n"
-        f"🏷️ القطاع: {data['sector']}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"⏳ انتظر الجوكر للدخول 🃏"
+# === SNIPER LOGIC ===
+def sniper_entry(data):
+    return (
+        data["tps"] >= TPS_MIN and
+        data["vdelta"] >= VDELTA_MIN and
+        data["vol_ratio"] >= VOL_RATIO_MIN and
+        data["ats_now"] > data["ats_prev"]
     )
-    return msg
 
-def monitor_loop():
-    log.info("🚀 MAFIO-BOT Engine Started...")
-    while True:
-        tickers = get_market_data()
-        
-        for t in tickers:
-            symbol = t.get('symbol', '')
-            if not symbol.endswith("USDT"): continue
-            
-            try:
-                price = float(t.get('lastPrice', 0))
-                change = float(t.get('priceChangePercent', 0))
-                quote_vol = float(t.get('quoteVolume', 0)) / 1_000_000 # تحويل للمليون
-                
-                # شروط الفلترة (يمكنك تعديلها)
-                if quote_vol > 0.5 and 2 < change < 15:
-                    if symbol not in tracked_signals or (time.time() - tracked_signals[symbol] > 3600):
-                        # إرسال الإشارة بالشكل المطلوب
-                        signal_msg = format_signal(symbol, price, change, quote_vol)
-                        send_telegram(signal_msg)
-                        tracked_signals[symbol] = time.time()
-                        
-            except (ValueError, TypeError):
-                continue
-
-        time.sleep(CHECK_INTERVAL)
-
-if __name__ == "__main__":
+# === MAIN LOOP ===
+while True:
     try:
-        monitor_loop()
-    except KeyboardInterrupt:
-        log.info("Stopped.")
+        # Reset daily counter
+        if datetime.utcnow().date() != current_day:
+            signals_sent = 0
+            current_day = datetime.utcnow().date()
+            logging.info("🔄 Daily reset of signals counter")
+
+        data = get_market_data()
+
+        if sniper_entry(data):
+            if signals_sent < MAX_SIGNALS_PER_DAY:
+                signals_sent += 1
+                logging.info(f"🔥 SIGNAL #{signals_sent} | DATA: {data}")
+            else:
+                logging.warning("⚠️ Max signals reached for today")
+
+        time.sleep(5)
+
+    except Exception as e:
+        logging.error(f"❌ ERROR: {e}")
+        time.sleep(10)
