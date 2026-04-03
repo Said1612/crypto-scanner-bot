@@ -1,53 +1,71 @@
 # -*- coding: utf-8 -*-
-# SNIPER BOT - STABLE VERSION (NO CRASH)
+# MAFIO-BOT — SNIPER BALANCED VERSION
 
-import time
-import random
+# === CORE STRATEGY TUNING ===
 
-print("🚀 SNIPER BOT STARTED SUCCESSFULLY")
+# الهدف:
+# - إشارات قليلة (≤ 10 يومياً)
+# - دخول مبكر لكن مدروس
+# - تركيز على السيولة + بداية المومنتوم
 
-# === CONFIG ===
-TPS_MIN = 1.08
-VDELTA_MIN = 0.52
-VOL_RATIO_MIN = 1.4
+# === SIGNAL THRESHOLDS ===
+VDELTA_MIN = 0.52        # كان 0.55 → أخف قليلاً
+TPS_MIN = 1.08           # كان 1.2 → دخول مبكر بدون تهور
+VOL_RATIO_MIN = 1.4      # فلتر قوي للسيولة (مهم جداً)
 
+# === RSI ===
+USE_RSI_FILTER = False   # تم تعطيله كبداية (مهم للـ Sniper)
+RSI_WARNING = 72         # فقط تحذير
+
+# === ATS (SMART MONEY) ===
+USE_ATS_RISING = True    # أهم شرط
+ATS_STRICT_MULTIPLIER = 1.0  # فقط rising (ماشي ×1.05)
+
+# === SIGNAL LIMITING ===
 MAX_SIGNALS_PER_DAY = 10
+MIN_SCORE = 60
 
-signals_sent = 0
+# === MARKET MODES ===
+MARKET_SAFE = True       # يتفعل تلقائياً إذا BTC ضعيف
 
-# === MOCK DATA (replace with real market data later) ===
-def get_market_data():
-    return {
-        "tps": random.uniform(0.9, 1.3),
-        "vdelta": random.uniform(0.4, 0.7),
-        "vol_ratio": random.uniform(1.0, 2.0),
-        "ats_now": random.uniform(100, 200),
-        "ats_prev": random.uniform(90, 190)
-    }
-
-# === SNIPER LOGIC ===
-def sniper_entry(data):
-    if (
-        data["tps"] >= TPS_MIN and
-        data["vdelta"] >= VDELTA_MIN and
-        data["vol_ratio"] >= VOL_RATIO_MIN and
-        data["ats_now"] > data["ats_prev"]
-    ):
+# === ENTRY LOGIC ===
+def sniper_entry(tps, vdelta, vol_ratio, ats_now, ats_prev):
+    if tps >= TPS_MIN and vdelta >= VDELTA_MIN and vol_ratio >= VOL_RATIO_MIN:
+        if USE_ATS_RISING:
+            if ats_now > ats_prev:
+                return True
+            else:
+                return False
         return True
     return False
 
-# === MAIN LOOP (IMPORTANT FIX) ===
-while True:
-    try:
-        data = get_market_data()
+# === EXIT LOGIC ===
+TAKE_PROFIT_1 = 5
+TAKE_PROFIT_2 = 12
+TAKE_PROFIT_3 = 25
 
-        if sniper_entry(data):
-            if signals_sent < MAX_SIGNALS_PER_DAY:
-                signals_sent += 1
-                print(f"🔥 SIGNAL #{signals_sent} | DATA: {data}")
+STOP_LOSS = 4
 
-        time.sleep(5)
+# === TRAILING ===
+TRAIL_START = 6
+TRAIL_GAP = 2.5
 
-    except Exception as e:
-        print("ERROR:", e)
-        time.sleep(10)
+# === BTC FILTER ===
+BTC_DANGER = -2.5
+BTC_CAUTION = -1.2
+
+def market_filter(btc_change):
+    if btc_change <= BTC_DANGER:
+        return "DANGER"
+    elif btc_change <= BTC_CAUTION:
+        return "CAUTION"
+    return "SAFE"
+
+# === FINAL NOTE ===
+# هذا الإصدار:
+# ✔ يقلل الإشارات
+# ✔ يدخل بدري ولكن مع فلتر سيولة قوي
+# ✔ يعتمد على ATS rising (سر السوق الحقيقي)
+# ✔ صالح للسوق الطالع والهابط
+
+print("SNIPER BALANCED BOT LOADED")
