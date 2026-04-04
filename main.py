@@ -70,6 +70,8 @@ market_bias   = 0    # -100 to +100, updated each scan
 market_cvd    = 0.0  # cumulative volume delta ($)
 _multi_confirm       : Dict[str, dict] = {}   # {sym: {"count": N, "scanners": [], "last_time": ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 min window for multi-scanner confirmation
+_funding_cache       : Dict[str, dict] = {}   # {sym: {"rate": float, "label": str, "ts": float}}
+FUNDING_TTL          = 300   # refresh funding rate every 5 min
 
 # ══════════════════════════════════════════════════════
 #  LOGGING
@@ -201,6 +203,81 @@ def fetch_klines(sym, base_url, interval="5m", limit=25):
                 {"symbol": sym, "interval": interval, "limit": limit})
     return data if isinstance(data, list) else []
 
+def fetch_agg_trades(sym, base_url, minutes=60):
+    """
+    Real buy/sell volume from actual trades (Wolf Flow: real-time, no lag).
+    m=True  → maker is buyer  → taker is SELLER  → sell volume
+    m=False → maker is seller → taker is BUYER    → buy volume
+    """
+    start_ms = int((time.time() - minutes * 60) * 1000)
+    data = _get(f"{base_url}/aggTrades",
+                {"symbol": sym, "startTime": start_ms, "limit": 1000},
+                timeout=8)
+    if not isinstance(data, list) or not data:
+        return 0.0, 0.0
+    buy = sell = 0.0
+    for t in data:
+        try:
+            vol = float(t["q"]) * float(t["p"])
+            if t.get("m", True):   # m=True → market SELL
+                sell += vol
+            else:                  # m=False → market BUY
+                buy += vol
+        except Exception:
+            continue
+    return buy, sell
+
+def fetch_ob_imbalance(sym, base_url, levels=20):
+    """
+    Order book bid/ask USDT imbalance (Wolf Flow: order book spot/future).
+    Returns ratio 0.0–1.0:  >0.55 = buyers dominate  |  <0.45 = sellers dominate
+    """
+    data = _get(f"{base_url}/depth", {"symbol": sym, "limit": levels}, timeout=5)
+    if not data:
+        return 0.5
+    try:
+        bid_vol = sum(float(b[0]) * float(b[1]) for b in data.get("bids", [])[:levels])
+        ask_vol = sum(float(a[0]) * float(a[1]) for a in data.get("asks", [])[:levels])
+        total   = bid_vol + ask_vol
+        return bid_vol / total if total > 0 else 0.5
+    except Exception:
+        return 0.5
+
+def fetch_funding_rate(sym):
+    """
+    Query Binance Futures funding rate for the symbol.
+    Returns (rate_pct, label):
+      rate_pct  — float % or None if coin is spot-only
+      label     — human readable: Bullish/Longs, Bearish/Shorts, Neutral/Covering, Spot
+    Positive funding = longs pay shorts = market is bullish (like Wolf Flow 'Bullish/Longs')
+    Negative funding = shorts pay longs = bearish OR short squeeze setup ('Covering')
+    """
+    now   = time.time()
+    cache = _funding_cache.get(sym)
+    if cache and (now - cache["ts"]) < FUNDING_TTL:
+        return cache["rate"], cache["label"]
+
+    data = _get(f"{BINANCE_FUTURES}/premiumIndex", {"symbol": sym}, timeout=5)
+    if not data or isinstance(data, list) or data.get("code"):
+        entry = {"rate": None, "label": "Spot", "ts": now}
+        _funding_cache[sym] = entry
+        return None, "Spot"
+    try:
+        rate = float(data.get("lastFundingRate", 0)) * 100  # convert to %
+        if rate > 0.02:
+            label = "🟢 Bullish / Longs"
+        elif rate < -0.02:
+            label = "🔴 Bearish / Shorts"
+        else:
+            label = "🟡 Neutral / Covering"
+        entry = {"rate": rate, "label": label, "ts": now}
+        _funding_cache[sym] = entry
+        return rate, label
+    except Exception:
+        entry = {"rate": None, "label": "Spot", "ts": now}
+        _funding_cache[sym] = entry
+        return None, "Spot"
+
 # ══════════════════════════════════════════════════════
 #  ANALYSIS
 # ══════════════════════════════════════════════════════
@@ -297,7 +374,8 @@ def _ts():
 
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
-                 high24=0.0, low24=0.0, badge="🔔1"):
+                 high24=0.0, low24=0.0, badge="🔔1",
+                 funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50):
     global signal_count
     signal_count += 1
 
@@ -311,7 +389,10 @@ def build_signal(sym, price, change, buy_v, sell_v,
     pos_ok = pos_from_bottom <= 60   # in lower 60% of range = good entry
 
     # Interest / Short Squeeze detection
-    if ratio >= 8.0:
+    if ratio >= 30.0:
+        interest = "Institutional Breakout 🐋"
+        int_icon = "🔵"
+    elif ratio >= 8.0:
         interest = "🔥 High Short Squeeze Risk 🧨"
         int_icon = "🟡"
     elif ratio >= 4.0:
@@ -345,6 +426,8 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"  📥 In:  `{_fv(buy_v)}`\n"
         f"  📤 Out: `{_fv(sell_v)}`\n"
         f"  ▲ Net: `+{_fv(net)}` ✅\n"
+        f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
+        f"📌 Funding: {funding_label}\n"
         f"\n"
         f"🕐 {_ts()} UTC\n"
         f"{'━' * 20}\n"
@@ -428,33 +511,53 @@ def _check(sym, ticker, interval):
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
-    # Minimum 24h volume — enough to be a real traded coin
-    min_vol = 200_000 if exchange == "Binance" else 50_000
+    # Minimum 24h volume — must be an established, findable coin
+    min_vol = 5_000_000 if exchange == "Binance" else 300_000
     if vol_24h < min_vol:
         log.debug("Low 24h vol skip %s vol=%s [%s]", sym, _fv(vol_24h), exchange)
         return
 
-    # Fetch klines
+    # ── Step 1: Klines — volume spike detection only ─────────────────
     candles = fetch_klines(sym, base_url, interval=interval, limit=25)
     if len(candles) < 10: return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    if spike < spike_min or move < 1.5: return
+    if move < 1.5: return
 
-    # Minimum base candle liquidity — reject completely dead coins (0 volume)
-    min_candle = 50 if exchange == "MEXC" else 200
-    if avg_vol < min_candle:
-        log.debug("Zombie skip %s avg=%s [%s %s]", sym, _fv(avg_vol), exchange, interval)
+    # Reject dead coins (zero base volume)
+    if avg_vol < (50 if exchange == "MEXC" else 200): return
+
+    # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
+    # PIPPIN pattern: ratio 63.8x but spike only 1.8x (institution buying quietly)
+    # When almost nobody is selling, spike threshold is irrelevant → bypass
+    _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
+                                            minutes=60 if interval == "1h" else 10)
+    _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
+    super_ratio = _pre_ratio >= 20.0   # institutional / near-zero sell pressure
+    effective_spike_min = 1.5 if super_ratio else spike_min
+    if spike < effective_spike_min:
         return
 
-    # Skip late entry: big move already happened AND price near top of range
+    # Spike candle must close in upper half — rejects pump-dump wicks (BNK style)
+    try:
+        sc = candles[-1]
+        sc_rng = float(sc[2]) - float(sc[3])
+        sc_close_pct = (float(sc[4]) - float(sc[3])) / sc_rng if sc_rng > 0 else 0.5
+    except Exception:
+        sc_close_pct = 0.5
+    if sc_close_pct < 0.50:
+        log.debug("Dump-wick skip %s close=%.0f%%", sym, sc_close_pct * 100)
+        return
+
+    # Late-entry guard
     rng24 = ticker["high24"] - ticker["low24"]
     pos24 = (price - ticker["low24"]) / rng24 if rng24 > 0 else 0.5
     if move > 4.0 and pos24 > 0.70:
-        log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24*100)
+        log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24 * 100)
         return
 
-    buy_v, sell_v = calc_flow(candles)
+    # ── Step 2: Real buy/sell from aggTrades (reuse pre-fetched data) ───
+    buy_v, sell_v = _pre_buy, _pre_sell
     if sell_v <= 0: return
     ratio = buy_v / sell_v
     net   = buy_v - sell_v
@@ -462,10 +565,32 @@ def _check(sym, ticker, interval):
     if ratio < ratio_min: return
     if net   < net_min:   return
 
-    # EMA alignment
-    closes   = [float(c[4]) for c in candles]
-    e5, e10, e20 = calc_ema(closes, 5), calc_ema(closes, 10), calc_ema(closes, 20)
-    ema_bull = e5 > e10 > e20
+    # ── Step 3: Order book imbalance (Wolf Flow: order book spot + future) ──
+    ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
+    ob_fut  = 0.5
+    if exchange == "Binance":
+        ob_fut = fetch_ob_imbalance(sym, BINANCE_FUTURES, levels=20)
+    # Weighted: spot 70% + futures 30%
+    ob_score = ob_spot * 0.7 + ob_fut * 0.3
+    if ob_score < 0.46:   # sellers dominate order books
+        log.debug("OB bearish skip %s ob_spot=%.2f ob_fut=%.2f", sym, ob_spot, ob_fut)
+        return
+    if ob_spot > 0.58:
+        ob_label = "🟢 Buyers"
+    elif ob_spot < 0.44:
+        ob_label = "🔴 Sellers"
+    else:
+        ob_label = "⚪ Balanced"
+
+    # ── Step 4: Funding rate (Wolf Flow: Bullish/Longs or Covering) ─────────
+    funding_rate, funding_label = (None, "Spot")
+    if exchange == "Binance":
+        funding_rate, funding_label = fetch_funding_rate(sym)
+    if funding_rate is not None and funding_rate < -0.05:
+        log.debug("Bearish funding skip %s rate=%.4f%%", sym, funding_rate)
+        return
+
+    ema_bull = True  # kept for compatibility, not used as filter
 
     # Multi-scanner confirmation badge
     scanner = "fast" if interval == "5m" else "slow"
@@ -485,7 +610,8 @@ def _check(sym, ticker, interval):
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
-                       badge=badge)
+                       badge=badge, funding_label=funding_label,
+                       ob_label=ob_label, ob_pct=int(ob_spot * 100))
     send(msg)
     log.info("SIGNAL %-14s tier=%-5s spike=%.1fx net=%s ratio=%.1fx [%s %s]",
              sym, tier["name"], spike, _fv(net), ratio, exchange, interval)
