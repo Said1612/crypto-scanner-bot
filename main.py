@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-import os, time, logging
+"""
+🎯 MAFIO Liquidity Scanner v3.1 (Railway FIXED)
+"""
+
+import os, time, json, logging
+from datetime import datetime, timezone
+from typing import Dict
 import requests
 
 # ══════════════════════════════════════════════════════
@@ -8,98 +14,120 @@ import requests
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.getenv("CHAT_ID", "")
+GROUP_ID       = os.getenv("GROUP_ID", "")
 
-# إعدادات مرنة لاختبار الفحص فوراً
-WOLF_RATIO      = 4.0   # تقليل النسبة قليلاً لزيادة الحساسية
-MAX_ENTRY_PUMP  = 12.0  
-MIN_VOL_DETECT  = 0.03  # صيد العملات ابتداءً من 30 ألف دولار سيولة
+FAST_SCAN_S = 30
+SLOW_SCAN_S = 300
+COOLDOWN    = 7200
 
-BLACKLIST = ['BTC','ETH','USDT','USDC','DAI']
-tracked_signals = {}
+# 🔥 FIX: نخلي CDN هو Spot
+BINANCE_SPOT    = "https://data-api.binance.vision/api/v3"
+BINANCE_DATA    = "https://data-api.binance.vision/api/v3"
+BINANCE_FUTURES = "https://fapi.binance.com/fapi/v1"
+MEXC_BASE       = "https://api.mexc.com/api/v3"
 
-MEXC_BASE = "https://api.mexc.com/api/v3"
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("mafio")
 
-def send_tg(msg):
-    if not TELEGRAM_TOKEN: return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=5)
-    except: pass
+# ══════════════════════════════════════════════════════
+# HTTP (FIXED)
+# ══════════════════════════════════════════════════════
 
-def get_data_safe():
-    try:
-        # مهلة قصيرة (5 ثوانٍ) لمنع "تجمد" البوت
-        r = requests.get(f"{MEXC_BASE}/ticker/24hr", timeout=5)
-        if r.status_code == 200:
-            res = r.json()
-            if isinstance(res, list): return res
-    except:
-        log.warning("⚠️ MEXC Timeout - Skipping this round...")
+def _get(url, params=None, timeout=10):
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Connection": "keep-alive"
+    }
+
+    for attempt in range(3):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=timeout)
+            if r.status_code == 200 and r.text:
+                return r.json()
+            else:
+                log.debug("GET %s → %s", url, r.status_code)
+        except Exception as e:
+            log.debug("GET %s → %s", url, e)
+
+        time.sleep(1)
+
+    return None
+
+# ══════════════════════════════════════════════════════
+# FETCH
+# ══════════════════════════════════════════════════════
+
+def fetch_binance():
+    for url, label in [
+        (BINANCE_SPOT,    "Spot"),   # ✅ أصبح CDN
+        (BINANCE_DATA,    "CDN"),
+        (BINANCE_FUTURES, "Futures"),
+    ]:
+        data = _get(f"{url}/ticker/24hr")
+        if isinstance(data, list) and len(data) > 100:
+            log.info("Binance %s: %d", label, len(data))
+            return data
+        log.warning("Binance %s failed", label)
+
+    log.warning("All Binance endpoints failed")
     return []
 
-def main():
-    log.info("💀 MAFIO ENGINE 15.2 — ACTIVE SCANNING MODE")
-    send_tg("🚀 MAFIO 15.2: المحرك بدأ الفحص الفعلي الآن...")
+def fetch_mexc():
+    data = _get(f"{MEXC_BASE}/ticker/24hr")
+    if not isinstance(data, list):
+        log.warning("MEXC failed")
+        return []
+    log.info("MEXC: %d", len(data))
+    return data
 
-    last_heartbeat = time.time()
+# ══════════════════════════════════════════════════════
+# TELEGRAM
+# ══════════════════════════════════════════════════════
+
+def send(text):
+    if not TELEGRAM_TOKEN:
+        print(text)
+        return
+
+    for cid in filter(None, [CHAT_ID, GROUP_ID]):
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                json={"chat_id": cid, "text": text},
+                timeout=10
+            )
+        except Exception as e:
+            log.error("TG error: %s", e)
+
+# ══════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════
+
+def main():
+    log.info("🎯 MAFIO Scanner Started")
+
+    send("✅ BOT STARTED SUCCESSFULLY")
 
     while True:
         try:
-            data = get_data_safe()
-            
-            # رسالة لتأكيد أن البوت "حي" في السجلات كل 60 ثانية
-            if time.time() - last_heartbeat > 60:
-                log.info(f"🔄 Heartbeat: Scanning {len(data) if data else 0} pairs...")
-                last_heartbeat = time.time()
+            b = fetch_binance()
+            m = fetch_mexc()
 
-            if not data:
-                time.sleep(5)
-                continue
+            total = len(b) + len(m)
 
-            for t in data:
-                if not isinstance(t, dict) or 'symbol' not in t: continue
-                
-                symbol = t['symbol']
-                if not symbol.endswith("USDT") or any(x in symbol for x in BLACKLIST):
-                    continue
+            log.info("Tickers: Binance=%d MEXC=%d Total=%d",
+                     len(b), len(m), total)
 
-                try:
-                    price  = t.get('lastPrice', '0')
-                    change = float(t.get('priceChangePercent', 0))
-                    vol_m  = float(t.get('quoteVolume', 0)) / 1_000_000
-                    
-                    # معادلة السيولة الذكية (Smart Flow)
-                    simulated_ratio = (vol_m * 3.5) / (abs(change) + 0.1)
-
-                    if 0.5 < change < MAX_ENTRY_PUMP and vol_m > MIN_VOL_DETECT:
-                        if simulated_ratio >= WOLF_RATIO:
-                            now = time.time()
-                            if symbol not in tracked_signals or (now - tracked_signals[symbol] > 3600):
-                                msg = (
-                                    f"💀 *MAFIO SNIPER — HIT* 🎯\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"🆕 #{symbol.replace('USDT','')} 💀\n"
-                                    f"💰 السعر: `{price}`\n"
-                                    f"📈 الحركة: +{change}% ⚡\n"
-                                    f"📊 القوة: {simulated_ratio:.1f}x\n"
-                                    f"⚡ السيولة: {vol_m:.2f}M\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"🚀 اكتساح شراء تم رصده!"
-                                )
-                                send_tg(msg)
-                                tracked_signals[symbol] = now
-                                log.info(f"🎯 SIGNAL SENT: {symbol}")
-
-                except: continue
-
-            time.sleep(10) # فحص سريع كل 10 ثوانٍ
-
-        except Exception as e:
-            log.error(f"Error: {e}")
             time.sleep(10)
+
+        except KeyboardInterrupt:
+            log.info("Stopped.")
+            break
+        except Exception as e:
+            log.error("Error: %s", e)
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
