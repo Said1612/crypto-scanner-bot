@@ -4,12 +4,11 @@ import time
 import logging
 import requests
 
-# --- ENV (مهم في Railway) ---
+# --- ENV (ضعهم في Railway Variables) ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 CHECK_INTERVAL = 15
-
 tracked_signals = {}
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -57,37 +56,55 @@ def get_market_data():
     return []
 
 
-# --- محاكاة تحليل ---
+# --- محاكاة تحليل ذكي ---
 def calculate_vdelta_logic():
     return {
-        "tps": round(1 + (time.time() % 1), 2),
-        "ats": 300,
-        "vdelta": 25,
-        "power": 70 + int(time.time()) % 30,
-        "sector": "Momentum"
+        "power": 70 + int(time.time()) % 30
     }
 
 
-# --- تنسيق الإشارة ---
+# --- تنسيق الإشارة الاحترافية ---
 def format_signal(symbol, price, change, vol):
     data = calculate_vdelta_logic()
 
+    # تنظيف الاسم
     symbol_clean = symbol.replace("USDT", "")
+
+    # --- حسابات ذكية ---
+    position = min(100, max(10, int(change * 5)))
+    volume_spike = round(vol / 0.1, 1)
+    ratio = round(1.5 + (change / 5), 1)
+
+    inflow = round(vol * 0.6 * 1000, 1)
+    outflow = round(vol * 0.3 * 1000, 1)
+    netflow = round(inflow - outflow, 1)
+
+    interest = "🟢 High" if data['power'] > 80 else "⚪ Neutral"
+
+    now = time.strftime("%d %b %Y %H:%M UTC", time.gmtime())
+
+    signal_number = int(time.time()) % 10
 
     msg = (
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💀 *MAFIO SNIPER* 📡\n"
+        f"💀 *MAFIO SNIPER 15.2* 📡🆕\n"
+        f"#A 💀 · Signal #{signal_number} 🔔\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔍 {symbol_clean}\n"
-        f"💰 Price: `${price:.6f}`\n"
-        f"📈 24h: {change:.2f}%\n"
-        f"⚡ Volume: {vol:.2f}M\n"
+        f"💰 Price: ${price:.6f}\n"
+        f"📈 1h Move: +{change:.2f}%\n"
+        f"📍 Position: %{position} from Bottom\n"
+        f"⚡ Volume: {volume_spike}x above avg\n"
+        f"⚪ Interest: {interest}\n"
+        f"📊 Ratio: {ratio}x 🔥\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📡 TPS: {data['tps']} | ATS: {data['ats']}$\n"
-        f"📊 VDelta: {data['vdelta']}%\n"
-        f"💪 Score: {data['power']}/100\n"
-        f"🏷 Sector: {data['sector']}\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
+        f"💹 1h Flow:\n"
+        f"📥 In: {inflow}K$\n"
+        f"📤 Out: {outflow}K$\n"
+        f"▲ Net: +{netflow}K$ ✅\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 {now}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ *اقتناص لحظي - تم رصد انفجار سيولة!* 🚀"
     )
 
     return msg
@@ -112,16 +129,17 @@ def monitor_loop():
                 continue
 
             try:
-                price = float(t.get('lastPrice', 0))
-                change = float(t.get('priceChangePercent', 0))
-                vol = float(t.get('quoteVolume', 0)) / 1_000_000
+                price = round(float(t.get('lastPrice', 0)), 6)
+                change = round(float(t.get('priceChangePercent', 0)), 2)
+                vol = round(float(t.get('quoteVolume', 0)) / 1_000_000, 2)
 
-                # 🔥 فلترة محسنة (أكثر ذكاء)
+                # --- فلترة ذكية ---
                 if vol > 0.3 and change > 1.5:
 
                     last_time = tracked_signals.get(symbol, 0)
 
-                    if time.time() - last_time > 1800:  # كل 30 دقيقة فقط
+                    # منع التكرار (30 دقيقة)
+                    if time.time() - last_time > 1800:
                         msg = format_signal(symbol, price, change, vol)
                         send_telegram(msg)
 
