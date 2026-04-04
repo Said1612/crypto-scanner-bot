@@ -511,6 +511,22 @@ def _check(sym, ticker, interval):
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
+    # ── Fetch funding rate FIRST (Wolf Flow primary signal) ───────────
+    # Bullish funding = smart money adding longs = relax all other thresholds
+    funding_rate, funding_label = (None, "Spot")
+    if exchange == "Binance":
+        funding_rate, funding_label = fetch_funding_rate(sym)
+
+    funding_bullish = funding_rate is not None and funding_rate > 0.01
+    if funding_bullish:
+        # Smart money is buying despite market conditions → relax thresholds
+        # This captures NIGHT (ratio 1.68x) and SAHARA ($1.1K net) patterns
+        spike_min = max(2.0,          spike_min * 0.50)
+        ratio_min = max(1.3,          ratio_min - 0.40)
+        net_min   = max(net_min * 0.3, 100)
+        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.1f net≥%s",
+                  sym, spike_min, ratio_min, _fv(net_min))
+
     # Minimum 24h volume — must be an established, findable coin
     min_vol = 5_000_000 if exchange == "Binance" else 300_000
     if vol_24h < min_vol:
@@ -582,15 +598,12 @@ def _check(sym, ticker, interval):
     else:
         ob_label = "⚪ Balanced"
 
-    # ── Step 4: Funding rate (Wolf Flow: Bullish/Longs or Covering) ─────────
-    funding_rate, funding_label = (None, "Spot")
-    if exchange == "Binance":
-        funding_rate, funding_label = fetch_funding_rate(sym)
+    # Funding: Bearish block (strongly negative = bears in control)
     if funding_rate is not None and funding_rate < -0.05:
         log.debug("Bearish funding skip %s rate=%.4f%%", sym, funding_rate)
         return
 
-    ema_bull = True  # kept for compatibility, not used as filter
+    ema_bull = True
 
     # Multi-scanner confirmation badge
     scanner = "fast" if interval == "5m" else "slow"
