@@ -54,6 +54,7 @@ SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE"}
 BINANCE_SPOT    = "https://api.binance.com/api/v3"
 BINANCE_DATA    = "https://data-api.binance.vision/api/v3"
 BINANCE_FUTURES = "https://fapi.binance.com/fapi/v1"
+MEXC_BASE       = "https://api.mexc.com/api/v3"
 
 # ══════════════════════════════════════════════════════
 #  STATE
@@ -194,6 +195,16 @@ def fetch_binance_futures():
         log.info("Binance Futures: %d", len(out))
         return out
     log.warning("Binance Futures failed (blocked on Railway, works on VPS)")
+    return {}
+
+def fetch_mexc():
+    """MEXC tickers — works on Railway and VPS (no IP restrictions)"""
+    data = _get(f"{MEXC_BASE}/ticker/24hr")
+    if isinstance(data, list) and len(data) > 100:
+        out = _parse(data, "MEXC", MEXC_BASE)
+        log.info("MEXC: %d", len(out))
+        return out
+    log.warning("MEXC failed")
     return {}
 
 def fetch_klines(sym, base_url, interval="5m", limit=25):
@@ -402,7 +413,12 @@ def build_signal(sym, price, change, buy_v, sell_v,
         int_icon = "⚪"
 
     # Exchange footer
-    ex_note = "Binance Futures" if exchange == "Binance-F" else "Binance"
+    if exchange == "Binance-F":
+        ex_note = "Binance Futures"
+    elif exchange == "MEXC":
+        ex_note = "MEXC"
+    else:
+        ex_note = "Binance"
 
     pos_icon = "✅" if pos_ok else "⚠️"
 
@@ -459,7 +475,7 @@ def _tstr(e):
 
 def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
     base    = sym[:-4]
-    ex_icon = "🔶" if exchange == "Binance-F" else "🔷"
+    ex_icon = "🟠" if exchange == "MEXC" else ("🔶" if exchange == "Binance-F" else "🔷")
     if ms == 2:
         icon  = "✅"
         title = f"*{base}USDT*  WIN confirmed  +{ms}% reached"
@@ -537,8 +553,8 @@ def _check(sym, ticker, interval):
     move_min = 0.3 if funding_bullish else 1.5
     if move < move_min: return
 
-    # Reject dead coins (zero base volume)
-    if avg_vol < 200: return
+    # Reject dead coins (zero base volume) — MEXC has lower liquidity baseline
+    if avg_vol < (50 if exchange == "MEXC" else 200): return
 
     # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
     # PIPPIN pattern: ratio 63.8x but spike only 1.8x (institution buying quietly)
@@ -776,7 +792,7 @@ def main():
         "🎯 *MAFIO Liquidity Scanner v3.1*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "✅ Bot started\n"
-        "📡 Exchange: *Binance* 🔷 (Spot + Futures)\n"
+        "📡 Exchange: *MEXC* 🟠 + *Binance* 🔷 (Spot + Futures)\n"
         f"⚡ Fast scan (5m): every {FAST_SCAN_S}s\n"
         f"📊 Slow scan (1h): every {SLOW_SCAN_S//60}min\n"
         "📊 Tiers: Micro / Small / Mid / Large cap\n"
@@ -792,13 +808,14 @@ def main():
                 time.sleep(1); continue
             last_fast = now
 
+            mexc = fetch_mexc()
             spot = fetch_binance_spot()
             fut  = fetch_binance_futures()
-            # Futures data takes priority (enables funding rate for those coins)
-            all_t = {**spot, **fut}
+            # Priority: MEXC → Binance Spot → Binance Futures (Futures override Spot)
+            all_t = {**mexc, **spot, **fut}
 
-            log.info("Tickers: Spot=%d Futures=%d Total=%d Tracking=%d",
-                     len(spot), len(fut), len(all_t), len(tracking))
+            log.info("Tickers: MEXC=%d Spot=%d Futures=%d Total=%d Tracking=%d",
+                     len(mexc), len(spot), len(fut), len(all_t), len(tracking))
 
             # ── Market Bias ───────────────────────────
             global market_bias, market_cvd, last_bias_log
