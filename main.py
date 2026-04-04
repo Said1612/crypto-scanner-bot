@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
-Binance (Spot + Futures)
+MEXC only — works on Railway without IP restrictions
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
@@ -51,10 +51,7 @@ TRACK_HOURS = 24
 STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT"}
 SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE"}
 
-BINANCE_SPOT    = "https://api.binance.com/api/v3"
-BINANCE_DATA    = "https://data-api.binance.vision/api/v3"
-BINANCE_FUTURES = "https://fapi.binance.com/fapi/v1"
-MEXC_BASE       = "https://api.mexc.com/api/v3"
+MEXC_BASE = "https://api.mexc.com/api/v3"
 
 # ══════════════════════════════════════════════════════
 #  STATE
@@ -71,8 +68,6 @@ market_bias   = 0    # -100 to +100, updated each scan
 market_cvd    = 0.0  # cumulative volume delta ($)
 _multi_confirm       : Dict[str, dict] = {}   # {sym: {"count": N, "scanners": [], "last_time": ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 min window for multi-scanner confirmation
-_funding_cache       : Dict[str, dict] = {}   # {sym: {"rate": float, "label": str, "ts": float}}
-FUNDING_TTL          = 300   # refresh funding rate every 5 min
 
 # ══════════════════════════════════════════════════════
 #  LOGGING
@@ -176,27 +171,6 @@ def _parse(data, exchange, base_url):
             continue
     return out
 
-def fetch_binance_spot():
-    """Spot tickers via CDN (always works) or main API (works on VPS)"""
-    for url, label in [(BINANCE_SPOT, "Spot"), (BINANCE_DATA, "CDN")]:
-        data = _get(f"{url}/ticker/24hr")
-        if isinstance(data, list) and len(data) > 100:
-            out = _parse(data, "Binance", url)
-            log.info("Binance %s: %d", label, len(out))
-            return out
-    log.warning("Binance Spot failed")
-    return {}
-
-def fetch_binance_futures():
-    """Futures tickers — works on VPS, enables funding rate + OB futures"""
-    data = _get(f"{BINANCE_FUTURES}/ticker/24hr")
-    if isinstance(data, list) and len(data) > 50:
-        out = _parse(data, "Binance-F", BINANCE_FUTURES)
-        log.info("Binance Futures: %d", len(out))
-        return out
-    log.warning("Binance Futures failed (blocked on Railway, works on VPS)")
-    return {}
-
 def fetch_mexc():
     """MEXC tickers — works on Railway and VPS (no IP restrictions)"""
     data = _get(f"{MEXC_BASE}/ticker/24hr")
@@ -250,40 +224,6 @@ def fetch_ob_imbalance(sym, base_url, levels=20):
     except Exception:
         return 0.5
 
-def fetch_funding_rate(sym):
-    """
-    Query Binance Futures funding rate for the symbol.
-    Returns (rate_pct, label):
-      rate_pct  — float % or None if coin is spot-only
-      label     — human readable: Bullish/Longs, Bearish/Shorts, Neutral/Covering, Spot
-    Positive funding = longs pay shorts = market is bullish (like Wolf Flow 'Bullish/Longs')
-    Negative funding = shorts pay longs = bearish OR short squeeze setup ('Covering')
-    """
-    now   = time.time()
-    cache = _funding_cache.get(sym)
-    if cache and (now - cache["ts"]) < FUNDING_TTL:
-        return cache["rate"], cache["label"]
-
-    data = _get(f"{BINANCE_FUTURES}/premiumIndex", {"symbol": sym}, timeout=5)
-    if not data or isinstance(data, list) or data.get("code"):
-        entry = {"rate": None, "label": "Spot", "ts": now}
-        _funding_cache[sym] = entry
-        return None, "Spot"
-    try:
-        rate = float(data.get("lastFundingRate", 0)) * 100  # convert to %
-        if rate > 0.02:
-            label = "🟢 Bullish / Longs"
-        elif rate < -0.02:
-            label = "🔴 Bearish / Shorts"
-        else:
-            label = "🟡 Neutral / Covering"
-        entry = {"rate": rate, "label": label, "ts": now}
-        _funding_cache[sym] = entry
-        return rate, label
-    except Exception:
-        entry = {"rate": None, "label": "Spot", "ts": now}
-        _funding_cache[sym] = entry
-        return None, "Spot"
 
 # ══════════════════════════════════════════════════════
 #  ANALYSIS
@@ -382,7 +322,7 @@ def _ts():
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
                  high24=0.0, low24=0.0, badge="🔔1",
-                 funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50):
+                 ob_label="⚪ Balanced", ob_pct=50):
     global signal_count
     signal_count += 1
 
@@ -412,14 +352,6 @@ def build_signal(sym, price, change, buy_v, sell_v,
         interest = "⚪ Neutral"
         int_icon = "⚪"
 
-    # Exchange footer
-    if exchange == "Binance-F":
-        ex_note = "Binance Futures"
-    elif exchange == "MEXC":
-        ex_note = "MEXC"
-    else:
-        ex_note = "Binance"
-
     pos_icon = "✅" if pos_ok else "⚠️"
 
     return (
@@ -439,7 +371,6 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"  📤 Out: `{_fv(sell_v)}`\n"
         f"  ▲ Net: `+{_fv(net)}` ✅\n"
         f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
-        f"📌 Funding: {funding_label}\n"
         f"\n"
         f"🕐 {_ts()} UTC\n"
         f"{'━' * 20}"
@@ -475,7 +406,7 @@ def _tstr(e):
 
 def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
     base    = sym[:-4]
-    ex_icon = "🟠" if exchange == "MEXC" else ("🔶" if exchange == "Binance-F" else "🔷")
+    ex_icon = "🟠"
     if ms == 2:
         icon  = "✅"
         title = f"*{base}USDT*  WIN confirmed  +{ms}% reached"
@@ -523,25 +454,8 @@ def _check(sym, ticker, interval):
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
-    # ── Fetch funding rate FIRST — before bias gate (Wolf Flow primary signal) ─
-    # Funding Bullish = smart money adding longs → bypass market direction entirely
-    funding_rate, funding_label = (None, "Spot")
-    if exchange in ("Binance", "Binance-F"):
-        funding_rate, funding_label = fetch_funding_rate(sym)
-
-    funding_bullish = funding_rate is not None and funding_rate > 0.01
-    if funding_bullish:
-        # Funding Bullish = smart money adding longs → almost everything qualifies
-        # ONG pattern: +0.72% move, ratio 1.31x → still a valid Wolf Flow signal
-        spike_min = max(2.0, spike_min * 0.50)
-        ratio_min = 1.15   # flat minimum when funding bullish (ONG=1.31x passes)
-        net_min   = max(net_min * 0.3, 100)
-        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s bypass_bias=True",
-                  sym, spike_min, ratio_min, _fv(net_min))
-
-    # Market bias gate — skip if funding bullish (Wolf Flow ignores market direction
-    # when smart money is buying longs regardless of macro trend)
-    if not funding_bullish and not should_signal(tier["name"], market_bias):
+    # Market bias gate
+    if not should_signal(tier["name"], market_bias):
         log.debug("Skipped %s — bias=%d tier=%s", sym, market_bias, tier["name"])
         return
 
@@ -550,8 +464,7 @@ def _check(sym, ticker, interval):
     if len(candles) < 10: return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    move_min = 0.3 if funding_bullish else 1.5
-    if move < move_min: return
+    if move < 1.5: return
 
     # Reject dead coins (zero base volume) — MEXC has lower liquidity baseline
     if avg_vol < (50 if exchange == "MEXC" else 200): return
@@ -594,15 +507,10 @@ def _check(sym, ticker, interval):
     if ratio < ratio_min: return
     if net   < net_min:   return
 
-    # ── Step 3: Order book imbalance (Wolf Flow: order book spot + future) ──
+    # ── Step 3: Order book imbalance ──────────────────────────────────────
     ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
-    ob_fut  = 0.5
-    if exchange in ("Binance", "Binance-F"):
-        ob_fut = fetch_ob_imbalance(sym, BINANCE_FUTURES, levels=20)
-    # Weighted: spot 70% + futures 30%
-    ob_score = ob_spot * 0.7 + ob_fut * 0.3
-    if ob_score < 0.40:   # sellers strongly dominate order books
-        log.debug("OB bearish skip %s ob_spot=%.2f ob_fut=%.2f", sym, ob_spot, ob_fut)
+    if ob_spot < 0.40:   # sellers strongly dominate order books
+        log.debug("OB bearish skip %s ob_spot=%.2f", sym, ob_spot)
         return
     if ob_spot > 0.58:
         ob_label = "🟢 Buyers"
@@ -610,11 +518,6 @@ def _check(sym, ticker, interval):
         ob_label = "🔴 Sellers"
     else:
         ob_label = "⚪ Balanced"
-
-    # Funding: Bearish block (strongly negative = bears in control)
-    if funding_rate is not None and funding_rate < -0.05:
-        log.debug("Bearish funding skip %s rate=%.4f%%", sym, funding_rate)
-        return
 
     ema_bull = True
 
@@ -636,7 +539,7 @@ def _check(sym, ticker, interval):
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
-                       badge=badge, funding_label=funding_label,
+                       badge=badge,
                        ob_label=ob_label, ob_pct=int(ob_spot * 100))
     send(msg)
     log.info("SIGNAL %-14s tier=%-5s spike=%.1fx net=%s ratio=%.1fx [%s %s]",
@@ -718,7 +621,7 @@ def should_signal(tier_name: str, bias: int) -> bool:
     if tier_name == "Mid":
         return bias > -60   # was -30, relaxed — Mid can pump in bear market
     # Large cap
-    return bias > -30       # was 0, relaxed — funding bullish bypass handles the rest
+    return bias > -30
 
 
 def _register_confirm(sym, scanner_name):
@@ -772,7 +675,7 @@ def slow_scan(all_t):
         (sym, t) for sym, t in all_t.items()
         if t["vol"] >= 30_000 and t["change"] <= MAX_PUMP_24H
     ]
-    candidates.sort(key=lambda x: (-int(x[1]["exchange"] == "Binance"), -x[1]["vol"]))
+    candidates.sort(key=lambda x: -x[1]["vol"])
     candidates = candidates[:300]
     log.info("slow_scan: %d/%d candidates (1h)", len(candidates), len(all_t))
     for sym, ticker in candidates:
@@ -792,7 +695,7 @@ def main():
         "🎯 *MAFIO Liquidity Scanner v3.1*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "✅ Bot started\n"
-        "📡 Exchange: *MEXC* 🟠 + *Binance* 🔷 (Spot + Futures)\n"
+        "📡 Exchange: *MEXC* 🟠\n"
         f"⚡ Fast scan (5m): every {FAST_SCAN_S}s\n"
         f"📊 Slow scan (1h): every {SLOW_SCAN_S//60}min\n"
         "📊 Tiers: Micro / Small / Mid / Large cap\n"
@@ -808,14 +711,9 @@ def main():
                 time.sleep(1); continue
             last_fast = now
 
-            mexc = fetch_mexc()
-            spot = fetch_binance_spot()
-            fut  = fetch_binance_futures()
-            # Priority: MEXC → Binance Spot → Binance Futures (Futures override Spot)
-            all_t = {**mexc, **spot, **fut}
+            all_t = fetch_mexc()
 
-            log.info("Tickers: MEXC=%d Spot=%d Futures=%d Total=%d Tracking=%d",
-                     len(mexc), len(spot), len(fut), len(all_t), len(tracking))
+            log.info("Tickers: MEXC=%d Tracking=%d", len(all_t), len(tracking))
 
             # ── Market Bias ───────────────────────────
             global market_bias, market_cvd, last_bias_log
