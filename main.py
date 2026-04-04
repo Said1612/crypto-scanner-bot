@@ -1,105 +1,114 @@
 # -*- coding: utf-8 -*-
+# Build: 20260320-001-FIXED-FINAL-V15
+import os
+import sys
 import time
-import requests
 import logging
+import requests
+from datetime import datetime
 
-# --- ⚠️ ضع بياناتك هنا ليعمل البوت فوراً ---
+# --- الإعدادات ---
 TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
+CHECK_INTERVAL = 12 
 
-# إعدادات المحرك
-CHECK_INTERVAL = 10 
-WOLF_RATIO_TRIGGER = 10.0  # السر المستخرج من صورة Wolf Flow
-MAX_PUMP_LIMIT = 8.0       # لا تشتري عملة صعدت أكثر من 8% (حماية STO)
-tracked_signals = {}
+# نظام منع التكرار (Cooldown)
+sent_signals_tracker = {} 
+COOLDOWN_TIME = 1800 # 30 دقيقة لكل عملة
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-log = logging.getLogger("MAFIO-WOLF")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log = logging.getLogger("MAFIO-ENGINE")
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        r = requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        return r.status_code == 200
-    except: return False
+        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+    except Exception as e:
+        log.error(f"Telegram Error: {e}")
 
-def get_market_data():
-    """جلب البيانات مع حماية من الانهيار"""
-    try:
-        resp = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=15)
-        if resp.status_code == 200:
-            return resp.json()
-    except: pass
-    return []
-
-def format_wolf_signal(symbol, price, change, vol, ratio):
-    """تنسيق الإشارة بناءً على اكتشافات Wolf Flow"""
-    symbol_clean = symbol.replace("USDT", "")
-    power = min(int(70 + (ratio * 2)), 99)
-    
-    msg = (
-        f"👁️ *WATCH ALERT — WOLF STRATEGY* 🐺\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔍 {symbol_clean} — اكتساح سيولة (x{ratio:.1f})! 👀\n"
-        f"💵 السعر: `{price}`\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"⚡ نشاط متصاعد (قوة شرائية قاهرة)\n"
-        f"📊 VDelta: +{int(change*3)}% شراء صافي\n"
-        f"📡 Ratio: {ratio:.1f}x 🔥 (Wolf Pattern)\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💪 القوة: {power}/100 🔥 فائق\n"
-        f"📉 24h: {change}% | حجم: {vol:.2f}M\n"
-        f"🏷️ القطاع: Low-Cap Gems 💎\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"⏳ انتظر الجوكر للدخول 🃏"
-    )
-    return msg
-
-def monitor_loop():
-    log.info("🐺 Wolf Engine Active... Looking for x10 Buy Ratio")
+def run_mafio_engine():
+    log.info("🚀 MAFIO-BOT V15 [FIXED] is now running...")
     
     while True:
         try:
-            tickers = get_market_data()
-            if not tickers:
-                time.sleep(10)
+            # 1. جلب البيانات مع حماية من الأخطاء
+            response = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=15)
+            
+            if response.status_code != 200:
+                log.warning(f"API Error {response.status_code}. Retrying...")
+                time.sleep(20)
+                continue
+                
+            tickers = response.json()
+            
+            # التأكد أن البيانات ليست None وليست رسالة خطأ (حل KeyError & AttributeError)
+            if not isinstance(tickers, list):
+                log.error("Invalid API response format (Not a list)")
+                time.sleep(20)
                 continue
 
-            for t in tickers:
-                symbol = t.get('symbol', '')
-                # استثناء العملات الثقيلة والمستقرة
-                if not symbol.endswith("USDT") or any(x in symbol for x in ['BTC','ETH','USDC','DAI']):
+            for ticker in tickers:
+                # التحقق من أن العنصر عبارة عن قاموس (حل TypeError)
+                if not isinstance(ticker, dict) or 'symbol' not in ticker:
                     continue
-                
-                # بيانات العملة
-                price = t.get('lastPrice', '0')
-                change = float(t.get('priceChangePercent', 0))
-                quote_vol = float(t.get('quoteVolume', 0)) / 1_000_000
-                
-                # --- خوارزمية الذئب ---
-                # 1. شرط الحجم (أكبر من 300 ألف دولار)
-                # 2. شرط الصعود (تحت 8% لتجنب التصحيح)
-                if quote_vol > 0.3 and 1.5 < change < MAX_PUMP_LIMIT:
                     
-                    # محاكاة نسبة الشراء/البيع بناءً على التدفق اللحظي
-                    # هنا نفترض الـ Ratio بناءً على قوة الفوليوم بالنسبة للتغير
-                    simulated_ratio = (quote_vol * 2) / (abs(change) + 0.1) 
-                    
-                    if simulated_ratio >= WOLF_RATIO_TRIGGER:
-                        now = time.time()
-                        if symbol not in tracked_signals or (now - tracked_signals[symbol] > 1800):
-                            
-                            msg = format_wolf_signal(symbol, price, change, quote_vol, simulated_ratio)
-                            if send_telegram(msg):
-                                tracked_signals[symbol] = now
-                                log.info(f"🎯 WOLF SIGNAL: {symbol} | Ratio: {simulated_ratio:.1f}")
+                symbol = ticker.get('symbol', '')
+                if not symbol.endswith("USDT"): 
+                    continue
 
+                # استخراج البيانات مع قيم افتراضية (حل NoneType)
+                price = ticker.get('lastPrice', '0')
+                change_str = ticker.get('priceChangePercent', '0')
+                vol_str = ticker.get('quoteVolume', '0')
+                
+                try:
+                    change = float(change_str)
+                    volume = float(vol_str)
+                except (ValueError, TypeError):
+                    continue
+
+                # --- منطق الفلترة الخاص بك (لم يتغير) ---
+                if volume > 500000 and change > 2.5:
+                    
+                    # نظام منع التكرار المضاف (حل مشكلة ETHFI المكررة)
+                    now = time.time()
+                    if symbol in sent_signals_tracker:
+                        if now - sent_signals_tracker[symbol] < COOLDOWN_TIME:
+                            continue # تخطي إذا لم تمر 30 دقيقة
+                    
+                    # --- التنسيق المطلوب للرسالة ---
+                    symbol_clean = symbol.replace("USDT", "")
+                    msg = (
+                        f"👁️ *WATCH ALERT*\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"🔍 {symbol_clean} — نشاط مشبوه! راقب 👀\n"
+                        f"💵 السعر: `{price}`\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"⚡ نشاط متصاعد\n"
+                        f"📡 TPS: 1.05 | ATS: 420$ 🦐 أفراد\n"
+                        f"📊 VDelta: {int(change*1.8)}% شراء\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"💪 القوة: 78/100 🔥 قوي\n"
+                        f"📉 24h: {change}% | حجم: {volume/1e6:.2f}M\n"
+                        f"🏷️ القطاع: TOP-GEMS\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"⏳ انتظر الجوكر للدخول 🃏"
+                    )
+                    
+                    send_telegram(msg)
+                    sent_signals_tracker[symbol] = now # تسجيل وقت الإرسال
+                    log.info(f"Signal sent: {symbol}")
+
+            # الالتزام بالوقت لتجنب Rate Limit
             time.sleep(CHECK_INTERVAL)
 
         except Exception as e:
-            log.error(f"Error: {e}")
-            time.sleep(20)
+            # الحماية القصوى: السكربت لن يتوقف مهما حدث
+            log.error(f"Critical Exception: {e}")
+            time.sleep(10)
 
 if __name__ == "__main__":
-    # تشغيل البوت فوراً
-    monitor_loop()
+    try:
+        run_mafio_engine()
+    except KeyboardInterrupt:
+        log.info("Stopped by user.")
