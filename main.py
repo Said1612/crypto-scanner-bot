@@ -519,12 +519,12 @@ def _check(sym, ticker, interval):
 
     funding_bullish = funding_rate is not None and funding_rate > 0.01
     if funding_bullish:
-        # Smart money is buying despite market conditions → relax thresholds
-        # This captures NIGHT (ratio 1.68x) and SAHARA ($1.1K net) patterns
-        spike_min = max(2.0,          spike_min * 0.50)
-        ratio_min = max(1.3,          ratio_min - 0.40)
+        # Funding Bullish = smart money adding longs → almost everything qualifies
+        # ONG pattern: +0.72% move, ratio 1.31x → still a valid Wolf Flow signal
+        spike_min = max(2.0, spike_min * 0.50)
+        ratio_min = 1.15   # flat minimum when funding bullish (ONG=1.31x passes)
         net_min   = max(net_min * 0.3, 100)
-        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.1f net≥%s",
+        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s",
                   sym, spike_min, ratio_min, _fv(net_min))
 
     # Minimum 24h volume — must be an established, findable coin
@@ -538,7 +538,8 @@ def _check(sym, ticker, interval):
     if len(candles) < 10: return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    if move < 1.5: return
+    move_min = 0.3 if funding_bullish else 1.5
+    if move < move_min: return
 
     # Reject dead coins (zero base volume)
     if avg_vol < (50 if exchange == "MEXC" else 200): return
