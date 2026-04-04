@@ -34,10 +34,10 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    {"name": "Micro",  "vol_max": 2_000_000,  "spike": 6.0, "ratio": 2.0, "net": 150},
-    {"name": "Small",  "vol_max": 15_000_000, "spike": 5.0, "ratio": 1.8, "net": 800},
-    {"name": "Mid",    "vol_max": 80_000_000, "spike": 5.0, "ratio": 1.6, "net": 15_000},
-    {"name": "Large",  "vol_max": 9e99,        "spike": 5.0, "ratio": 1.5, "net": 80_000},
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 500_000,   "spike": 6.0, "ratio": 2.0, "net": 150},
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 2_000_000,  "spike": 5.0, "ratio": 1.8, "net": 800},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 15_000_000, "spike": 5.0, "ratio": 1.6, "net": 15_000},
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 80_000_000, "spike": 5.0, "ratio": 1.5, "net": 80_000},
 ]
 
 FAST_TICKER_MOVE = 1.5   # 30s price delta to trigger 5m klines fetch
@@ -426,8 +426,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"📌 Funding: {funding_label}\n"
         f"\n"
         f"🕐 {_ts()} UTC\n"
-        f"{'━' * 20}\n"
-        f"⚠️ اقتناص لحظي - تم رصد انفجار سيولة على {ex_note}! 🚀"
+        f"{'━' * 20}"
     )
 
 # ══════════════════════════════════════════════════════
@@ -499,16 +498,17 @@ def _check(sym, ticker, interval):
     # Get tier thresholds based on 24h volume
     tier = get_tier(vol_24h)
 
-    # Market bias gate — like Wolf Flow
-    if not should_signal(tier["name"], market_bias):
-        log.debug("Skipped %s — bias=%d tier=%s", sym, market_bias, tier["name"])
+    # Minimum volume per tier (Micro=$500K, Small=$2M, Mid=$15M, Large=$80M)
+    if vol_24h < tier["vol_min"]:
+        log.debug("Low vol skip %s vol=%s tier=%s", sym, _fv(vol_24h), tier["name"])
         return
+
     spike_min = tier["spike"]
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
-    # ── Fetch funding rate FIRST (Wolf Flow primary signal) ───────────
-    # Bullish funding = smart money adding longs = relax all other thresholds
+    # ── Fetch funding rate FIRST — before bias gate (Wolf Flow primary signal) ─
+    # Funding Bullish = smart money adding longs → bypass market direction entirely
     funding_rate, funding_label = (None, "Spot")
     if exchange in ("Binance", "Binance-F"):
         funding_rate, funding_label = fetch_funding_rate(sym)
@@ -520,13 +520,13 @@ def _check(sym, ticker, interval):
         spike_min = max(2.0, spike_min * 0.50)
         ratio_min = 1.15   # flat minimum when funding bullish (ONG=1.31x passes)
         net_min   = max(net_min * 0.3, 100)
-        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s",
+        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s bypass_bias=True",
                   sym, spike_min, ratio_min, _fv(net_min))
 
-    # Minimum 24h volume — Binance only now (Spot + Futures)
-    min_vol = 3_000_000   # $3M minimum — ensures real liquidity
-    if vol_24h < min_vol:
-        log.debug("Low 24h vol skip %s vol=%s [%s]", sym, _fv(vol_24h), exchange)
+    # Market bias gate — skip if funding bullish (Wolf Flow ignores market direction
+    # when smart money is buying longs regardless of macro trend)
+    if not funding_bullish and not should_signal(tier["name"], market_bias):
+        log.debug("Skipped %s — bias=%d tier=%s", sym, market_bias, tier["name"])
         return
 
     # ── Step 1: Klines — volume spike detection only ─────────────────
@@ -698,11 +698,11 @@ def should_signal(tier_name: str, bias: int) -> bool:
     Mid/Large caps need positive bias.
     """
     if tier_name in ("Micro", "Small"):
-        return bias > -70   # block only in crash conditions
+        return bias > -70   # block only in extreme crash
     if tier_name == "Mid":
-        return bias > -30   # need neutral or better
+        return bias > -60   # was -30, relaxed — Mid can pump in bear market
     # Large cap
-    return bias > 0         # need positive bias
+    return bias > -30       # was 0, relaxed — funding bullish bypass handles the rest
 
 
 def _register_confirm(sym, scanner_name):
