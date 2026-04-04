@@ -177,20 +177,14 @@ def _parse(data, exchange, base_url):
     return out
 
 def fetch_binance():
-    endpoints = [
-        (BINANCE_FUTURES, "Futures → fapi.binance.com"),
-        (BINANCE_DATA,    "CDN    → data-api.binance.vision"),
-        (BINANCE_SPOT,    "Spot   → data-api.binance.vision"),
-    ]
-    for url, label in endpoints:
-        log.info("Binance trying: %s", label)
-        data = _get(f"{url}/ticker/24hr")
-        if isinstance(data, list) and len(data) > 100:
-            out = _parse(data, "Binance", url)
-            log.info("Binance OK ✅ %s → %d tickers", label, len(out))
-            return out
-        log.warning("Binance FAIL ❌ %s", label)
-    log.warning("All Binance endpoints failed")
+    # Futures (fapi.binance.com) is blocked on Railway cloud IPs — skip it
+    # Use CDN directly (confirmed working: data-api.binance.vision)
+    data = _get(f"{BINANCE_DATA}/ticker/24hr")
+    if isinstance(data, list) and len(data) > 100:
+        out = _parse(data, "Binance", BINANCE_DATA)
+        log.info("Binance CDN: %d", len(out))
+        return out
+    log.warning("Binance CDN failed")
     return {}
 
 def fetch_mexc():
@@ -211,11 +205,9 @@ def fetch_agg_trades(sym, base_url, minutes=60):
     Real buy/sell volume from actual trades (Wolf Flow: real-time, no lag).
     m=True  → maker is buyer  → taker is SELLER  → sell volume
     m=False → maker is seller → taker is BUYER    → buy volume
+    Uses limit=500 only (no startTime — MEXC doesn't support it).
     """
-    start_ms = int((time.time() - minutes * 60) * 1000)
-    data = _get(f"{base_url}/aggTrades",
-                {"symbol": sym, "startTime": start_ms, "limit": 1000},
-                timeout=8)
+    data = _get(f"{base_url}/aggTrades", {"symbol": sym, "limit": 500}, timeout=8)
     if not isinstance(data, list) or not data:
         return 0.0, 0.0
     buy = sell = 0.0
@@ -592,7 +584,7 @@ def _check(sym, ticker, interval):
         ob_fut = fetch_ob_imbalance(sym, BINANCE_FUTURES, levels=20)
     # Weighted: spot 70% + futures 30%
     ob_score = ob_spot * 0.7 + ob_fut * 0.3
-    if ob_score < 0.46:   # sellers dominate order books
+    if ob_score < 0.40:   # sellers strongly dominate order books
         log.debug("OB bearish skip %s ob_spot=%.2f ob_fut=%.2f", sym, ob_spot, ob_fut)
         return
     if ob_spot > 0.58:
