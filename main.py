@@ -1,3 +1,6 @@
+
+
+
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -177,9 +180,9 @@ def _parse(data, exchange, base_url):
 
 def fetch_binance():
     for url, label in [
-        (BINANCE_SPOT,    "Spot"),
-        (BINANCE_DATA,    "CDN"),
         (BINANCE_FUTURES, "Futures"),
+        (BINANCE_DATA,    "CDN"),
+        (BINANCE_SPOT,    "Spot"),
     ]:
         data = _get(f"{url}/ticker/24hr")
         if isinstance(data, list) and len(data) > 100:
