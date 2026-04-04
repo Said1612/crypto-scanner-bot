@@ -4,7 +4,7 @@ import time
 import logging
 import requests
 
-# --- ENV (ضعهم في Railway Variables) ---
+# --- ENV (Railway) ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -56,21 +56,19 @@ def get_market_data():
     return []
 
 
-# --- محاكاة تحليل ذكي ---
+# --- تحليل بسيط ---
 def calculate_vdelta_logic():
     return {
         "power": 70 + int(time.time()) % 30
     }
 
 
-# --- تنسيق الإشارة الاحترافية ---
+# --- تنسيق الإشارة ---
 def format_signal(symbol, price, change, vol):
     data = calculate_vdelta_logic()
 
-    # تنظيف الاسم
     symbol_clean = symbol.replace("USDT", "")
 
-    # --- حسابات ذكية ---
     position = min(100, max(10, int(change * 5)))
     volume_spike = round(vol / 0.1, 1)
     ratio = round(1.5 + (change / 5), 1)
@@ -82,13 +80,14 @@ def format_signal(symbol, price, change, vol):
     interest = "🟢 High" if data['power'] > 80 else "⚪ Neutral"
 
     now = time.strftime("%d %b %Y %H:%M UTC", time.gmtime())
-
     signal_number = int(time.time()) % 10
 
     msg = (
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💀 *MAFIO SNIPER 15.2* 📡🆕\n"
         f"#A 💀 · Signal #{signal_number} 🔔\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 *{symbol_clean}/USDT*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 Price: ${price:.6f}\n"
         f"📈 1h Move: +{change:.2f}%\n"
@@ -125,20 +124,37 @@ def monitor_loop():
         for t in tickers:
             symbol = t.get('symbol', '')
 
+            # فلترة الأزواج
             if not symbol.endswith("USDT"):
                 continue
 
+            # ❌ حذف العملات الرافعة
+            if any(x in symbol for x in ["3L", "3S", "5L", "5S"]):
+                continue
+
             try:
-                price = round(float(t.get('lastPrice', 0)), 6)
+                # --- السعر الحقيقي ---
+                bid = float(t.get('bidPrice', 0))
+                ask = float(t.get('askPrice', 0))
+
+                if bid > 0 and ask > 0:
+                    price = round((bid + ask) / 2, 6)
+                else:
+                    price = round(float(t.get('lastPrice', 0)), 6)
+
                 change = round(float(t.get('priceChangePercent', 0)), 2)
                 vol = round(float(t.get('quoteVolume', 0)) / 1_000_000, 2)
+
+                # ❌ حذف القيم الغير منطقية
+                if price <= 0 or price < 0.00001:
+                    continue
 
                 # --- فلترة ذكية ---
                 if vol > 0.3 and change > 1.5:
 
                     last_time = tracked_signals.get(symbol, 0)
 
-                    # منع التكرار (30 دقيقة)
+                    # Anti-spam
                     if time.time() - last_time > 1800:
                         msg = format_signal(symbol, price, change, vol)
                         send_telegram(msg)
