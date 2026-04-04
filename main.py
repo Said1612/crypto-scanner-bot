@@ -51,7 +51,8 @@ TRACK_HOURS = 24
 STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT"}
 SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE"}
 
-MEXC_BASE = "https://api.mexc.com/api/v3"
+MEXC_BASE    = "https://api.mexc.com/api/v3"
+MEXC_FUTURES = "https://contract.mexc.com/api/v1"
 
 # ══════════════════════════════════════════════════════
 #  STATE
@@ -68,6 +69,8 @@ market_bias   = 0    # -100 to +100, updated each scan
 market_cvd    = 0.0  # cumulative volume delta ($)
 _multi_confirm       : Dict[str, dict] = {}   # {sym: {"count": N, "scanners": [], "last_time": ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 min window for multi-scanner confirmation
+_funding_cache       : Dict[str, dict] = {}   # {sym: {"rate": float, "label": str, "ts": float}}
+FUNDING_TTL          = 300   # refresh funding rate every 5 min
 
 # ══════════════════════════════════════════════════════
 #  LOGGING
@@ -180,6 +183,61 @@ def fetch_mexc():
         return out
     log.warning("MEXC failed")
     return {}
+
+def _fut_sym(sym):
+    """BTCUSDT → BTC_USDT  (MEXC Futures symbol format)"""
+    return sym[:-4] + "_USDT"
+
+def fetch_mexc_funding_rate(sym):
+    """
+    MEXC Futures funding rate — works on Railway (no IP restrictions).
+    Positive = longs pay shorts = bullish (smart money buying longs).
+    Negative = shorts pay longs = bearish or short squeeze setup.
+    """
+    now   = time.time()
+    cache = _funding_cache.get(sym)
+    if cache and (now - cache["ts"]) < FUNDING_TTL:
+        return cache["rate"], cache["label"]
+    data = _get(f"{MEXC_FUTURES}/contract/funding_rate/{_fut_sym(sym)}", timeout=5)
+    if not data or not data.get("success") or not data.get("data"):
+        _funding_cache[sym] = {"rate": None, "label": "Spot", "ts": now}
+        return None, "Spot"
+    try:
+        rate = float(data["data"]["fundingRate"]) * 100   # → %
+        if rate > 0.02:
+            label = "🟢 Bullish / Longs"
+        elif rate < -0.02:
+            label = "🔴 Bearish / Shorts"
+        else:
+            label = "🟡 Neutral / Covering"
+        _funding_cache[sym] = {"rate": rate, "label": label, "ts": now}
+        return rate, label
+    except Exception:
+        _funding_cache[sym] = {"rate": None, "label": "Spot", "ts": now}
+        return None, "Spot"
+
+def fetch_mexc_fut_ob(sym, levels=20):
+    """MEXC Futures order book imbalance (bid dominance 0.0–1.0)."""
+    data = _get(f"{MEXC_FUTURES}/contract/depth/{_fut_sym(sym)}",
+                {"limit": levels}, timeout=5)
+    if not data or not data.get("success") or not data.get("data"):
+        return 0.5
+    try:
+        depth = data["data"]
+        def _side_vol(entries):
+            total = 0.0
+            for e in entries[:levels]:
+                if isinstance(e, (list, tuple)):
+                    total += float(e[0]) * float(e[1])
+                elif isinstance(e, dict):
+                    total += float(e.get("price", 0)) * float(e.get("vol", 0))
+            return total
+        bid_vol = _side_vol(depth.get("bids", []))
+        ask_vol = _side_vol(depth.get("asks", []))
+        total   = bid_vol + ask_vol
+        return bid_vol / total if total > 0 else 0.5
+    except Exception:
+        return 0.5
 
 def fetch_klines(sym, base_url, interval="5m", limit=25):
     data = _get(f"{base_url}/klines",
@@ -322,7 +380,7 @@ def _ts():
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
                  high24=0.0, low24=0.0, badge="🔔1",
-                 ob_label="⚪ Balanced", ob_pct=50):
+                 funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50):
     global signal_count
     signal_count += 1
 
@@ -371,6 +429,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"  📤 Out: `{_fv(sell_v)}`\n"
         f"  ▲ Net: `+{_fv(net)}` ✅\n"
         f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
+        f"📌 Funding: {funding_label}\n"
         f"\n"
         f"🕐 {_ts()} UTC\n"
         f"{'━' * 20}"
@@ -454,8 +513,18 @@ def _check(sym, ticker, interval):
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
-    # Market bias gate
-    if not should_signal(tier["name"], market_bias):
+    # ── Funding Rate (Wolf Flow primary signal) — MEXC Futures ───────────
+    funding_rate, funding_label = fetch_mexc_funding_rate(sym)
+    funding_bullish = funding_rate is not None and funding_rate > 0.01
+    if funding_bullish:
+        spike_min = max(2.0, spike_min * 0.50)
+        ratio_min = 1.15
+        net_min   = max(net_min * 0.3, 100)
+        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s bypass_bias=True",
+                  sym, spike_min, ratio_min, _fv(net_min))
+
+    # Market bias gate — bypass if funding bullish
+    if not funding_bullish and not should_signal(tier["name"], market_bias):
         log.debug("Skipped %s — bias=%d tier=%s", sym, market_bias, tier["name"])
         return
 
@@ -464,7 +533,8 @@ def _check(sym, ticker, interval):
     if len(candles) < 10: return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    if move < 1.5: return
+    move_min = 0.3 if funding_bullish else 1.5
+    if move < move_min: return
 
     # Reject dead coins (zero base volume) — MEXC has lower liquidity baseline
     if avg_vol < (50 if exchange == "MEXC" else 200): return
@@ -507,10 +577,12 @@ def _check(sym, ticker, interval):
     if ratio < ratio_min: return
     if net   < net_min:   return
 
-    # ── Step 3: Order book imbalance ──────────────────────────────────────
-    ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
-    if ob_spot < 0.40:   # sellers strongly dominate order books
-        log.debug("OB bearish skip %s ob_spot=%.2f", sym, ob_spot)
+    # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
+    ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
+    ob_fut   = fetch_mexc_fut_ob(sym, levels=20)
+    ob_score = ob_spot * 0.7 + ob_fut * 0.3
+    if ob_score < 0.40:
+        log.debug("OB bearish skip %s ob_spot=%.2f ob_fut=%.2f", sym, ob_spot, ob_fut)
         return
     if ob_spot > 0.58:
         ob_label = "🟢 Buyers"
@@ -518,6 +590,11 @@ def _check(sym, ticker, interval):
         ob_label = "🔴 Sellers"
     else:
         ob_label = "⚪ Balanced"
+
+    # Funding bearish block
+    if funding_rate is not None and funding_rate < -0.05:
+        log.debug("Bearish funding skip %s rate=%.4f%%", sym, funding_rate)
+        return
 
     ema_bull = True
 
@@ -539,7 +616,7 @@ def _check(sym, ticker, interval):
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
-                       badge=badge,
+                       badge=badge, funding_label=funding_label,
                        ob_label=ob_label, ob_pct=int(ob_spot * 100))
     send(msg)
     log.info("SIGNAL %-14s tier=%-5s spike=%.1fx net=%s ratio=%.1fx [%s %s]",
