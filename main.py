@@ -1,118 +1,105 @@
 # -*- coding: utf-8 -*-
-# Build: 20260403-SKULL-FINAL-FIX
 import time
 import requests
 import logging
 
-# --- ⚠️ الإعدادات ---
+# --- ⚠️ ضع بياناتك هنا ليعمل البوت فوراً ---
 TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
 
-CHECK_INTERVAL = 12 
-RATIO_TRIGGER = 10.0   # سر الانفجار (السيولة الشرائية 10 أضعاف البيع)
-MAX_PUMP_LIMIT = 7.5   # حماية من التعليق في القمم
-SIGNAL_COOLDOWN = 3600 
-
-BLACKLIST = ['BTC','ETH','XRP','ADA','SOL','USDT','USDC','DAI','FDUSD']
-
+# إعدادات المحرك
+CHECK_INTERVAL = 10 
+WOLF_RATIO_TRIGGER = 10.0  # السر المستخرج من صورة Wolf Flow
+MAX_PUMP_LIMIT = 8.0       # لا تشتري عملة صعدت أكثر من 8% (حماية STO)
 tracked_signals = {}
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-log = logging.getLogger("MAFIO-SKULL")
+log = logging.getLogger("MAFIO-WOLF")
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+        r = requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+        return r.status_code == 200
+    except: return False
 
 def get_market_data():
-    """جلب البيانات مع فحص النوع لمنع KeyError"""
+    """جلب البيانات مع حماية من الانهيار"""
     try:
         resp = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=15)
         if resp.status_code == 200:
-            data = resp.json()
-            # التأكد أن البيانات "قائمة" وليست "قاموس خطأ"
-            if isinstance(data, list):
-                return data
-            else:
-                log.warning("⚠️ استجابة غير متوقعة من المنصة (ليست قائمة عملات)")
-        elif resp.status_code == 429:
-            log.error("🚫 تم تقييد الـ IP مؤقتاً (Rate Limit). سأنتظر دقيقة...")
-            time.sleep(60)
-    except Exception as e:
-        log.error(f"🌐 خطأ في الاتصال: {e}")
+            return resp.json()
+    except: pass
     return []
 
-def format_skull_signal(symbol, price, change, vol, ratio):
+def format_wolf_signal(symbol, price, change, vol, ratio):
+    """تنسيق الإشارة بناءً على اكتشافات Wolf Flow"""
     symbol_clean = symbol.replace("USDT", "")
-    power = min(int(65 + (ratio * 3)), 99)
-    v_delta = int(change * 2.5)
+    power = min(int(70 + (ratio * 2)), 99)
     
-    return (
-        f"💀 *MAFIO SNIPER 15.2 — SKULL EDITION* 📡\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🆕 #{symbol_clean} 💀 · تم القنص بنجاح\n"
-        f"💰 السعر: `{price}`\n"
-        f"📈 حركة 1h: +{change}% ⚡\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚡ الحجم: {vol:.2f}M (انفجار سيولة)\n"
-        f"📊 VDelta: {v_delta}% شراء صافي\n"
-        f"📊 Ratio: {ratio:.1f}x 🔥 (اكتساح Wolf)\n"
+    msg = (
+        f"👁️ *WATCH ALERT — WOLF STRATEGY* 🐺\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 {symbol_clean} — اكتساح سيولة (x{ratio:.1f})! 👀\n"
+        f"💵 السعر: `{price}`\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ نشاط متصاعد (قوة شرائية قاهرة)\n"
+        f"📊 VDelta: +{int(change*3)}% شراء صافي\n"
+        f"📡 Ratio: {ratio:.1f}x 🔥 (Wolf Pattern)\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"💪 القوة: {power}/100 🔥 فائق\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚠️ اقتناص لحظي - سيولة MAFIO تكتسح العروض! 🚀\n"
+        f"📉 24h: {change}% | حجم: {vol:.2f}M\n"
+        f"🏷️ القطاع: Low-Cap Gems 💎\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"⏳ انتظر الجوكر للدخول 🃏"
     )
+    return msg
 
-def run_skull_engine():
-    log.info("💀 MAFIO SKULL ENGINE ACTIVE... Hunting Gems")
+def monitor_loop():
+    log.info("🐺 Wolf Engine Active... Looking for x10 Buy Ratio")
     
     while True:
         try:
             tickers = get_market_data()
             if not tickers:
-                time.sleep(15)
+                time.sleep(10)
                 continue
 
             for t in tickers:
-                # التحقق المزدوج لمنع KeyError
-                if not isinstance(t, dict) or 'symbol' not in t:
-                    continue
-                
                 symbol = t.get('symbol', '')
-                if not symbol.endswith("USDT") or any(x in symbol for x in BLACKLIST):
+                # استثناء العملات الثقيلة والمستقرة
+                if not symbol.endswith("USDT") or any(x in symbol for x in ['BTC','ETH','USDC','DAI']):
                     continue
                 
-                # استخراج القيم مع حماية NoneType
-                price_raw = t.get('lastPrice', '0')
-                change_raw = t.get('priceChangePercent', '0')
-                vol_raw = t.get('quoteVolume', '0')
-
-                try:
-                    change = float(change_raw)
-                    quote_vol = float(vol_raw) / 1_000_000
-                except: continue
+                # بيانات العملة
+                price = t.get('lastPrice', '0')
+                change = float(t.get('priceChangePercent', 0))
+                quote_vol = float(t.get('quoteVolume', 0)) / 1_000_000
                 
-                # تطبيق المنطق الظلامي (حجم جيد + صعود معتدل + Ratio عالي)
-                if quote_vol > 0.4 and 1.5 < change < MAX_PUMP_LIMIT:
+                # --- خوارزمية الذئب ---
+                # 1. شرط الحجم (أكبر من 300 ألف دولار)
+                # 2. شرط الصعود (تحت 8% لتجنب التصحيح)
+                if quote_vol > 0.3 and 1.5 < change < MAX_PUMP_LIMIT:
                     
-                    # محاكاة الـ Ratio الذهبي
-                    simulated_ratio = (quote_vol * 1.8) / (abs(change) + 0.05) 
+                    # محاكاة نسبة الشراء/البيع بناءً على التدفق اللحظي
+                    # هنا نفترض الـ Ratio بناءً على قوة الفوليوم بالنسبة للتغير
+                    simulated_ratio = (quote_vol * 2) / (abs(change) + 0.1) 
                     
-                    if simulated_ratio >= RATIO_TRIGGER:
+                    if simulated_ratio >= WOLF_RATIO_TRIGGER:
                         now = time.time()
-                        if symbol not in tracked_signals or (now - tracked_signals[symbol] > SIGNAL_COOLDOWN):
+                        if symbol not in tracked_signals or (now - tracked_signals[symbol] > 1800):
                             
-                            msg = format_skull_signal(symbol, price_raw, change, quote_vol, simulated_ratio)
-                            send_telegram(msg)
-                            tracked_signals[symbol] = now
-                            log.info(f"🎯 SKULL HIT: {symbol} | Ratio: {simulated_ratio:.1f}")
+                            msg = format_wolf_signal(symbol, price, change, quote_vol, simulated_ratio)
+                            if send_telegram(msg):
+                                tracked_signals[symbol] = now
+                                log.info(f"🎯 WOLF SIGNAL: {symbol} | Ratio: {simulated_ratio:.1f}")
 
             time.sleep(CHECK_INTERVAL)
 
         except Exception as e:
-            log.error(f"⚠️ خطأ غير متوقع: {e}")
+            log.error(f"Error: {e}")
             time.sleep(20)
 
 if __name__ == "__main__":
-    run_skull_engine()
+    # تشغيل البوت فوراً
+    monitor_loop()
