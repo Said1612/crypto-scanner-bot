@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
-Binance (Spot → CDN → Futures) + MEXC
+Binance (Spot + Futures)
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
@@ -51,10 +51,9 @@ TRACK_HOURS = 24
 STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT"}
 SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE"}
 
-BINANCE_SPOT    = "https://data-api.binance.vision/api/v3"
+BINANCE_SPOT    = "https://api.binance.com/api/v3"
 BINANCE_DATA    = "https://data-api.binance.vision/api/v3"
 BINANCE_FUTURES = "https://fapi.binance.com/fapi/v1"
-MEXC_BASE       = "https://api.mexc.com/api/v3"
 
 # ══════════════════════════════════════════════════════
 #  STATE
@@ -176,24 +175,26 @@ def _parse(data, exchange, base_url):
             continue
     return out
 
-def fetch_binance():
-    # Futures (fapi.binance.com) is blocked on Railway cloud IPs — skip it
-    # Use CDN directly (confirmed working: data-api.binance.vision)
-    data = _get(f"{BINANCE_DATA}/ticker/24hr")
-    if isinstance(data, list) and len(data) > 100:
-        out = _parse(data, "Binance", BINANCE_DATA)
-        log.info("Binance CDN: %d", len(out))
-        return out
-    log.warning("Binance CDN failed")
+def fetch_binance_spot():
+    """Spot tickers via CDN (always works) or main API (works on VPS)"""
+    for url, label in [(BINANCE_SPOT, "Spot"), (BINANCE_DATA, "CDN")]:
+        data = _get(f"{url}/ticker/24hr")
+        if isinstance(data, list) and len(data) > 100:
+            out = _parse(data, "Binance", url)
+            log.info("Binance %s: %d", label, len(out))
+            return out
+    log.warning("Binance Spot failed")
     return {}
 
-def fetch_mexc():
-    data = _get(f"{MEXC_BASE}/ticker/24hr")
-    if not isinstance(data, list):
-        log.warning("MEXC: no data"); return {}
-    out = _parse(data, "MEXC", MEXC_BASE)
-    log.info("MEXC: %d", len(out))
-    return out
+def fetch_binance_futures():
+    """Futures tickers — works on VPS, enables funding rate + OB futures"""
+    data = _get(f"{BINANCE_FUTURES}/ticker/24hr")
+    if isinstance(data, list) and len(data) > 50:
+        out = _parse(data, "Binance-F", BINANCE_FUTURES)
+        log.info("Binance Futures: %d", len(out))
+        return out
+    log.warning("Binance Futures failed (blocked on Railway, works on VPS)")
+    return {}
 
 def fetch_klines(sym, base_url, interval="5m", limit=25):
     data = _get(f"{base_url}/klines",
@@ -205,7 +206,7 @@ def fetch_agg_trades(sym, base_url, minutes=60):
     Real buy/sell volume from actual trades (Wolf Flow: real-time, no lag).
     m=True  → maker is buyer  → taker is SELLER  → sell volume
     m=False → maker is seller → taker is BUYER    → buy volume
-    Uses limit=500 only (no startTime — MEXC doesn't support it).
+    Uses limit=500 only (no startTime).
     """
     data = _get(f"{base_url}/aggTrades", {"symbol": sym, "limit": 500}, timeout=8)
     if not isinstance(data, list) or not data:
@@ -401,7 +402,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         int_icon = "⚪"
 
     # Exchange footer
-    ex_note = "MEXC" if exchange == "MEXC" else "Binance"
+    ex_note = "Binance Futures" if exchange == "Binance-F" else "Binance"
 
     pos_icon = "✅" if pos_ok else "⚠️"
 
@@ -459,7 +460,7 @@ def _tstr(e):
 
 def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
     base    = sym[:-4]
-    ex_icon = "🔶" if exchange == "MEXC" else "🔷"
+    ex_icon = "🔶" if exchange == "Binance-F" else "🔷"
     if ms == 2:
         icon  = "✅"
         title = f"*{base}USDT*  WIN confirmed  +{ms}% reached"
@@ -509,7 +510,7 @@ def _check(sym, ticker, interval):
     # ── Fetch funding rate FIRST (Wolf Flow primary signal) ───────────
     # Bullish funding = smart money adding longs = relax all other thresholds
     funding_rate, funding_label = (None, "Spot")
-    if exchange == "Binance":
+    if exchange in ("Binance", "Binance-F"):
         funding_rate, funding_label = fetch_funding_rate(sym)
 
     funding_bullish = funding_rate is not None and funding_rate > 0.01
@@ -522,8 +523,8 @@ def _check(sym, ticker, interval):
         log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s",
                   sym, spike_min, ratio_min, _fv(net_min))
 
-    # Minimum 24h volume — must be an established, findable coin
-    min_vol = 5_000_000 if exchange == "Binance" else 300_000
+    # Minimum 24h volume — Binance only now (Spot + Futures)
+    min_vol = 3_000_000   # $3M minimum — ensures real liquidity
     if vol_24h < min_vol:
         log.debug("Low 24h vol skip %s vol=%s [%s]", sym, _fv(vol_24h), exchange)
         return
@@ -537,7 +538,7 @@ def _check(sym, ticker, interval):
     if move < move_min: return
 
     # Reject dead coins (zero base volume)
-    if avg_vol < (50 if exchange == "MEXC" else 200): return
+    if avg_vol < 200: return
 
     # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
     # PIPPIN pattern: ratio 63.8x but spike only 1.8x (institution buying quietly)
@@ -580,7 +581,7 @@ def _check(sym, ticker, interval):
     # ── Step 3: Order book imbalance (Wolf Flow: order book spot + future) ──
     ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
     ob_fut  = 0.5
-    if exchange == "Binance":
+    if exchange in ("Binance", "Binance-F"):
         ob_fut = fetch_ob_imbalance(sym, BINANCE_FUTURES, levels=20)
     # Weighted: spot 70% + futures 30%
     ob_score = ob_spot * 0.7 + ob_fut * 0.3
@@ -775,11 +776,12 @@ def main():
         "🎯 *MAFIO Liquidity Scanner v3.1*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "✅ Bot started\n"
-        "📡 Exchanges: *Binance* 🔷 + *MEXC* 🔶\n"
+        "📡 Exchange: *Binance* 🔷 (Spot + Futures)\n"
         f"⚡ Fast scan (5m): every {FAST_SCAN_S}s\n"
         f"📊 Slow scan (1h): every {SLOW_SCAN_S//60}min\n"
         "📊 Tiers: Micro / Small / Mid / Large cap\n"
         "📈 Market Bias: Breadth + CVD + Taker-buy filter\n"
+        "💰 Funding Rate: Bullish/Bearish detection\n"
         f"🔕 Cooldown: {COOLDOWN//3600}h per coin"
     )
 
@@ -790,12 +792,13 @@ def main():
                 time.sleep(1); continue
             last_fast = now
 
-            b = fetch_binance()
-            m = fetch_mexc()
-            all_t = {**m, **b}
+            spot = fetch_binance_spot()
+            fut  = fetch_binance_futures()
+            # Futures data takes priority (enables funding rate for those coins)
+            all_t = {**spot, **fut}
 
-            log.info("Tickers: Binance=%d MEXC=%d Total=%d Tracking=%d",
-                     len(b), len(m), len(all_t), len(tracking))
+            log.info("Tickers: Spot=%d Futures=%d Total=%d Tracking=%d",
+                     len(spot), len(fut), len(all_t), len(tracking))
 
             # ── Market Bias ───────────────────────────
             global market_bias, market_cvd, last_bias_log
