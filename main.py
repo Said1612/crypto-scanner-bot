@@ -629,9 +629,6 @@ def _check(sym, ticker, interval):
     # Reject dead coins (zero base volume)
     if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
 
-    # Basic spike check (before expensive API calls)
-    if spike < 1.5: _rej("low_spike"); return
-
     # ── Funding Rate (API call — only for candidates that pass klines) ───
     funding_rate, funding_label = fetch_mexc_funding_rate(sym)
     funding_bullish = funding_rate is not None and funding_rate > 0.03
