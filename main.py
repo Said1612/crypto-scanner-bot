@@ -621,7 +621,10 @@ def _check(sym, ticker, interval):
     if len(candles) < 10: _rej("no_klines"); return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    if move < 1.5: _rej("low_move"); return
+
+    # Early move filter: only block clear downtrends (< -1%)
+    # Real move_min (1.5%) is applied AFTER funding_rate check below
+    if move < -1.0: _rej("low_move"); return
 
     # Reject dead coins (zero base volume)
     if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
@@ -637,6 +640,11 @@ def _check(sym, ticker, interval):
         spike_min = max(1.5, spike_min * 0.40)
         ratio_min = max(1.8, ratio_min * 0.55)
         net_min   = max(net_min * 0.15, 50)
+        move_min  = -5.0   # funding bullish: allow dip buying
+    else:
+        move_min  = 1.5    # non-funding: need real upward move
+
+    if move < move_min: _rej("low_move"); return
 
     # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
