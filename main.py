@@ -596,8 +596,12 @@ def _check(sym, ticker, interval):
     def _rej(reason):
         _diag[reason] = _diag.get(reason, 0) + 1
 
-    # Skip already pumped
-    if change > MAX_PUMP_24H: _rej("max_pump"); return
+    # Skip already pumped — check BOTH ticker change AND actual 24h range
+    # (priceChangePercent uses open-price, not low — can miss 800% pumps like BLINKY)
+    h24, l24 = ticker["high24"], ticker["low24"]
+    range_pump = (h24 - l24) / l24 * 100 if l24 > 0 else 0
+    if change > MAX_PUMP_24H or range_pump > 200.0:
+        _rej("max_pump"); return
     if now - alerted.get(sym, 0) < COOLDOWN: _rej("cooldown"); return
 
     # Get tier thresholds based on 24h volume
