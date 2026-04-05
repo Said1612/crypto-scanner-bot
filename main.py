@@ -833,8 +833,8 @@ def get_market_ctx(bias: int) -> dict:
                 "move_min": 0.0,  "late_pct": 0.97}  # Strong Bull: high pos = valid breakout
     if bias >= 25:
         return {"pos_limit": 0.92, "crash_limit": 20.0,
-                "spike_mult": 0.80, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 0.5,  "late_pct": 0.95}  # Bullish: consistent with late_pct
+                "spike_mult": 0.80, "ratio_mult": 0.88, "ob_min": 0.40,
+                "move_min": 0.5,  "late_pct": 0.95}  # Bullish: relax ratio (Micro: 3.5→3.08x)
     if bias >= -24:
         return {"pos_limit": 0.82, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
