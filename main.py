@@ -61,12 +61,14 @@ MEXC_FUTURES = "https://contract.mexc.com/api/v1"
 prev_prices   : Dict[str, float] = {}
 alerted       : Dict[str, float] = {}
 tracking      : Dict[str, dict]  = {}
+daily_results : List[dict]       = []   # completed signals for daily report
 last_fast     = 0.0
 last_slow     = 0.0
 last_bias_log = 0.0
+last_report   = 0.0   # last daily report sent (unix ts)
 signal_count  = 0
-market_bias   = 0    # -100 to +100, updated each scan
-market_cvd    = 0.0  # cumulative volume delta ($)
+market_bias   = 0
+market_cvd    = 0.0
 _multi_confirm       : Dict[str, dict] = {}   # {sym: {"count": N, "scanners": [], "last_time": ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 min window for multi-scanner confirmation
 _funding_cache       : Dict[str, dict] = {}   # {sym: {"rate": float, "label": str, "ts": float}}
@@ -440,6 +442,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
 # ══════════════════════════════════════════════════════
 
 def check_milestones(all_t):
+    global daily_results
     now, expired = time.time(), []
     for sym, info in list(tracking.items()):
         if now - info["t0"] > TRACK_HOURS * 3600:
@@ -453,11 +456,81 @@ def check_milestones(all_t):
         pending = [ms for ms in MILESTONES if ms not in info["hit"] and gain >= ms]
         if pending:
             for ms in pending:
-                info["hit"].add(ms)   # mark all as hit
+                info["hit"].add(ms)
             _fire_ms(sym, pending[-1], gain, t["price"], info["entry"],
-                     int(now - info["t0"]), info["exchange"])  # send only highest
+                     int(now - info["t0"]), info["exchange"])
     for s in expired:
-        tracking.pop(s, None)
+        info = tracking.pop(s, None)
+        if info:
+            daily_results.append({
+                "sym":     s,
+                "entry":   info["entry"],
+                "max":     info.get("max", 0.0),
+                "elapsed": int(now - info["t0"]),
+                "success": info.get("max", 0.0) >= 5.0,
+            })
+
+def send_daily_report():
+    global daily_results
+    now    = datetime.now(timezone.utc)
+    date   = now.strftime("%d %b %Y")
+    active = list(tracking.values())
+
+    # Combine active + completed today
+    all_entries = []
+    for info in active:
+        all_entries.append({
+            "sym":     [k for k,v in tracking.items() if v is info][0] if tracking else "?",
+            "entry":   info["entry"],
+            "max":     info.get("max", 0.0),
+            "elapsed": int(time.time() - info["t0"]),
+            "success": info.get("max", 0.0) >= 5.0,
+            "active":  True,
+        })
+    for r in daily_results:
+        r["active"] = False
+        all_entries.append(r)
+
+    # Fix active sym names
+    sym_map = {id(v): k for k, v in tracking.items()}
+    for e in all_entries:
+        if e.get("active") and e["sym"] == "?":
+            e["sym"] = "UNKNOWN"
+
+    total   = len(all_entries)
+    success = sum(1 for e in all_entries if e["success"])
+    miss    = total - success
+    avg_pk  = sum(e["max"] for e in all_entries) / total if total else 0.0
+
+    # Sort by max gain desc
+    all_entries.sort(key=lambda x: -x["max"])
+
+    lines = [f"📊 *Daily Symbol Report*\n{date} UTC\n"]
+    lines.append(
+        f"🔔 Active ({total} symbols)\n"
+        f"✅ {success} success  ❌ {miss} miss  "
+        f"avg peak *+{avg_pk:.2f}%*\n"
+    )
+    for e in all_entries[:20]:   # max 20 lines
+        base = e["sym"][:-4] if e["sym"].endswith("USDT") else e["sym"]
+        icon = "✅" if e["success"] else "❌"
+        act  = " 🔄" if e.get("active") else ""
+        h    = e["elapsed"] // 3600
+        m    = (e["elapsed"] % 3600) // 60
+        t_str = f"{h}h {m}m" if h else f"{m}m"
+        lines.append(
+            f"{icon} *{base}* entry ${_fp(e['entry'])} "
+            f"max *+{e['max']:.2f}%* ⏱ {t_str}{act}"
+        )
+    if total > 20:
+        lines.append(f"+{total - 20} more")
+
+    lines.append(f"\n_Report sent daily at 23:00 UTC_")
+    send("\n".join(lines))
+    log.info("Daily report sent: %d symbols, %d success, %d miss", total, success, miss)
+    # Reset daily results after sending
+    daily_results = []
+
 
 def _tstr(e):
     """Wolf Flow style: always show minutes (e.g. 566m)"""
@@ -820,6 +893,14 @@ def main():
                     _multi_confirm.pop(k, None)
 
             check_milestones(all_t)
+
+            # ── Daily Report at 23:00 UTC ─────────────
+            utc_h = datetime.now(timezone.utc).hour
+            utc_m = datetime.now(timezone.utc).minute
+            if utc_h == 23 and utc_m == 0 and now - last_report > 3600:
+                last_report = now
+                send_daily_report()
+
             fast_scan(all_t)
 
             if now - last_slow >= SLOW_SCAN_S:
