@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -46,7 +45,8 @@ FLOW_CANDLES     = 3     # candles for flow calculation
 MAX_PUMP_24H     = 60.0  # skip already-pumped coins
 LATE_ENTRY_PCT   = 0.92  # skip if price in top 8% of 24h range (SIGNUSDT/ONTUSDT late-entry filter)
 
-MILESTONES  = [2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
+MILESTONES  = [2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100,
+               125, 150, 175, 200, 250, 300, 400, 500]
 TRACK_HOURS = 24
 
 STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT"}
