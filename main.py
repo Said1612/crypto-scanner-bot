@@ -590,11 +590,11 @@ def _check(sym, ticker, interval):
 
     # ── Funding Rate (Wolf Flow primary signal) — MEXC Futures ───────────
     funding_rate, funding_label = fetch_mexc_funding_rate(sym)
-    funding_bullish = funding_rate is not None and funding_rate > 0.01
+    funding_bullish = funding_rate is not None and funding_rate > 0.03  # raised from 0.01
     if funding_bullish:
-        spike_min = max(2.0, spike_min * 0.50)
-        ratio_min = 1.15
-        net_min   = max(net_min * 0.3, 100)
+        spike_min = max(2.0, spike_min * 0.60)
+        ratio_min = max(1.8, ratio_min * 0.70)  # never drop below 1.8x
+        net_min   = max(net_min * 0.4, 100)
         log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s bypass_bias=True",
                   sym, spike_min, ratio_min, _fv(net_min))
 
@@ -608,7 +608,7 @@ def _check(sym, ticker, interval):
     if len(candles) < 10: return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    move_min = 0.3 if funding_bullish else 1.5
+    move_min = 0.8 if funding_bullish else 1.5  # raised from 0.3
     if move < move_min: return
 
     # Reject dead coins (zero base volume) — MEXC has lower liquidity baseline
