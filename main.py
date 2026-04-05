@@ -1,3 +1,5 @@
+
+
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -34,10 +36,10 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 500_000,   "spike": 3.5, "ratio": 2.5, "net": 150},
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 2_000_000,  "spike": 3.0, "ratio": 2.2, "net": 800},
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 15_000_000, "spike": 3.0, "ratio": 2.0, "net": 15_000},
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 80_000_000, "spike": 2.5, "ratio": 1.8, "net": 80_000},
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 2.5, "net": 150},
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 3.0, "ratio": 2.2, "net": 800},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 3.0, "ratio": 2.0, "net": 15_000},
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.5, "ratio": 1.8, "net": 80_000},
 ]
 
 FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
@@ -608,37 +610,35 @@ def _check(sym, ticker, interval):
     spike_min *= ctx["spike_mult"]
     ratio_min *= ctx["ratio_mult"]
 
-    # ── Funding Rate FIRST — Wolf Flow primary signal ─────────────────────
-    funding_rate, funding_label = fetch_mexc_funding_rate(sym)
-    funding_bullish = funding_rate is not None and funding_rate > 0.03
-
-    # Vol min: very low for funding bullish (Wolf Flow catches tiny coins)
-    # Otherwise use tier minimum (Micro=$500K, Small=$2M, etc.)
-    min_vol = 20_000 if funding_bullish else tier["vol_min"]
-    if vol_24h < min_vol:
+    # ── Quick vol floor (no API call) ─────────────────────────────────────
+    if vol_24h < tier["vol_min"]:
         _rej("low_vol"); return
 
-    if funding_bullish:
-        # Wolf Flow: funding bullish = buy regardless of direction
-        spike_min = max(1.5, spike_min * 0.40)
-        ratio_min = max(1.8, ratio_min * 0.55)
-        net_min   = max(net_min * 0.15, 50)
-
-    # Market bias gate — bypass if funding bullish
-    if not funding_bullish and not should_signal(tier["name"], market_bias):
+    # Market bias gate (no API call)
+    if not should_signal(tier["name"], market_bias):
         _rej("bias_gate"); return
 
-    # ── Step 1: Klines ───────────────────────────────────────────────────
+    # ── Step 1: Klines FIRST (1 API call — main filter) ──────────────────
     candles = fetch_klines(sym, base_url, interval=interval, limit=25)
     if len(candles) < 10: _rej("no_klines"); return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    # Funding bullish: allow negative moves (Wolf Flow buys the dip)
-    move_min = -5.0 if funding_bullish else 1.5
-    if move < move_min: _rej("low_move"); return
+    if move < 1.5: _rej("low_move"); return
 
-    # Reject dead coins (zero base volume) — MEXC has lower liquidity baseline
+    # Reject dead coins (zero base volume)
     if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
+
+    # Basic spike check (before expensive API calls)
+    if spike < 1.5: _rej("low_spike"); return
+
+    # ── Funding Rate (API call — only for candidates that pass klines) ───
+    funding_rate, funding_label = fetch_mexc_funding_rate(sym)
+    funding_bullish = funding_rate is not None and funding_rate > 0.03
+
+    if funding_bullish:
+        spike_min = max(1.5, spike_min * 0.40)
+        ratio_min = max(1.8, ratio_min * 0.55)
+        net_min   = max(net_min * 0.15, 50)
 
     # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
@@ -913,7 +913,7 @@ def slow_scan(all_t):
     _diag.clear()
     for sym, ticker in candidates:
         _check(sym, ticker, "1h")
-        time.sleep(0.08)
+        time.sleep(0.12)
     if _diag:
         parts = sorted(_diag.items(), key=lambda x: -x[1])
         log.info("DIAG: %s", " | ".join(f"{k}={v}" for k, v in parts))
