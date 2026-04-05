@@ -637,9 +637,9 @@ def _check(sym, ticker, interval):
         spike_min = max(1.5, spike_min * 0.40)
         ratio_min = max(1.8, ratio_min * 0.55)
         net_min   = max(net_min * 0.15, 50)
-        move_min  = -5.0   # funding bullish: allow dip buying
+        move_min  = -5.0              # funding bullish: allow dip buying
     else:
-        move_min  = 1.5    # non-funding: need real upward move
+        move_min  = ctx["move_min"]   # adaptive: 0.5% bull → 2.5% bear
 
     if move < move_min: _rej("low_move"); return
 
@@ -821,19 +821,24 @@ def get_market_ctx(bias: int) -> dict:
     """
     if bias >= 60:
         return {"pos_limit": 0.78, "crash_limit": 25.0,
-                "spike_mult": 0.85, "ratio_mult": 0.90, "ob_min": 0.38}
+                "spike_mult": 0.85, "ratio_mult": 0.90, "ob_min": 0.38,
+                "move_min": 0.5}
     if bias >= 25:
         return {"pos_limit": 0.75, "crash_limit": 20.0,
-                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40}
+                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
+                "move_min": 1.0}
     if bias >= -24:
         return {"pos_limit": 0.65, "crash_limit": 12.0,
-                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40}
+                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
+                "move_min": 1.5}
     if bias >= -60:
         return {"pos_limit": 0.55, "crash_limit":  8.0,
-                "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45}
+                "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
+                "move_min": 2.0}
     # Strong Bear
     return     {"pos_limit": 0.50, "crash_limit":  5.0,
-                "spike_mult": 1.30, "ratio_mult": 1.20, "ob_min": 0.50}
+                "spike_mult": 1.30, "ratio_mult": 1.20, "ob_min": 0.50,
+                "move_min": 2.5}
 
 
 def should_signal(tier_name: str, bias: int) -> bool:
