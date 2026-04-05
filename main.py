@@ -599,6 +599,11 @@ def _check(sym, ticker, interval):
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
+    # ── Market context: adapt all thresholds to current market state ──────
+    ctx = get_market_ctx(market_bias)
+    spike_min *= ctx["spike_mult"]
+    ratio_min *= ctx["ratio_mult"]
+
     # ── Funding Rate FIRST — Wolf Flow primary signal ─────────────────────
     funding_rate, funding_label = fetch_mexc_funding_rate(sym)
     funding_bullish = funding_rate is not None and funding_rate > 0.03
@@ -673,26 +678,23 @@ def _check(sym, ticker, interval):
                   sym, spike, pos24 * 100, ob_quick)
         return
 
-    # Post-pump crash filter — coin already pumped and crashed today
-    # Relaxed in bull market (bias > 40): normal pullback after pump is OK
+    # Post-pump crash filter — uses ctx.crash_limit (adaptive per market state)
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
-        crash_limit = 20.0 if market_bias > 40 else 12.0   # relaxed in bull
-        if pump_size > 30.0 and crash_from_top > crash_limit:
-            log.debug("Post-pump skip %s pump=+%.0f%% crash=%.0f%% (limit=%.0f%% bias=%d)",
-                      sym, pump_size, crash_from_top, crash_limit, market_bias)
+        if pump_size > 30.0 and crash_from_top > ctx["crash_limit"]:
+            log.debug("Post-pump skip %s pump=+%.0f%% crash=%.0f%% limit=%.0f%%",
+                      sym, pump_size, crash_from_top, ctx["crash_limit"])
             return
 
-    # Position guard — relaxed in bull market
-    pos_limit = 0.75 if market_bias > 40 else 0.65
-    if pos24 > pos_limit:
-        log.debug("High-position skip %s pos=%.0f%% (limit=%.0f%% bias=%d)",
-                  sym, pos24 * 100, pos_limit * 100, market_bias)
+    # Position guard — uses ctx.pos_limit (adaptive per market state)
+    if pos24 > ctx["pos_limit"]:
+        log.debug("High-position skip %s pos=%.0f%% limit=%.0f%%",
+                  sym, pos24 * 100, ctx["pos_limit"] * 100)
         return
 
     # Late-entry guard
-    if move > 4.0 and pos24 > 0.70:
+    if move > 4.0 and pos24 > ctx["pos_limit"] - 0.05:
         log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24 * 100)
         return
 
@@ -713,8 +715,8 @@ def _check(sym, ticker, interval):
         return
     ob_fut   = fetch_mexc_fut_ob(sym, levels=20)
     ob_score = ob_spot * 0.7 + ob_fut * 0.3
-    if ob_score < 0.40:
-        log.debug("OB bearish skip %s ob_spot=%.2f ob_fut=%.2f", sym, ob_spot, ob_fut)
+    if ob_score < ctx["ob_min"]:
+        log.debug("OB bearish skip %s ob_score=%.2f < %.2f", sym, ob_score, ctx["ob_min"])
         return
     if ob_spot > 0.58:
         ob_label = "🟢 Buyers"
@@ -820,6 +822,33 @@ def bias_label(score: int) -> str:
     return "🔴🔴 Strong Bear"
 
 
+def get_market_ctx(bias: int) -> dict:
+    """
+    Returns adaptive thresholds based on market bias.
+
+    Strong Bull (≥60) : loose filters — momentum market, coins near highs are valid
+    Bull      (25-59) : relaxed filters
+    Neutral   (-24-24): standard filters
+    Bear      (-25-59): strict filters — only high-conviction signals
+    Strong Bear (<-60): very strict — almost only funding_bullish signals pass
+    """
+    if bias >= 60:
+        return {"pos_limit": 0.78, "crash_limit": 25.0,
+                "spike_mult": 0.85, "ratio_mult": 0.90, "ob_min": 0.38}
+    if bias >= 25:
+        return {"pos_limit": 0.75, "crash_limit": 20.0,
+                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40}
+    if bias >= -24:
+        return {"pos_limit": 0.65, "crash_limit": 12.0,
+                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40}
+    if bias >= -60:
+        return {"pos_limit": 0.55, "crash_limit":  8.0,
+                "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45}
+    # Strong Bear
+    return     {"pos_limit": 0.50, "crash_limit":  5.0,
+                "spike_mult": 1.30, "ratio_mult": 1.20, "ob_min": 0.50}
+
+
 def should_signal(tier_name: str, bias: int) -> bool:
     """
     Wolf Flow logic: only fire signals when market conditions allow.
@@ -829,7 +858,7 @@ def should_signal(tier_name: str, bias: int) -> bool:
     if tier_name in ("Micro", "Small"):
         return bias > -70   # block only in extreme crash
     if tier_name == "Mid":
-        return bias > -60   # was -30, relaxed — Mid can pump in bear market
+        return bias > -60
     # Large cap
     return bias > -30
 
