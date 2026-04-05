@@ -449,11 +449,13 @@ def check_milestones(all_t):
         gain = (t["price"] - info["entry"]) / info["entry"] * 100.0
         if gain > info.get("max", 0.0):
             info["max"] = gain
-        for ms in MILESTONES:
-            if ms not in info["hit"] and gain >= ms:
-                info["hit"].add(ms)
-                _fire_ms(sym, ms, gain, t["price"], info["entry"],
-                         int(now - info["t0"]), info["exchange"])
+        # Find all unnotified milestones reached — send only the highest
+        pending = [ms for ms in MILESTONES if ms not in info["hit"] and gain >= ms]
+        if pending:
+            for ms in pending:
+                info["hit"].add(ms)   # mark all as hit
+            _fire_ms(sym, pending[-1], gain, t["price"], info["entry"],
+                     int(now - info["t0"]), info["exchange"])  # send only highest
     for s in expired:
         tracking.pop(s, None)
 
