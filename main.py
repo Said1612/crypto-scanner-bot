@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -43,7 +44,7 @@ TIERS = [
 FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
 FLOW_CANDLES     = 3     # candles for flow calculation
 MAX_PUMP_24H     = 60.0  # skip already-pumped coins
-LATE_ENTRY_PCT   = 0.85  # skip if price in top 15% of 24h range
+LATE_ENTRY_PCT   = 0.92  # skip if price in top 8% of 24h range (SIGNUSDT/ONTUSDT late-entry filter)
 
 MILESTONES  = [2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100]
 TRACK_HOURS = 24
@@ -672,6 +673,10 @@ def _check(sym, ticker, interval):
 
     # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
+    if ob_spot < 0.44:
+        # Spot OB = Sellers dominating → hard block regardless of futures
+        log.debug("Sellers OB hard-skip %s ob_spot=%.2f", sym, ob_spot)
+        return
     ob_fut   = fetch_mexc_fut_ob(sym, levels=20)
     ob_score = ob_spot * 0.7 + ob_fut * 0.3
     if ob_score < 0.40:
@@ -696,6 +701,16 @@ def _check(sym, ticker, interval):
     _, badge = _register_confirm(sym, scanner)
 
     # Fire
+    msg = build_signal(sym, price, change, buy_v, sell_v,
+                       spike, move, exchange, tier["name"], ema_bull,
+                       high24=ticker["high24"], low24=ticker["low24"],
+                       badge=badge, funding_label=funding_label,
+                       ob_label=ob_label, ob_pct=int(ob_spot * 100))
+    send(msg)
+    log.info("SIGNAL %-14s tier=%-5s spike=%.1fx net=%s ratio=%.1fx [%s %s]",
+             sym, tier["name"], spike, _fv(net), ratio, exchange, interval)
+
+    # Save state AFTER sending — ensures no tracking without signal delivery
     alerted[sym] = now
     tracking[sym] = {
         "entry":    price,
@@ -705,15 +720,6 @@ def _check(sym, ticker, interval):
         "exchange": exchange,
     }
     save_state()
-
-    msg = build_signal(sym, price, change, buy_v, sell_v,
-                       spike, move, exchange, tier["name"], ema_bull,
-                       high24=ticker["high24"], low24=ticker["low24"],
-                       badge=badge, funding_label=funding_label,
-                       ob_label=ob_label, ob_pct=int(ob_spot * 100))
-    send(msg)
-    log.info("SIGNAL %-14s tier=%-5s spike=%.1fx net=%s ratio=%.1fx [%s %s]",
-             sym, tier["name"], spike, _fv(net), ratio, exchange, interval)
 
 # ══════════════════════════════════════════════════════
 #  MARKET BIAS  (like Wolf Flow Market Stats)
