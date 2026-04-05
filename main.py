@@ -674,23 +674,25 @@ def _check(sym, ticker, interval):
         return
 
     # Post-pump crash filter — coin already pumped and crashed today
-    # If price is >15% below 24h high AND 24h high is >30% above 24h low
-    # → coin completed its pump cycle, skip recovery signals (PTB pattern)
+    # Relaxed in bull market (bias > 40): normal pullback after pump is OK
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
-        if pump_size > 30.0 and crash_from_top > 12.0:
-            log.debug("Post-pump skip %s pump=+%.0f%% crash=%.0f%% from top",
-                      sym, pump_size, crash_from_top)
+        crash_limit = 20.0 if market_bias > 40 else 12.0   # relaxed in bull
+        if pump_size > 30.0 and crash_from_top > crash_limit:
+            log.debug("Post-pump skip %s pump=+%.0f%% crash=%.0f%% (limit=%.0f%% bias=%d)",
+                      sym, pump_size, crash_from_top, crash_limit, market_bias)
             return
 
-    # Position guard — block if already in upper 35% of 24h range
-    if pos24 > 0.65:
-        log.debug("High-position skip %s pos=%.0f%%", sym, pos24 * 100)
+    # Position guard — relaxed in bull market
+    pos_limit = 0.75 if market_bias > 40 else 0.65
+    if pos24 > pos_limit:
+        log.debug("High-position skip %s pos=%.0f%% (limit=%.0f%% bias=%d)",
+                  sym, pos24 * 100, pos_limit * 100, market_bias)
         return
 
     # Late-entry guard
-    if move > 4.0 and pos24 > 0.60:
+    if move > 4.0 and pos24 > 0.70:
         log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24 * 100)
         return
 
