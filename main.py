@@ -34,13 +34,13 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 500_000,   "spike": 6.0, "ratio": 2.0, "net": 150},
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 2_000_000,  "spike": 5.0, "ratio": 1.8, "net": 800},
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 15_000_000, "spike": 5.0, "ratio": 1.6, "net": 15_000},
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 80_000_000, "spike": 5.0, "ratio": 1.5, "net": 80_000},
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 500_000,   "spike": 3.5, "ratio": 2.0, "net": 150},
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 2_000_000,  "spike": 3.0, "ratio": 1.8, "net": 800},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 15_000_000, "spike": 3.0, "ratio": 1.6, "net": 15_000},
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 80_000_000, "spike": 2.5, "ratio": 1.5, "net": 80_000},
 ]
 
-FAST_TICKER_MOVE = 1.5   # 30s price delta to trigger 5m klines fetch
+FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
 FLOW_CANDLES     = 3     # candles for flow calculation
 MAX_PUMP_24H     = 60.0  # skip already-pumped coins
 LATE_ENTRY_PCT   = 0.85  # skip if price in top 15% of 24h range
@@ -748,12 +748,21 @@ def fast_scan(all_t):
 # ══════════════════════════════════════════════════════
 
 def slow_scan(all_t):
-    candidates = [
+    eligible = [
         (sym, t) for sym, t in all_t.items()
-        if t["vol"] >= 30_000 and t["change"] <= MAX_PUMP_24H
+        if t["vol"] >= 500_000 and t["change"] <= MAX_PUMP_24H
     ]
-    candidates.sort(key=lambda x: -x[1]["vol"])
-    candidates = candidates[:300]
+    # Top 150 by volume (Mid/Large caps)
+    by_vol = sorted(eligible, key=lambda x: -x[1]["vol"])[:150]
+    # Top 150 by 24h change (Micro/Small pumpers)
+    by_chg = sorted(eligible, key=lambda x: -x[1]["change"])[:150]
+    # Merge without duplicates
+    seen = set()
+    candidates = []
+    for item in by_vol + by_chg:
+        if item[0] not in seen:
+            seen.add(item[0])
+            candidates.append(item)
     log.info("slow_scan: %d/%d candidates (1h)", len(candidates), len(all_t))
     for sym, ticker in candidates:
         _check(sym, ticker, "1h")
@@ -823,5 +832,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
