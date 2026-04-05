@@ -828,19 +828,19 @@ def get_market_ctx(bias: int) -> dict:
     Strong Bear (<-60): very strict — almost only funding_bullish signals pass
     """
     if bias >= 60:
-        return {"pos_limit": 0.78, "crash_limit": 25.0,
+        return {"pos_limit": 0.94, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 1.00, "ob_min": 0.38,
-                "move_min": 0.0,  "late_pct": 0.97}  # Strong Bull: coins near highs = valid breakout
+                "move_min": 0.0,  "late_pct": 0.97}  # Strong Bull: high pos = valid breakout
     if bias >= 25:
-        return {"pos_limit": 0.75, "crash_limit": 20.0,
+        return {"pos_limit": 0.92, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 0.5,  "late_pct": 0.95}  # Bullish: relax spike + late_entry slightly
+                "move_min": 0.5,  "late_pct": 0.95}  # Bullish: consistent with late_pct
     if bias >= -24:
-        return {"pos_limit": 0.65, "crash_limit": 12.0,
+        return {"pos_limit": 0.82, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
                 "move_min": 1.5,  "late_pct": 0.92}  # Neutral: standard
     if bias >= -60:
-        return {"pos_limit": 0.55, "crash_limit":  8.0,
+        return {"pos_limit": 0.70, "crash_limit":  8.0,
                 "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
                 "move_min": 2.0,  "late_pct": 0.88}  # Bear: strict
     # Strong Bear
