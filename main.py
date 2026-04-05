@@ -534,9 +534,14 @@ def send_daily_report():
 
 
 def _tstr(e):
-    """Wolf Flow style: always show minutes (e.g. 566m)"""
+    """Show elapsed time as Xh Ym or Zm"""
     e = max(e, 0)
-    if e >= 60: return f"{e // 60}m"
+    if e >= 3600:
+        h = e // 3600
+        m = (e % 3600) // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    if e >= 60:
+        return f"{e // 60}m"
     return f"{e}s"
 
 def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
@@ -597,7 +602,7 @@ def _check(sym, ticker, interval):
     if funding_bullish:
         # Wolf Flow: funding bullish = buy regardless of direction
         spike_min = max(1.5, spike_min * 0.40)
-        ratio_min = max(1.3, ratio_min * 0.55)
+        ratio_min = max(1.8, ratio_min * 0.55)
         net_min   = max(net_min * 0.15, 50)
         log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s",
                   sym, spike_min, ratio_min, _fv(net_min))
@@ -657,8 +662,13 @@ def _check(sym, ticker, interval):
                   sym, spike, pos24 * 100, ob_quick)
         return
 
+    # Position guard — block if already in upper 35% of 24h range
+    if pos24 > 0.65:
+        log.debug("High-position skip %s pos=%.0f%%", sym, pos24 * 100)
+        return
+
     # Late-entry guard
-    if move > 4.0 and pos24 > 0.70:
+    if move > 4.0 and pos24 > 0.60:
         log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24 * 100)
         return
 
