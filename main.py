@@ -1,5 +1,3 @@
-
-
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -642,7 +640,7 @@ def _check(sym, ticker, interval):
 
     # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
-                                            minutes=60 if interval == "1h" else 10)
+                                            minutes=60 if interval == "60m" else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
     super_ratio = _pre_ratio >= 20.0
     effective_spike_min = 1.5 if super_ratio else spike_min
@@ -912,7 +910,7 @@ def slow_scan(all_t):
     log.info("slow_scan: %d/%d candidates (1h)", len(candidates), len(all_t))
     _diag.clear()
     for sym, ticker in candidates:
-        _check(sym, ticker, "1h")
+        _check(sym, ticker, "60m")
         time.sleep(0.12)
     if _diag:
         parts = sorted(_diag.items(), key=lambda x: -x[1])
