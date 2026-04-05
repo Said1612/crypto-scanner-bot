@@ -578,24 +578,27 @@ def _check(sym, ticker, interval):
 
     # Get tier thresholds based on 24h volume
     tier = get_tier(vol_24h)
-
-    # Minimum volume per tier (Micro=$500K, Small=$2M, Mid=$15M, Large=$80M)
-    if vol_24h < tier["vol_min"]:
-        log.debug("Low vol skip %s vol=%s tier=%s", sym, _fv(vol_24h), tier["name"])
-        return
-
     spike_min = tier["spike"]
     ratio_min = tier["ratio"]
     net_min   = tier["net"]
 
-    # ── Funding Rate (Wolf Flow primary signal) — MEXC Futures ───────────
+    # ── Funding Rate FIRST — Wolf Flow primary signal ─────────────────────
     funding_rate, funding_label = fetch_mexc_funding_rate(sym)
-    funding_bullish = funding_rate is not None and funding_rate > 0.03  # raised from 0.01
+    funding_bullish = funding_rate is not None and funding_rate > 0.03
+
+    # Vol min: very low for funding bullish (Wolf Flow catches tiny coins)
+    # Otherwise use tier minimum (Micro=$500K, Small=$2M, etc.)
+    min_vol = 20_000 if funding_bullish else tier["vol_min"]
+    if vol_24h < min_vol:
+        log.debug("Low vol skip %s vol=%s funding=%s", sym, _fv(vol_24h), funding_bullish)
+        return
+
     if funding_bullish:
-        spike_min = max(2.0, spike_min * 0.60)
-        ratio_min = max(1.8, ratio_min * 0.70)  # never drop below 1.8x
-        net_min   = max(net_min * 0.4, 100)
-        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s bypass_bias=True",
+        # Wolf Flow: funding bullish = buy regardless of direction
+        spike_min = max(1.5, spike_min * 0.40)
+        ratio_min = max(1.3, ratio_min * 0.55)
+        net_min   = max(net_min * 0.15, 50)
+        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s",
                   sym, spike_min, ratio_min, _fv(net_min))
 
     # Market bias gate — bypass if funding bullish
@@ -603,12 +606,13 @@ def _check(sym, ticker, interval):
         log.debug("Skipped %s — bias=%d tier=%s", sym, market_bias, tier["name"])
         return
 
-    # ── Step 1: Klines — volume spike detection only ─────────────────
+    # ── Step 1: Klines ───────────────────────────────────────────────────
     candles = fetch_klines(sym, base_url, interval=interval, limit=25)
     if len(candles) < 10: return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
-    move_min = 0.8 if funding_bullish else 1.5  # raised from 0.3
+    # Funding bullish: allow negative moves (Wolf Flow buys the dip)
+    move_min = -5.0 if funding_bullish else 1.5
     if move < move_min: return
 
     # Reject dead coins (zero base volume) — MEXC has lower liquidity baseline
@@ -636,9 +640,23 @@ def _check(sym, ticker, interval):
         log.debug("Dump-wick skip %s close=%.0f%%", sym, sc_close_pct * 100)
         return
 
-    # Late-entry guard
+    # ── Pump & Dump filter ────────────────────────────────────────────────
+    # Danger zone: extreme spike + mid-range position + weak order book
+    # PE pattern: 49x spike, 46% position, 56% OB → classic P&D
     rng24 = ticker["high24"] - ticker["low24"]
     pos24 = (price - ticker["low24"]) / rng24 if rng24 > 0 else 0.5
+    ob_quick = fetch_ob_imbalance(sym, base_url, levels=5)  # top 5 levels only
+    is_pump_dump = (
+        spike > 20.0          # extreme volume spike
+        and pos24 > 0.35      # already moved from bottom
+        and ob_quick < 0.60   # order book not strongly bullish
+    )
+    if is_pump_dump:
+        log.debug("PumpDump skip %s spike=%.1fx pos=%.0f%% ob=%.2f",
+                  sym, spike, pos24 * 100, ob_quick)
+        return
+
+    # Late-entry guard
     if move > 4.0 and pos24 > 0.70:
         log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24 * 100)
         return
@@ -825,12 +843,12 @@ def fast_scan(all_t):
 def slow_scan(all_t):
     eligible = [
         (sym, t) for sym, t in all_t.items()
-        if t["vol"] >= 500_000 and t["change"] <= MAX_PUMP_24H
+        if t["vol"] >= 10_000 and t["change"] <= MAX_PUMP_24H
     ]
-    # Top 150 by volume (Mid/Large caps)
-    by_vol = sorted(eligible, key=lambda x: -x[1]["vol"])[:150]
-    # Top 150 by 24h change (Micro/Small pumpers)
-    by_chg = sorted(eligible, key=lambda x: -x[1]["change"])[:150]
+    # Top 200 by volume (Large/Mid caps)
+    by_vol = sorted(eligible, key=lambda x: -x[1]["vol"])[:200]
+    # Top 200 by 24h change (pumping Micro/Small — Wolf Flow style)
+    by_chg = sorted(eligible, key=lambda x: -x[1]["change"])[:200]
     # Merge without duplicates
     seen = set()
     candidates = []
