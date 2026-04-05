@@ -351,6 +351,17 @@ def is_late(price, h24, l24):
 
 _TG = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
+def clear_bot_commands():
+    """Remove all registered bot commands from Telegram menu."""
+    if not TELEGRAM_TOKEN: return
+    try:
+        S.post(f"{_TG}/deleteMyCommands", json={}, timeout=5)
+        S.post(f"{_TG}/deleteMyCommands", json={"scope": {"type": "all_private_chats"}}, timeout=5)
+        S.post(f"{_TG}/deleteMyCommands", json={"scope": {"type": "all_group_chats"}}, timeout=5)
+        log.info("Bot commands cleared")
+    except Exception as e:
+        log.debug("clear_bot_commands: %s", e)
+
 def send(text):
     if not TELEGRAM_TOKEN:
         print(text); return
@@ -895,6 +906,7 @@ def slow_scan(all_t):
 def main():
     global last_fast, last_slow
     log.info("🎯 MAFIO Liquidity Scanner v3.1 — starting")
+    clear_bot_commands()
     load_state()
 
     send(
