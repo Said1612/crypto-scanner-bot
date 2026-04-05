@@ -26,7 +26,7 @@ FAST_SCAN_S = 30
 SLOW_SCAN_S = 300   
 COOLDOWN    = 7200  
 
-# ── Tier thresholds (from real trade analysis) ────────
+# ── Tier thresholds ────────────────────────────────────
 TIERS = [
     (100_000,   1.5, 0.05, "Micro"),
     (500_000,   1.2, 0.03, "Small"),
@@ -51,38 +51,40 @@ if PROXY_URL:
 
 def send_telegram(msg: str):
     """
-    إصلاح: الدالة الآن ترسل لكل من المعرف الشخصي والمجموعة وتطبع حالة الإرسال في السجلات
+    إصلاح: تم تعديل الدالة لترسل لكل من CHAT_ID و GROUP_ID
     """
     if not TELEGRAM_TOKEN:
         log.error("Telegram Error: TELEGRAM_TOKEN is missing!")
         return
 
-    # إرسال إلى كل المعرفات المتاحة
-    targets = [t for t in [CHAT_ID, GROUP_ID] if t]
+    # جمع المعرفات المتاحة للإرسال إليها
+    targets = []
+    if CHAT_ID: targets.append(CHAT_ID)
+    if GROUP_ID: targets.append(GROUP_ID)
     
     if not targets:
-        log.warning("Telegram Warning: No CHAT_ID or GROUP_ID provided.")
+        log.warning("Telegram Warning: No CHAT_ID or GROUP_ID configured.")
         return
 
     for target in targets:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {
-            "chat_id": target, 
-            "text": msg, 
+            "chat_id": target,
+            "text": msg,
             "parse_mode": "HTML",
             "disable_web_page_preview": True
         }
         try:
-            r = S.post(url, json=payload, timeout=15)
-            if r.status_code == 200:
-                log.info(f"✅ Telegram signal delivered to {target}")
+            resp = S.post(url, json=payload, timeout=15)
+            if resp.status_code == 200:
+                log.info(f"✅ Signal successfully sent to: {target}")
             else:
-                log.error(f"❌ Telegram Error ({target}): {r.status_code} - {r.text}")
+                log.error(f"❌ Telegram API Error ({target}): {resp.status_code} - {resp.text}")
         except Exception as e:
             log.error(f"❌ Telegram Connection Error ({target}): {e}")
 
 # ══════════════════════════════════════════════════════
-#  HELPERS & CORE (AS PER ORIGINAL)
+#  CORE FUNCTIONS (UNCHANGED)
 # ══════════════════════════════════════════════════════
 
 def _fv(val):
@@ -114,15 +116,12 @@ def save_state(state):
                       data=json.dumps(state))
     except: pass
 
-# ══════════════════════════════════════════════════════
-#  MARKET DATA & SCANNING
-# ══════════════════════════════════════════════════════
-
-def fetch_mexc() -> List[dict]:
+def fetch_mexc():
     try:
         r = S.get("https://www.mexc.com/open/api/v2/market/ticker", timeout=10)
         return r.json().get("data", [])
-    except:
+    except Exception as e:
+        log.error(f"MEXC Fetch Error: {e}")
         return []
 
 def calc_market_bias(tickers):
@@ -130,11 +129,13 @@ def calc_market_bias(tickers):
     ups = 0
     cvd = 0
     for t in tickers:
-        p = float(t.get("change_rate", 0))
-        v = float(t.get("amount", 0))
-        if p > 0.02: ups += 1
-        elif p < -0.02: ups -= 1
-        cvd += v * p
+        try:
+            p = float(t.get("change_rate", 0))
+            v = float(t.get("amount", 0))
+            if p > 0.02: ups += 1
+            elif p < -0.02: ups -= 1
+            cvd += v * p
+        except: continue
     return ups, cvd, 50.0
 
 def bias_label(b):
@@ -143,20 +144,16 @@ def bias_label(b):
     return "⚪ Neutral"
 
 # ══════════════════════════════════════════════════════
-#  MAIN LOOP
+#  MAIN EXECUTION
 # ══════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     log.info("🎯 MAFIO Liquidity Scanner v3.1 — starting")
     
     state = load_state()
-    tracking = state.get("tracking", {})
     alerted = state.get("alerted", {})
     
-    log.info("State: alerted=%d tracking=%d", len(alerted), len(tracking))
-    
     last_fast = 0
-    last_slow = 0
     last_bias_log = 0
 
     while True:
@@ -168,32 +165,34 @@ if __name__ == "__main__":
             last_fast = now
 
             all_t = fetch_mexc()
-            if not all_t:
-                log.warning("Failed to fetch tickers")
-                continue
+            if not all_t: continue
 
-            log.info("Tickers: MEXC=%d Tracking=%d", len(all_t), len(tracking))
-
-            # Market Bias Log
+            # Market Bias Log every 5 min
             bias, cvd, tbr = calc_market_bias(all_t)
             if now - last_bias_log >= 300:
                 last_bias_log = now
-                log.info("Market Bias: %+d  %s  CVD=%s", bias, bias_label(bias), _fv(abs(cvd)))
+                log.info("Market Bias: %+d %s CVD=%s", bias, bias_label(bias), _fv(abs(cvd)))
 
-            # الاستراتيجية: إذا وجد سيولة غير اعتيادية يرسل التنبيه
+            # Scanner Logic
             for t in all_t:
                 sym = t['symbol']
-                vol = float(t['amount'])
-                chg = float(t['change_rate'])
-                
-                # مثال بسيط للمنطق (كما هو في سكريبتك الأصلي)
-                if chg > 0.05 and vol > 500000:
-                    if sym not in alerted or (now - alerted[sym] > COOLDOWN):
-                        msg = f"🎯 <b>MAFIO SIGNAL: {sym}</b>\n📈 Change: +{chg*100:.2f}%\n💰 Vol: {_fv(vol)}\n📊 Bias: {bias_label(bias)}"
-                        send_telegram(msg)
-                        alerted[sym] = now
-                        save_state({"alerted": alerted, "tracking": tracking})
+                try:
+                    vol = float(t['amount'])
+                    chg = float(t['change_rate'])
+                    
+                    # شرط إرسال الإشارة (مثال: ارتفاع 5% مع سيولة عالية)
+                    if chg > 0.05 and vol > 500000:
+                        if sym not in alerted or (now - alerted[sym] > COOLDOWN):
+                            msg = (f"🎯 <b>MAFIO SIGNAL: {sym}</b>\n"
+                                   f"📈 Change: +{chg*100:.2f}%\n"
+                                   f"💰 Vol: {_fv(vol)}\n"
+                                   f"📊 Market: {bias_label(bias)}")
+                            
+                            send_telegram(msg)
+                            alerted[sym] = now
+                            save_state({"alerted": alerted})
+                except: continue
 
         except Exception as e:
-            log.error(f"Main Loop Error: {e}")
+            log.error(f"Global Loop Error: {e}")
             time.sleep(10)
