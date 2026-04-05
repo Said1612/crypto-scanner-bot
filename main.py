@@ -662,6 +662,17 @@ def _check(sym, ticker, interval):
                   sym, spike, pos24 * 100, ob_quick)
         return
 
+    # Post-pump crash filter — coin already pumped and crashed today
+    # If price is >15% below 24h high AND 24h high is >30% above 24h low
+    # → coin completed its pump cycle, skip recovery signals (PTB pattern)
+    if ticker["high24"] > 0 and ticker["low24"] > 0:
+        pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
+        crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
+        if pump_size > 30.0 and crash_from_top > 12.0:
+            log.debug("Post-pump skip %s pump=+%.0f%% crash=%.0f%% from top",
+                      sym, pump_size, crash_from_top)
+            return
+
     # Position guard — block if already in upper 35% of 24h range
     if pos24 > 0.65:
         log.debug("High-position skip %s pos=%.0f%%", sym, pos24 * 100)
