@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -597,9 +596,8 @@ def _check(sym, ticker, interval):
     def _rej(reason):
         _diag[reason] = _diag.get(reason, 0) + 1
 
-    # Skip already pumped or late entry
+    # Skip already pumped
     if change > MAX_PUMP_24H: _rej("max_pump"); return
-    if is_late(price, ticker["high24"], ticker["low24"]): _rej("late_entry"); return
     if now - alerted.get(sym, 0) < COOLDOWN: _rej("cooldown"); return
 
     # Get tier thresholds based on 24h volume
@@ -612,6 +610,11 @@ def _check(sym, ticker, interval):
     ctx = get_market_ctx(market_bias)
     spike_min *= ctx["spike_mult"]
     ratio_min *= ctx["ratio_mult"]
+
+    # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
+    rng = ticker["high24"] - ticker["low24"]
+    if rng > 0 and (price - ticker["low24"]) / rng > ctx["late_pct"]:
+        _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
     if vol_24h < tier["vol_min"]:
@@ -827,23 +830,23 @@ def get_market_ctx(bias: int) -> dict:
     if bias >= 60:
         return {"pos_limit": 0.78, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 1.00, "ob_min": 0.38,
-                "move_min": 0.0}   # Strong Bull: baseline vol elevated → lower spike, keep ratio strict
+                "move_min": 0.0,  "late_pct": 0.97}  # Strong Bull: coins near highs = valid breakout
     if bias >= 25:
         return {"pos_limit": 0.75, "crash_limit": 20.0,
-                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 0.5}
+                "spike_mult": 0.80, "ratio_mult": 1.00, "ob_min": 0.40,
+                "move_min": 0.5,  "late_pct": 0.95}  # Bullish: relax spike + late_entry slightly
     if bias >= -24:
         return {"pos_limit": 0.65, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 1.5}
+                "move_min": 1.5,  "late_pct": 0.92}  # Neutral: standard
     if bias >= -60:
         return {"pos_limit": 0.55, "crash_limit":  8.0,
                 "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
-                "move_min": 2.0}
+                "move_min": 2.0,  "late_pct": 0.88}  # Bear: strict
     # Strong Bear
     return     {"pos_limit": 0.50, "crash_limit":  5.0,
                 "spike_mult": 1.30, "ratio_mult": 1.20, "ob_min": 0.50,
-                "move_min": 2.5}
+                "move_min": 2.5,  "late_pct": 0.85}  # Strong Bear: very strict
 
 
 def should_signal(tier_name: str, bias: int) -> bool:
