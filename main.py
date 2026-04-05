@@ -70,6 +70,7 @@ last_report   = 0.0   # last daily report sent (unix ts)
 signal_count  = 0
 market_bias   = 0
 market_cvd    = 0.0
+_diag : Dict[str, int] = {}   # diagnostic: rejection counts per filter
 _multi_confirm       : Dict[str, dict] = {}   # {sym: {"count": N, "scanners": [], "last_time": ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 min window for multi-scanner confirmation
 _funding_cache       : Dict[str, dict] = {}   # {sym: {"rate": float, "label": str, "ts": float}}
@@ -588,10 +589,13 @@ def _check(sym, ticker, interval):
     exchange = ticker["exchange"]
     base_url = ticker["base_url"]
 
+    def _rej(reason):
+        _diag[reason] = _diag.get(reason, 0) + 1
+
     # Skip already pumped or late entry
-    if change > MAX_PUMP_24H: return
-    if is_late(price, ticker["high24"], ticker["low24"]): return
-    if now - alerted.get(sym, 0) < COOLDOWN: return
+    if change > MAX_PUMP_24H: _rej("max_pump"); return
+    if is_late(price, ticker["high24"], ticker["low24"]): _rej("late_entry"); return
+    if now - alerted.get(sym, 0) < COOLDOWN: _rej("cooldown"); return
 
     # Get tier thresholds based on 24h volume
     tier = get_tier(vol_24h)
@@ -612,46 +616,40 @@ def _check(sym, ticker, interval):
     # Otherwise use tier minimum (Micro=$500K, Small=$2M, etc.)
     min_vol = 20_000 if funding_bullish else tier["vol_min"]
     if vol_24h < min_vol:
-        log.debug("Low vol skip %s vol=%s funding=%s", sym, _fv(vol_24h), funding_bullish)
-        return
+        _rej("low_vol"); return
 
     if funding_bullish:
         # Wolf Flow: funding bullish = buy regardless of direction
         spike_min = max(1.5, spike_min * 0.40)
         ratio_min = max(1.8, ratio_min * 0.55)
         net_min   = max(net_min * 0.15, 50)
-        log.debug("Funding bullish %s → spike≥%.1f ratio≥%.2f net≥%s",
-                  sym, spike_min, ratio_min, _fv(net_min))
 
     # Market bias gate — bypass if funding bullish
     if not funding_bullish and not should_signal(tier["name"], market_bias):
-        log.debug("Skipped %s — bias=%d tier=%s", sym, market_bias, tier["name"])
-        return
+        _rej("bias_gate"); return
 
     # ── Step 1: Klines ───────────────────────────────────────────────────
     candles = fetch_klines(sym, base_url, interval=interval, limit=25)
-    if len(candles) < 10: return
+    if len(candles) < 10: _rej("no_klines"); return
 
     spike, move, avg_vol = vol_spike_and_move(candles)
     # Funding bullish: allow negative moves (Wolf Flow buys the dip)
     move_min = -5.0 if funding_bullish else 1.5
-    if move < move_min: return
+    if move < move_min: _rej("low_move"); return
 
     # Reject dead coins (zero base volume) — MEXC has lower liquidity baseline
-    if avg_vol < (50 if exchange == "MEXC" else 200): return
+    if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
 
     # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
-    # PIPPIN pattern: ratio 63.8x but spike only 1.8x (institution buying quietly)
-    # When almost nobody is selling, spike threshold is irrelevant → bypass
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
                                             minutes=60 if interval == "1h" else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
-    super_ratio = _pre_ratio >= 20.0   # institutional / near-zero sell pressure
+    super_ratio = _pre_ratio >= 20.0
     effective_spike_min = 1.5 if super_ratio else spike_min
     if spike < effective_spike_min:
-        return
+        _rej("low_spike"); return
 
-    # Spike candle must close in upper half — rejects pump-dump wicks (BNK style)
+    # Spike candle must close in upper half — rejects pump-dump wicks
     try:
         sc = candles[-1]
         sc_rng = float(sc[2]) - float(sc[3])
@@ -659,65 +657,50 @@ def _check(sym, ticker, interval):
     except Exception:
         sc_close_pct = 0.5
     if sc_close_pct < 0.50:
-        log.debug("Dump-wick skip %s close=%.0f%%", sym, sc_close_pct * 100)
-        return
+        _rej("dump_wick"); return
 
     # ── Pump & Dump filter ────────────────────────────────────────────────
-    # Danger zone: extreme spike + mid-range position + weak order book
-    # PE pattern: 49x spike, 46% position, 56% OB → classic P&D
     rng24 = ticker["high24"] - ticker["low24"]
     pos24 = (price - ticker["low24"]) / rng24 if rng24 > 0 else 0.5
-    ob_quick = fetch_ob_imbalance(sym, base_url, levels=5)  # top 5 levels only
+    ob_quick = fetch_ob_imbalance(sym, base_url, levels=5)
     is_pump_dump = (
-        spike > 20.0          # extreme volume spike
-        and pos24 > 0.35      # already moved from bottom
-        and ob_quick < 0.60   # order book not strongly bullish
+        spike > 20.0 and pos24 > 0.35 and ob_quick < 0.60
     )
     if is_pump_dump:
-        log.debug("PumpDump skip %s spike=%.1fx pos=%.0f%% ob=%.2f",
-                  sym, spike, pos24 * 100, ob_quick)
-        return
+        _rej("pump_dump"); return
 
-    # Post-pump crash filter — uses ctx.crash_limit (adaptive per market state)
+    # Post-pump crash filter — uses ctx.crash_limit (adaptive)
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
         if pump_size > 30.0 and crash_from_top > ctx["crash_limit"]:
-            log.debug("Post-pump skip %s pump=+%.0f%% crash=%.0f%% limit=%.0f%%",
-                      sym, pump_size, crash_from_top, ctx["crash_limit"])
-            return
+            _rej("post_pump"); return
 
-    # Position guard — uses ctx.pos_limit (adaptive per market state)
+    # Position guard — uses ctx.pos_limit (adaptive)
     if pos24 > ctx["pos_limit"]:
-        log.debug("High-position skip %s pos=%.0f%% limit=%.0f%%",
-                  sym, pos24 * 100, ctx["pos_limit"] * 100)
-        return
+        _rej("high_pos"); return
 
     # Late-entry guard
     if move > 4.0 and pos24 > ctx["pos_limit"] - 0.05:
-        log.debug("Late-move skip %s move=%.1f%% pos=%.0f%%", sym, move, pos24 * 100)
-        return
+        _rej("late_move"); return
 
     # ── Step 2: Real buy/sell from aggTrades (reuse pre-fetched data) ───
     buy_v, sell_v = _pre_buy, _pre_sell
-    if sell_v <= 0: return
+    if sell_v <= 0: _rej("no_sells"); return
     ratio = buy_v / sell_v
     net   = buy_v - sell_v
 
-    if ratio < ratio_min: return
-    if net   < net_min:   return
+    if ratio < ratio_min: _rej("low_ratio"); return
+    if net   < net_min:   _rej("low_net"); return
 
     # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
     if ob_spot < 0.44:
-        # Spot OB = Sellers dominating → hard block regardless of futures
-        log.debug("Sellers OB hard-skip %s ob_spot=%.2f", sym, ob_spot)
-        return
+        _rej("ob_sellers"); return
     ob_fut   = fetch_mexc_fut_ob(sym, levels=20)
     ob_score = ob_spot * 0.7 + ob_fut * 0.3
     if ob_score < ctx["ob_min"]:
-        log.debug("OB bearish skip %s ob_score=%.2f < %.2f", sym, ob_score, ctx["ob_min"])
-        return
+        _rej("ob_low"); return
     if ob_spot > 0.58:
         ob_label = "🟢 Buyers"
     elif ob_spot < 0.44:
@@ -743,6 +726,7 @@ def _check(sym, ticker, interval):
                        badge=badge, funding_label=funding_label,
                        ob_label=ob_label, ob_pct=int(ob_spot * 100))
     send(msg)
+    _rej("PASS")
     log.info("SIGNAL %-14s tier=%-5s spike=%.1fx net=%s ratio=%.1fx [%s %s]",
              sym, tier["name"], spike, _fv(net), ratio, exchange, interval)
 
@@ -926,9 +910,13 @@ def slow_scan(all_t):
             seen.add(item[0])
             candidates.append(item)
     log.info("slow_scan: %d/%d candidates (1h)", len(candidates), len(all_t))
+    _diag.clear()
     for sym, ticker in candidates:
         _check(sym, ticker, "1h")
         time.sleep(0.08)
+    if _diag:
+        parts = sorted(_diag.items(), key=lambda x: -x[1])
+        log.info("DIAG: %s", " | ".join(f"{k}={v}" for k, v in parts))
 
 # ══════════════════════════════════════════════════════
 #  MAIN
