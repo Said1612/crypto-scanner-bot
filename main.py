@@ -1,6 +1,4 @@
 
-
-
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -828,8 +826,8 @@ def get_market_ctx(bias: int) -> dict:
     """
     if bias >= 60:
         return {"pos_limit": 0.78, "crash_limit": 25.0,
-                "spike_mult": 0.85, "ratio_mult": 0.90, "ob_min": 0.38,
-                "move_min": 0.0}   # Strong Bull: just don't be going down
+                "spike_mult": 0.65, "ratio_mult": 1.00, "ob_min": 0.38,
+                "move_min": 0.0}   # Strong Bull: baseline vol elevated → lower spike, keep ratio strict
     if bias >= 25:
         return {"pos_limit": 0.75, "crash_limit": 20.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
