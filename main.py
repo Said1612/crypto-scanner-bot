@@ -1,3 +1,6 @@
+
+
+
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO Liquidity Scanner v3.1
@@ -34,10 +37,14 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 2.5, "net": 150},
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 3.0, "ratio": 2.2, "net": 800},
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 3.0, "ratio": 2.0, "net": 15_000},
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.5, "ratio": 1.8, "net": 80_000},
+    # Micro: tiny liquidity → easy pump/dump → need very strong ratio conviction
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 3.5, "net": 500},
+    # Small: medium liquidity → solid ratio required
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 3.0, "ratio": 3.0, "net": 2_000},
+    # Mid: good liquidity → standard conviction
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.8, "ratio": 2.5, "net": 20_000},
+    # Large: deep liquidity → harder to move, lower ratio still meaningful
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.5, "ratio": 2.0, "net": 100_000},
 ]
 
 FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
