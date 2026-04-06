@@ -34,14 +34,14 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    # Micro: tiny liquidity → easy pump/dump → need very strong ratio conviction
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 3.5, "net": 500},
-    # Small: medium liquidity → solid ratio required
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 3.0, "ratio": 3.0, "net": 2_000},
-    # Mid: good liquidity → standard conviction
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.8, "ratio": 2.5, "net": 20_000},
-    # Large: deep liquidity → harder to move, lower ratio still meaningful
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.5, "ratio": 2.0, "net": 100_000},
+    # Micro: tiny liquidity → ratio 2.0x+ in Bullish (Wolf Flow style)
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.0, "ratio": 2.5, "net": 300},
+    # Small: medium liquidity
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.8, "ratio": 2.5, "net": 1_500},
+    # Mid: good liquidity
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.5, "ratio": 2.2, "net": 15_000},
+    # Large: deep liquidity
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.2, "ratio": 1.8, "net": 80_000},
 ]
 
 FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
@@ -53,11 +53,15 @@ MILESTONES  = [2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100,
                125, 150, 175, 200, 250, 300, 400, 500]
 TRACK_HOURS = 24
 
-STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT"}
-SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE"}
+STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT","AEUR","EURI"}
+SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","IBVOL"}
 
 MEXC_BASE    = "https://api.mexc.com/api/v3"
 MEXC_FUTURES = "https://contract.mexc.com/api/v1"
+
+BINANCE_BASE    = "https://api.binance.com/api/v3"
+BINANCE_FUTURES = "https://fapi.binance.com"
+USE_BINANCE  = os.getenv("USE_BINANCE", "true").lower() == "true"  # disable on Railway
 
 # ══════════════════════════════════════════════════════
 #  STATE
@@ -191,6 +195,47 @@ def fetch_mexc():
         return out
     log.warning("MEXC failed")
     return {}
+
+def fetch_binance():
+    """Binance spot tickers — requires VPS (Binance blocks Railway/cloud IPs)."""
+    if not USE_BINANCE:
+        return {}
+    data = _get(f"{BINANCE_BASE}/ticker/24hr")
+    if isinstance(data, list) and len(data) > 100:
+        out = _parse(data, "Binance", BINANCE_BASE)
+        log.info("Binance: %d", len(out))
+        return out
+    log.warning("Binance fetch failed")
+    return {}
+
+def fetch_binance_funding_rate(sym):
+    """
+    Binance Futures funding rate — endpoint: /fapi/v1/premiumIndex
+    Returns (rate_pct, label) same format as fetch_mexc_funding_rate().
+    """
+    now   = time.time()
+    cache_key = "BN_" + sym
+    cache = _funding_cache.get(cache_key)
+    if cache and (now - cache["ts"]) < FUNDING_TTL:
+        return cache["rate"], cache["label"]
+    data = _get(f"{BINANCE_FUTURES}/fapi/v1/premiumIndex",
+                {"symbol": sym}, timeout=5)
+    if not data or not isinstance(data, dict):
+        _funding_cache[cache_key] = {"rate": None, "label": "Spot", "ts": now}
+        return None, "Spot"
+    try:
+        rate = float(data.get("lastFundingRate", 0)) * 100   # → %
+        if rate > 0.02:
+            label = "🟢 Bullish / Longs"
+        elif rate < -0.02:
+            label = "🔴 Bearish / Shorts"
+        else:
+            label = "🟡 Neutral / Covering"
+        _funding_cache[cache_key] = {"rate": rate, "label": label, "ts": now}
+        return rate, label
+    except Exception:
+        _funding_cache[cache_key] = {"rate": None, "label": "Spot", "ts": now}
+        return None, "Spot"
 
 def _fut_sym(sym):
     """BTCUSDT → BTC_USDT  (MEXC Futures symbol format)"""
@@ -409,9 +454,10 @@ def build_signal(sym, price, change, buy_v, sell_v,
     global signal_count
     signal_count += 1
 
-    base  = sym[:-4]
-    net   = buy_v - sell_v
-    ratio = buy_v / sell_v if sell_v > 0 else 99.0
+    base     = sym[:-4]
+    net      = buy_v - sell_v
+    ratio    = buy_v / sell_v if sell_v > 0 else 99.0
+    ex_icon  = "🟡" if exchange == "Binance" else "🟠"
 
     # Position from bottom (% of 24h range)
     rng = high24 - low24
@@ -456,6 +502,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
         f"📌 Funding: {funding_label}\n"
         f"\n"
+        f"{ex_icon} Exchange: `{exchange}`\n"
         f"🕐 {_ts()} UTC\n"
         f"{'━' * 20}"
     )
@@ -568,7 +615,7 @@ def _tstr(e):
 
 def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
     base    = sym[:-4]
-    ex_icon = "🟠"
+    ex_icon = "🟡" if exchange == "Binance" else "🟠"
     if ms == 2:
         icon  = "✅"
         title = f"*{base}USDT*  WIN confirmed  +{ms}% reached"
@@ -648,7 +695,10 @@ def _check(sym, ticker, interval):
     if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
 
     # ── Funding Rate (API call — only for candidates that pass klines) ───
-    funding_rate, funding_label = fetch_mexc_funding_rate(sym)
+    if exchange == "Binance":
+        funding_rate, funding_label = fetch_binance_funding_rate(sym)
+    else:
+        funding_rate, funding_label = fetch_mexc_funding_rate(sym)
     funding_bullish = funding_rate is not None and funding_rate > 0.03
 
     if funding_bullish:
@@ -663,7 +713,7 @@ def _check(sym, ticker, interval):
 
     # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
-                                            minutes=60 if interval == "60m" else 10)
+                                            minutes=60 if interval in ("60m", "1h") else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
     super_ratio = _pre_ratio >= 20.0
     effective_spike_min = 1.5 if super_ratio else spike_min
@@ -718,7 +768,10 @@ def _check(sym, ticker, interval):
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
     if ob_spot < 0.44:
         _rej("ob_sellers"); return
-    ob_fut   = fetch_mexc_fut_ob(sym, levels=20)
+    if exchange == "Binance":
+        ob_fut = fetch_ob_imbalance(sym, f"{BINANCE_FUTURES}/fapi/v1", levels=20)
+    else:
+        ob_fut = fetch_mexc_fut_ob(sym, levels=20)
     ob_score = ob_spot * 0.7 + ob_fut * 0.3
     if ob_score < ctx["ob_min"]:
         _rej("ob_low"); return
@@ -940,7 +993,9 @@ def slow_scan(all_t):
     log.info("slow_scan: %d/%d candidates (1h)", len(candidates), len(all_t))
     _diag.clear()
     for sym, ticker in candidates:
-        _check(sym, ticker, "60m")
+        # Binance uses "1h", MEXC uses "60m" for hourly klines
+        _kl_interval = "1h" if ticker.get("exchange") == "Binance" else "60m"
+        _check(sym, ticker, _kl_interval)
         time.sleep(0.12)
     if _diag:
         parts = sorted(_diag.items(), key=lambda x: -x[1])
@@ -960,7 +1015,7 @@ def main():
         "🎯 *MAFIO Liquidity Scanner v3.1*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "✅ Bot started\n"
-        "📡 Exchange: *MEXC* 🟠\n"
+        f"📡 Exchange: *MEXC* 🟠{'  +  *Binance* 🟡' if USE_BINANCE else ''}\n"
         f"⚡ Fast scan (5m): every {FAST_SCAN_S}s\n"
         f"📊 Slow scan (1h): every {SLOW_SCAN_S//60}min\n"
         "📊 Tiers: Micro / Small / Mid / Large cap\n"
@@ -977,8 +1032,15 @@ def main():
             last_fast = now
 
             all_t = fetch_mexc()
-
-            log.info("Tickers: MEXC=%d Tracking=%d", len(all_t), len(tracking))
+            if USE_BINANCE:
+                _bn = fetch_binance()
+                for _sym, _td in _bn.items():
+                    if _sym not in all_t or _td["vol"] > all_t[_sym]["vol"]:
+                        all_t[_sym] = _td
+                log.info("Tickers: MEXC=%d Binance=%d Total=%d Tracking=%d",
+                         len(all_t) - len(_bn), len(_bn), len(all_t), len(tracking))
+            else:
+                log.info("Tickers: MEXC=%d Tracking=%d", len(all_t), len(tracking))
 
             # ── Market Bias ───────────────────────────
             global market_bias, market_cvd, last_bias_log
