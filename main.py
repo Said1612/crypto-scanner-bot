@@ -369,14 +369,20 @@ def clear_bot_commands():
 
 def send(text):
     if not TELEGRAM_TOKEN:
-        print(text); return
+        print(text); return True
+    ok = False
     for cid in filter(None, [CHAT_ID, GROUP_ID]):
         try:
-            S.post(f"{_TG}/sendMessage",
-                   json={"chat_id": cid, "text": text, "parse_mode": "Markdown"},
-                   timeout=10)
+            r = S.post(f"{_TG}/sendMessage",
+                       json={"chat_id": cid, "text": text, "parse_mode": "Markdown"},
+                       timeout=10)
+            if r.status_code == 200:
+                ok = True
+            else:
+                log.error("TG send failed cid=%s status=%s", cid, r.status_code)
         except Exception as e:
             log.error("TG: %s", e)
+    return ok
 
 def _fv(v):
     if v >= 1e6:  return f"{v/1e6:.1f}M$"
@@ -740,12 +746,14 @@ def _check(sym, ticker, interval):
                        high24=ticker["high24"], low24=ticker["low24"],
                        badge=badge, funding_label=funding_label,
                        ob_label=ob_label, ob_pct=int(ob_spot * 100))
-    send(msg)
+    if not send(msg):
+        log.error("SIGNAL SEND FAILED for %s — not tracking to avoid ghost signals", sym)
+        return
     _rej("PASS")
     log.info("SIGNAL %-14s tier=%-5s spike=%.1fx net=%s ratio=%.1fx [%s %s]",
              sym, tier["name"], spike, _fv(net), ratio, exchange, interval)
 
-    # Save state AFTER sending — ensures no tracking without signal delivery
+    # Save state AFTER confirmed delivery — no tracking without notification
     alerted[sym] = now
     tracking[sym] = {
         "entry":    price,
