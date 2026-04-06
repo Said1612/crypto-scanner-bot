@@ -652,9 +652,9 @@ def _check(sym, ticker, interval):
     funding_bullish = funding_rate is not None and funding_rate > 0.03
 
     if funding_bullish:
-        spike_min = max(1.5, spike_min * 0.40)
-        ratio_min = max(1.8, ratio_min * 0.55)
-        net_min   = max(net_min * 0.15, 50)
+        spike_min = max(2.0, spike_min * 0.60)   # floor 1.5→2.0 (CLO 1.6x blocked)
+        ratio_min = max(2.5, ratio_min * 0.70)   # floor 1.8→2.5 (CLO 2.1x, QUAI 2.4x blocked)
+        net_min   = max(net_min * 0.25, 100)
         move_min  = -5.0              # funding bullish: allow dip buying
     else:
         move_min  = ctx["move_min"]   # adaptive: 0.5% bull → 2.5% bear
@@ -840,13 +840,13 @@ def get_market_ctx(bias: int) -> dict:
     Strong Bear (<-60): very strict — almost only funding_bullish signals pass
     """
     if bias >= 60:
-        return {"pos_limit": 0.94, "crash_limit": 25.0,
+        return {"pos_limit": 0.82, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 0.85, "ob_min": 0.38,
-                "move_min": 0.0,  "late_pct": 0.97}  # Strong Bull: high pos = valid breakout
+                "move_min": 0.0,  "late_pct": 0.92}  # Strong Bull
     if bias >= 25:
-        return {"pos_limit": 0.92, "crash_limit": 20.0,
+        return {"pos_limit": 0.80, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
-                "move_min": 0.5,  "late_pct": 0.95}  # Bullish: Micro=2.80x, QUAI(2.4x) still blocked
+                "move_min": 0.5,  "late_pct": 0.92}  # Bullish: block top 20% of range
     if bias >= -24:
         return {"pos_limit": 0.82, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
