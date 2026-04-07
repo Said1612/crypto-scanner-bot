@@ -35,11 +35,11 @@ COOLDOWN    = 7200  # 2h per coin
 # Large cap  > $80M : hardest to move
 TIERS = [
     # Micro: tiny liquidity → ratio 2.0x+ in Bullish (Wolf Flow style)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.0, "ratio": 2.5, "net": 300},
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 2.5, "net": 300},
     # Small: medium liquidity
     {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.8, "ratio": 2.5, "net": 1_500},
     # Mid: good liquidity
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.5, "ratio": 2.2, "net": 15_000},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.5, "ratio": 2.5, "net": 15_000},
     # Large: deep liquidity
     {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.2, "ratio": 1.8, "net": 80_000},
 ]
@@ -691,6 +691,10 @@ def _check(sym, ticker, interval):
     # Real move_min (1.5%) is applied AFTER funding_rate check below
     if move < -1.0: _rej("low_move"); return
 
+    # Thin coin + big move = pump already over (AURORA, SIX type)
+    if move > 8.0 and vol_24h < 200_000:
+        _rej("thin_pump"); return
+
     # Reject dead coins (zero base volume)
     if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
 
@@ -750,6 +754,11 @@ def _check(sym, ticker, interval):
     # Position guard — uses ctx.pos_limit (adaptive)
     if pos24 > ctx["pos_limit"]:
         _rej("high_pos"); return
+
+    # Weak top filter: high in range + weak ratio + no momentum = false signal
+    # (ARTX: pos=73%, ratio=2.2x, move=0.16% | CFG: pos=65%, ratio=2.2x)
+    if pos24 > 0.62 and ratio_min > 0 and move < 1.5:
+        _rej("weak_top"); return
 
     # Late-entry guard
     if move > 4.0 and pos24 > ctx["pos_limit"] - 0.05:
@@ -975,22 +984,34 @@ def fast_scan(all_t):
 # ══════════════════════════════════════════════════════
 
 def slow_scan(all_t):
-    eligible = [
-        (sym, t) for sym, t in all_t.items()
-        if t["vol"] >= 10_000 and t["change"] <= MAX_PUMP_24H
-    ]
-    # Top 200 by volume (Large/Mid caps)
-    by_vol = sorted(eligible, key=lambda x: -x[1]["vol"])[:200]
-    # Top 200 by 24h change (pumping Micro/Small — Wolf Flow style)
-    by_chg = sorted(eligible, key=lambda x: -x[1]["change"])[:200]
-    # Merge without duplicates
-    seen = set()
-    candidates = []
-    for item in by_vol + by_chg:
+    mexc_t    = {s: t for s, t in all_t.items() if t["exchange"] == "MEXC"}
+    binance_t = {s: t for s, t in all_t.items() if t["exchange"] == "Binance"}
+
+    def _pool(coins, pump_limit):
+        elig = [(s, t) for s, t in coins.items()
+                if t["vol"] >= 10_000 and t["change"] <= pump_limit]
+        by_vol = sorted(elig, key=lambda x: -x[1]["vol"])[:200]
+        by_chg = sorted(elig, key=lambda x: -x[1]["change"])[:200]
+        seen, out = set(), []
+        for item in by_vol + by_chg:
+            if item[0] not in seen:
+                seen.add(item[0]); out.append(item)
+        return out
+
+    # MEXC: keep original 60% pump limit
+    # Binance: allow up to 80% (liquid coins can sustain bigger moves)
+    mexc_candidates    = _pool(mexc_t,    MAX_PUMP_24H)
+    binance_candidates = _pool(binance_t, 80.0)
+
+    # Merge — Binance candidates get their own dedicated slots
+    seen, candidates = set(), []
+    for item in mexc_candidates + binance_candidates:
         if item[0] not in seen:
-            seen.add(item[0])
-            candidates.append(item)
-    log.info("slow_scan: %d/%d candidates (1h)", len(candidates), len(all_t))
+            seen.add(item[0]); candidates.append(item)
+
+    log.info("slow_scan: %d/%d candidates (MEXC=%d Binance=%d)",
+             len(candidates), len(all_t),
+             len(mexc_candidates), len(binance_candidates))
     _diag.clear()
     for sym, ticker in candidates:
         # Binance uses "1h", MEXC uses "60m" for hourly klines
