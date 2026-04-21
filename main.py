@@ -44,7 +44,7 @@ TIERS = [
     {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.2, "ratio": 1.8, "net": 80_000},
 ]
 
-FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
+FAST_TICKER_MOVE = 1.5   # 30s price delta to trigger 5m klines fetch
 FLOW_CANDLES     = 3     # candles for flow calculation
 MAX_PUMP_24H     = 60.0  # skip already-pumped coins
 LATE_ENTRY_PCT   = 0.92  # skip if price in top 8% of 24h range (SIGNUSDT/ONTUSDT late-entry filter)
@@ -687,9 +687,8 @@ def _check(sym, ticker, interval):
 
     spike, move, avg_vol = vol_spike_and_move(candles)
 
-    # Early move filter: only block clear downtrends (< -1%)
-    # Real move_min (1.5%) is applied AFTER funding_rate check below
-    if move < -1.0: _rej("low_move"); return
+    # Early move filter: require at least slight positive candle before funding check
+    if move < 0.2: _rej("low_move"); return
 
     # Thin coin + big move = pump already over (AURORA, SIX type)
     if move > 8.0 and vol_24h < 200_000:
@@ -706,12 +705,12 @@ def _check(sym, ticker, interval):
     funding_bullish = funding_rate is not None and funding_rate > 0.03
 
     if funding_bullish:
-        spike_min = max(2.0, spike_min * 0.60)   # floor 1.5→2.0 (CLO 1.6x blocked)
-        ratio_min = max(2.5, ratio_min * 0.70)   # floor 1.8→2.5 (CLO 2.1x, QUAI 2.4x blocked)
-        net_min   = max(net_min * 0.25, 100)
-        move_min  = -5.0              # funding bullish: allow dip buying
+        spike_min = max(2.0, spike_min * 0.75)   # reduced discount: was 0.60
+        ratio_min = max(2.5, ratio_min * 0.85)   # reduced discount: was 0.70
+        net_min   = max(net_min * 0.50, 100)     # less generous: was 0.25
+        move_min  = -1.5              # tighter dip buying: was -5.0
     else:
-        move_min  = ctx["move_min"]   # adaptive: 0.5% bull → 2.5% bear
+        move_min  = ctx["move_min"]   # adaptive: 1.0% bull → 3.5% strong bear
 
     if move < move_min: _rej("low_move"); return
 
@@ -796,7 +795,13 @@ def _check(sym, ticker, interval):
         log.debug("Bearish funding skip %s rate=%.4f%%", sym, funding_rate)
         return
 
-    ema_bull = True
+    # EMA momentum check: price above EMA9, and EMA9 above EMA21 (uptrend)
+    closes   = [float(c[4]) for c in candles]
+    ema9     = calc_ema(closes, 9)
+    ema21    = calc_ema(closes, 21)
+    ema_bull = price >= ema9 * 0.995 and ema9 >= ema21 * 0.998
+    if not ema_bull and not funding_bullish:
+        _rej("ema_bear"); return
 
     # Multi-scanner confirmation badge
     scanner = "fast" if interval == "5m" else "slow"
@@ -904,23 +909,23 @@ def get_market_ctx(bias: int) -> dict:
     if bias >= 60:
         return {"pos_limit": 0.75, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 0.85, "ob_min": 0.38,
-                "move_min": 0.0,  "late_pct": 0.92}  # Strong Bull
+                "move_min": 1.0,  "late_pct": 0.92}  # Strong Bull
     if bias >= 25:
         return {"pos_limit": 0.72, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
-                "move_min": 0.5,  "late_pct": 0.90}  # Bullish: ratio is quality gate
+                "move_min": 1.5,  "late_pct": 0.90}  # Bullish
     if bias >= -24:
         return {"pos_limit": 0.65, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 1.5,  "late_pct": 0.88}  # Neutral
+                "move_min": 2.0,  "late_pct": 0.88}  # Neutral
     if bias >= -60:
         return {"pos_limit": 0.58, "crash_limit":  8.0,
                 "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
-                "move_min": 2.0,  "late_pct": 0.85}  # Bear
+                "move_min": 2.5,  "late_pct": 0.85}  # Bear
     # Strong Bear
     return     {"pos_limit": 0.50, "crash_limit":  5.0,
                 "spike_mult": 1.30, "ratio_mult": 1.20, "ob_min": 0.50,
-                "move_min": 2.5,  "late_pct": 0.85}  # Strong Bear: very strict
+                "move_min": 3.5,  "late_pct": 0.85}  # Strong Bear: very strict
 
 
 def should_signal(tier_name: str, bias: int) -> bool:
