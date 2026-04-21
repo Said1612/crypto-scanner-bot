@@ -34,14 +34,14 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    # Micro: tiny liquidity → ratio 2.0x+ in Bullish (Wolf Flow style)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 2.5, "net": 300},
-    # Small: medium liquidity
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.8, "ratio": 2.5, "net": 1_500},
+    # Micro: tiny liquidity → needs strong conviction to avoid fake pumps
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 3.5, "net": 500},
+    # Small: medium liquidity → solid ratio required
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 3.0, "ratio": 3.0, "net": 2_000},
     # Mid: good liquidity
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.5, "ratio": 2.5, "net": 15_000},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.8, "ratio": 2.5, "net": 20_000},
     # Large: deep liquidity
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.2, "ratio": 1.8, "net": 80_000},
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.5, "ratio": 2.0, "net": 100_000},
 ]
 
 FAST_TICKER_MOVE = 1.5   # 30s price delta to trigger 5m klines fetch
@@ -715,11 +715,12 @@ def _check(sym, ticker, interval):
 
     if move < move_min: _rej("low_move"); return
 
-    # ── Pre-check real ratio for Super-Ratio Bypass ────────────────────
+    # ── Pre-check real ratio for Super-Ratio / Super-Spike Bypass ───────
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
                                             minutes=60 if interval in ("60m", "1h") else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
     super_ratio = _pre_ratio >= 20.0
+    super_spike = spike >= 20.0  # extreme volume explosion → relax ratio req (e.g. XION 30x)
     effective_spike_min = 1.5 if super_ratio else spike_min
     if spike < effective_spike_min:
         _rej("low_spike"); return
@@ -777,7 +778,9 @@ def _check(sym, ticker, interval):
     ratio = buy_v / sell_v
     net   = buy_v - sell_v
 
-    if ratio < ratio_min: _rej("low_ratio"); return
+    # Super-Spike bypass: spike≥20x (e.g. XION 30.3x) can pass with lower ratio
+    effective_ratio_min = max(1.4, ratio_min * 0.45) if super_spike else ratio_min
+    if ratio < effective_ratio_min: _rej("low_ratio"); return
     if net   < net_min:   _rej("low_net"); return
 
     # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
