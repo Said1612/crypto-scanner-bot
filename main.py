@@ -55,6 +55,7 @@ TRACK_HOURS = 24
 
 STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT","AEUR","EURI"}
 SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","IBVOL"}
+SKIP_EXACT    = {"XAU","XAG","EUR","GBP","XPT","XPD"}  # commodities & forex — not crypto
 
 MEXC_BASE    = "https://api.mexc.com/api/v3"
 MEXC_FUTURES = "https://contract.mexc.com/api/v1"
@@ -158,6 +159,7 @@ def _valid(sym):
     if not sym.endswith("USDT"): return False
     b = sym[:-4]
     if b in STABLECOINS: return False
+    if b in SKIP_EXACT: return False
     if any(k in b for k in SKIP_KEYWORDS): return False
     if "(" in sym: return False
     return True
