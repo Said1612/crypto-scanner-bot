@@ -755,9 +755,16 @@ def _check(sym, ticker, interval):
     if pos24 > ctx["pos_limit"]:
         _rej("high_pos"); return
 
+    # Position-adaptive ratio/spike: higher in range = need stronger conviction
+    # CHIP (14%): no penalty — ZRO (74%): would need 1.58x stronger ratio
+    if pos24 > 0.45:
+        pos_factor = 1.0 + (pos24 - 0.45) * 3.8  # 0.45→1.0x, 0.55→1.38x, 0.60→1.57x
+        ratio_min *= pos_factor
+        spike_min = max(spike_min, spike_min * (1.0 + (pos24 - 0.45) * 1.5))
+
     # Weak top filter: high in range + weak ratio + no momentum = false signal
     # (ARTX: pos=73%, ratio=2.2x, move=0.16% | CFG: pos=65%, ratio=2.2x)
-    if pos24 > 0.62 and ratio_min > 0 and move < 1.5:
+    if pos24 > 0.55 and ratio_min > 0 and move < 1.5:
         _rej("weak_top"); return
 
     # Late-entry guard
