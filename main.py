@@ -462,7 +462,20 @@ def build_signal(sym, price, change, buy_v, sell_v,
     # Position from bottom (% of 24h range)
     rng = high24 - low24
     pos_from_bottom = int((price - low24) / rng * 100) if rng > 0 else 0
-    pos_ok = pos_from_bottom <= 60   # in lower 60% of range = good entry
+
+    # Position quality label: shows user how close to bottom they are
+    if pos_from_bottom <= 15:
+        pos_icon  = "🔥🔥"          # MOONSHOT zone — near bottom (HIGH/PORTAL type)
+        pos_label = "BOTTOM ZONE"
+    elif pos_from_bottom <= 30:
+        pos_icon  = "🚀"            # Excellent entry
+        pos_label = "Early Entry"
+    elif pos_from_bottom <= 45:
+        pos_icon  = "✅"            # Good entry
+        pos_label = "Good Entry"
+    else:
+        pos_icon  = "⚠️"            # Mid range — use caution
+        pos_label = "Mid Range"
 
     # Interest / Short Squeeze detection
     if ratio >= 30.0:
@@ -481,16 +494,14 @@ def build_signal(sym, price, change, buy_v, sell_v,
         interest = "⚪ Neutral"
         int_icon = "⚪"
 
-    pos_icon = "✅" if pos_ok else "⚠️"
-
     return (
         f"{'━' * 20}\n"
-        f"💀 *MAFIO SNIPER 15.2* 📡\n"
+        f"💀 *MAFIO SNIPER* 📡\n"
         f"\n"
         f"🆕 *#{base}* 💀 · Signal #{signal_count} {badge}\n"
         f"💰 Price: `${_fp(price)}`\n"
-        f"📈 1h Move: `+{move:.2f}%` ⚡\n"
-        f"📍 Position: `%{pos_from_bottom} from Bottom` {pos_icon}\n"
+        f"📈 1m/1h Move: `+{move:.2f}%` ⚡\n"
+        f"📍 Position: `%{pos_from_bottom} from Bottom` {pos_icon} *{pos_label}*\n"
         f"\n"
         f"⚡ Volume: `{spike:.1f}x` above avg\n"
         f"{int_icon} Interest: {interest}\n"
@@ -519,16 +530,59 @@ def check_milestones(all_t):
             expired.append(sym); continue
         t = all_t.get(sym)
         if not t: continue
-        gain = (t["price"] - info["entry"]) / info["entry"] * 100.0
+        price  = t["price"]
+        entry  = info["entry"]
+        gain   = (price - entry) / entry * 100.0
+        elapsed = int(now - info["t0"])
+        ex_icon = "🟡" if info["exchange"] == "Binance" else "🟠"
+        base    = sym[:-4]
+
+        # Track max gain and min (max loss)
         if gain > info.get("max", 0.0):
             info["max"] = gain
+        if gain < info.get("min", 0.0):
+            info["min"] = gain
+
+        # Reversal warning: price fell 3%+ from peak (only once per peak)
+        peak = info.get("max", 0.0)
+        drop_from_peak = peak - gain
+        if peak >= 5.0 and drop_from_peak >= 3.0 and not info.get("rev_warned"):
+            info["rev_warned"] = True
+            send(
+                f"⚠️ *REVERSAL WARNING* ⚠️\n"
+                f"*#{base}USDT* — Reversal detected\n"
+                f"{'━' * 20}\n"
+                f"🏔 Peak gain:   +{peak:.1f}%\n"
+                f"📉 Now:         +{gain:.2f}% from entry\n"
+                f"💰 Price now:   ${_fp(price)}\n"
+                f"🏁 Entry:       ${_fp(entry)}\n"
+                f"⏱ Time in:      {_tstr(elapsed)}\n"
+                f"💡 Consider exiting — price fell {drop_from_peak:.0f}%+ from peak\n"
+                f"{ex_icon} {info['exchange']}"
+            )
+        elif drop_from_peak < 2.0:
+            info["rev_warned"] = False  # reset if recovered
+
+        # Stop-loss warning at -5% — informational only, does NOT close signal
+        if gain <= -5.0 and not info.get("sl_warned"):
+            info["sl_warned"] = True
+            send(
+                f"🛑 *STOP-LOSS* — *#{base}USDT*\n"
+                f"{'━' * 20}\n"
+                f"📉 Loss:        {gain:.2f}%\n"
+                f"💰 Price now:   ${_fp(price)}\n"
+                f"🏁 Entry:       ${_fp(entry)}\n"
+                f"⏱ Time in:      {_tstr(elapsed)}\n"
+                f"💡 Signal still active — price may recover\n"
+                f"{ex_icon} {info['exchange']}"
+            )
+
         # Find all unnotified milestones reached — send only the highest
         pending = [ms for ms in MILESTONES if ms not in info["hit"] and gain >= ms]
         if pending:
             for ms in pending:
                 info["hit"].add(ms)
-            _fire_ms(sym, pending[-1], gain, t["price"], info["entry"],
-                     int(now - info["t0"]), info["exchange"])
+            _fire_ms(sym, pending[-1], gain, price, entry, elapsed, info["exchange"])
     for s in expired:
         info = tracking.pop(s, None)
         if info:
@@ -536,6 +590,7 @@ def check_milestones(all_t):
                 "sym":     s,
                 "entry":   info["entry"],
                 "max":     info.get("max", 0.0),
+                "min":     info.get("min", 0.0),
                 "elapsed": int(now - info["t0"]),
                 "success": info.get("max", 0.0) >= 5.0,
             })
@@ -834,11 +889,14 @@ def _check(sym, ticker, interval):
     # Save state AFTER confirmed delivery — no tracking without notification
     alerted[sym] = now
     tracking[sym] = {
-        "entry":    price,
-        "t0":       now,
-        "hit":      set(),
-        "max":      0.0,
-        "exchange": exchange,
+        "entry":      price,
+        "t0":         now,
+        "hit":        set(),
+        "max":        0.0,
+        "min":        0.0,
+        "sl_warned":  False,
+        "rev_warned": False,
+        "exchange":   exchange,
     }
     save_state()
 
