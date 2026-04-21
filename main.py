@@ -732,7 +732,9 @@ def _check(sym, ticker, interval):
         _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
-    if vol_24h < tier["vol_min"]:
+    # MEXC volume is often inflated/wash-traded → require 2x the normal minimum
+    vol_min_eff = tier["vol_min"] * 2.0 if exchange == "MEXC" else tier["vol_min"]
+    if vol_24h < vol_min_eff:
         _rej("low_vol"); return
 
     # Market bias gate (no API call)
@@ -753,7 +755,8 @@ def _check(sym, ticker, interval):
         _rej("thin_pump"); return
 
     # Reject dead coins (zero base volume)
-    if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
+    # MEXC threshold higher — many ghost coins with fake tiny volume
+    if avg_vol < (300 if exchange == "MEXC" else 200): _rej("dead_coin"); return
 
     # ── Funding Rate (API call — only for candidates that pass klines) ───
     if exchange == "Binance":
@@ -842,8 +845,15 @@ def _check(sym, ticker, interval):
 
     # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
-    if ob_spot < 0.44:
+    # MEXC OB is thinner and easier to manipulate → stricter threshold
+    ob_spot_min = 0.50 if exchange == "MEXC" else 0.44
+    if ob_spot < ob_spot_min:
         _rej("ob_sellers"); return
+
+    # MEXC wash-trading filter: extreme ratio with no real price move = fake volume
+    # (LINGO 378x/+0.39%, AFK 80x → reversed immediately, ARTX 82x/+0.31%)
+    if exchange == "MEXC" and ratio > 50.0 and move < 2.0:
+        _rej("mexc_wash"); return
     if exchange == "Binance":
         ob_fut = fetch_ob_imbalance(sym, f"{BINANCE_FUTURES}/fapi/v1", levels=20)
     else:
