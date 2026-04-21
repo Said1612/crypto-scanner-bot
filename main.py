@@ -667,6 +667,7 @@ def _check(sym, ticker, interval):
     ctx = get_market_ctx(market_bias)
     spike_min *= ctx["spike_mult"]
     ratio_min *= ctx["ratio_mult"]
+    spike_min = max(spike_min, 2.0)   # hard floor: never accept spike below 2x
 
     # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
     rng = ticker["high24"] - ticker["low24"]
@@ -907,25 +908,25 @@ def get_market_ctx(bias: int) -> dict:
     Strong Bear (<-60): very strict — almost only funding_bullish signals pass
     """
     if bias >= 60:
-        return {"pos_limit": 0.75, "crash_limit": 25.0,
+        return {"pos_limit": 0.60, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 0.85, "ob_min": 0.38,
-                "move_min": 1.0,  "late_pct": 0.92}  # Strong Bull
+                "move_min": 1.0,  "late_pct": 0.88}  # Strong Bull
     if bias >= 25:
-        return {"pos_limit": 0.72, "crash_limit": 20.0,
+        return {"pos_limit": 0.58, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
-                "move_min": 1.5,  "late_pct": 0.90}  # Bullish
+                "move_min": 1.5,  "late_pct": 0.86}  # Bullish
     if bias >= -24:
-        return {"pos_limit": 0.65, "crash_limit": 12.0,
+        return {"pos_limit": 0.55, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 2.0,  "late_pct": 0.88}  # Neutral
+                "move_min": 2.0,  "late_pct": 0.84}  # Neutral
     if bias >= -60:
-        return {"pos_limit": 0.58, "crash_limit":  8.0,
+        return {"pos_limit": 0.50, "crash_limit":  8.0,
                 "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
-                "move_min": 2.5,  "late_pct": 0.85}  # Bear
+                "move_min": 2.5,  "late_pct": 0.82}  # Bear
     # Strong Bear
-    return     {"pos_limit": 0.50, "crash_limit":  5.0,
+    return     {"pos_limit": 0.45, "crash_limit":  5.0,
                 "spike_mult": 1.30, "ratio_mult": 1.20, "ob_min": 0.50,
-                "move_min": 3.5,  "late_pct": 0.85}  # Strong Bear: very strict
+                "move_min": 3.5,  "late_pct": 0.80}  # Strong Bear: very strict
 
 
 def should_signal(tier_name: str, bias: int) -> bool:
