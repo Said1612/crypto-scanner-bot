@@ -44,7 +44,7 @@ TIERS = [
     {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.5, "ratio": 2.0, "net": 100_000},
 ]
 
-FAST_TICKER_MOVE = 1.5   # 30s price delta to trigger 5m klines fetch
+FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
 FLOW_CANDLES     = 3     # candles for flow calculation
 MAX_PUMP_24H     = 60.0  # skip already-pumped coins
 LATE_ENTRY_PCT   = 0.92  # skip if price in top 8% of 24h range (SIGNUSDT/ONTUSDT late-entry filter)
@@ -818,14 +818,14 @@ def _check(sym, ticker, interval):
 
     # Position-adaptive ratio/spike: higher in range = need stronger conviction
     # CHIP (14%): no penalty — ZRO (74%): would need 1.58x stronger ratio
-    if pos24 > 0.45:
-        pos_factor = 1.0 + (pos24 - 0.45) * 3.8  # 0.45→1.0x, 0.55→1.38x, 0.60→1.57x
+    if pos24 > 0.50:
+        pos_factor = 1.0 + (pos24 - 0.50) * 2.5  # 0.50→1.0x, 0.60→1.25x, 0.70→1.50x
         ratio_min *= pos_factor
-        spike_min = max(spike_min, spike_min * (1.0 + (pos24 - 0.45) * 1.5))
+        spike_min = max(spike_min, spike_min * (1.0 + (pos24 - 0.50) * 1.0))
 
     # Weak top filter: high in range + weak ratio + no momentum = false signal
     # (ARTX: pos=73%, ratio=2.2x, move=0.16% | CFG: pos=65%, ratio=2.2x)
-    if pos24 > 0.55 and ratio_min > 0 and move < 1.5:
+    if pos24 > 0.60 and ratio_min > 0 and move < 1.5:
         _rej("weak_top"); return
 
     # Late-entry guard
@@ -988,11 +988,11 @@ def get_market_ctx(bias: int) -> dict:
     Strong Bear (<-60): very strict — almost only funding_bullish signals pass
     """
     if bias >= 60:
-        return {"pos_limit": 0.60, "crash_limit": 25.0,
+        return {"pos_limit": 0.70, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 0.85, "ob_min": 0.38,
                 "move_min": 1.0,  "late_pct": 0.88}  # Strong Bull
     if bias >= 25:
-        return {"pos_limit": 0.58, "crash_limit": 20.0,
+        return {"pos_limit": 0.65, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
                 "move_min": 1.5,  "late_pct": 0.86}  # Bullish
     if bias >= -24:
