@@ -724,7 +724,8 @@ def _check(sym, ticker, interval):
     ctx = get_market_ctx(market_bias)
     spike_min *= ctx["spike_mult"]
     ratio_min *= ctx["ratio_mult"]
-    spike_min = max(spike_min, 2.0)   # hard floor: never accept spike below 2x
+    spike_floor = 1.7 if market_bias >= 25 else (1.8 if market_bias >= -24 else 2.0)
+    spike_min = max(spike_min, spike_floor)  # adaptive floor: lower in bull markets
 
     # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
     rng = ticker["high24"] - ticker["low24"]
@@ -990,15 +991,15 @@ def get_market_ctx(bias: int) -> dict:
     if bias >= 60:
         return {"pos_limit": 0.70, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 0.85, "ob_min": 0.38,
-                "move_min": 1.0,  "late_pct": 0.88}  # Strong Bull
+                "move_min": 0.8,  "late_pct": 0.88}  # Strong Bull
     if bias >= 25:
         return {"pos_limit": 0.65, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
-                "move_min": 1.5,  "late_pct": 0.86}  # Bullish
+                "move_min": 1.0,  "late_pct": 0.86}  # Bullish
     if bias >= -24:
         return {"pos_limit": 0.55, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 2.0,  "late_pct": 0.84}  # Neutral
+                "move_min": 1.5,  "late_pct": 0.84}  # Neutral
     if bias >= -60:
         return {"pos_limit": 0.50, "crash_limit":  8.0,
                 "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
