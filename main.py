@@ -724,7 +724,7 @@ def _check(sym, ticker, interval):
     ctx = get_market_ctx(market_bias)
     spike_min *= ctx["spike_mult"]
     ratio_min *= ctx["ratio_mult"]
-    spike_floor = 1.7 if market_bias >= 25 else (1.8 if market_bias >= -24 else 2.0)
+    spike_floor = 1.5 if market_bias >= 60 else (1.6 if market_bias >= 25 else (1.8 if market_bias >= -24 else 2.0))
     spike_min = max(spike_min, spike_floor)  # adaptive floor: lower in bull markets
 
     # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
@@ -818,11 +818,13 @@ def _check(sym, ticker, interval):
         _rej("high_pos"); return
 
     # Position-adaptive ratio/spike: higher in range = need stronger conviction
-    # CHIP (14%): no penalty — ZRO (74%): would need 1.58x stronger ratio
-    if pos24 > 0.50:
-        pos_factor = 1.0 + (pos24 - 0.50) * 2.5  # 0.50→1.0x, 0.60→1.25x, 0.70→1.50x
+    # In bull market: penalty starts later and is gentler (coins naturally run higher)
+    pf_start = 0.65 if market_bias >= 25 else 0.50
+    pf_coeff = 1.5  if market_bias >= 60 else (2.0 if market_bias >= 25 else 2.5)
+    if pos24 > pf_start:
+        pos_factor = 1.0 + (pos24 - pf_start) * pf_coeff
         ratio_min *= pos_factor
-        spike_min = max(spike_min, spike_min * (1.0 + (pos24 - 0.50) * 1.0))
+        spike_min = max(spike_min, spike_min * (1.0 + (pos24 - pf_start) * 0.8))
 
     # Weak top filter: high in range + weak ratio + no momentum = false signal
     # (ARTX: pos=73%, ratio=2.2x, move=0.16% | CFG: pos=65%, ratio=2.2x)
@@ -989,15 +991,15 @@ def get_market_ctx(bias: int) -> dict:
     Strong Bear (<-60): very strict — almost only funding_bullish signals pass
     """
     if bias >= 60:
-        return {"pos_limit": 0.70, "crash_limit": 25.0,
+        return {"pos_limit": 0.88, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 0.85, "ob_min": 0.38,
-                "move_min": 0.8,  "late_pct": 0.88}  # Strong Bull
+                "move_min": 0.8,  "late_pct": 0.92}  # Strong Bull
     if bias >= 25:
-        return {"pos_limit": 0.65, "crash_limit": 20.0,
+        return {"pos_limit": 0.80, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
-                "move_min": 1.0,  "late_pct": 0.86}  # Bullish
+                "move_min": 1.0,  "late_pct": 0.90}  # Bullish
     if bias >= -24:
-        return {"pos_limit": 0.55, "crash_limit": 12.0,
+        return {"pos_limit": 0.60, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
                 "move_min": 1.5,  "late_pct": 0.84}  # Neutral
     if bias >= -60:
