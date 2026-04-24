@@ -451,12 +451,18 @@ def _pos_range_label(pos: int) -> str:
     return "🔴 Top Range"
 
 def _signal_score(spike, ratio, pos_from_bottom, ob_pct, funding_label) -> float:
-    spike_pts = min(spike / 10.0, 1.0) * 3.5
-    ratio_pts = min(ratio / 5.0,  1.0) * 3.0
-    pos_pts   = (1.0 - pos_from_bottom / 100.0) * 1.5
-    ob_pts    = max((ob_pct - 50) / 50.0, 0.0) * 1.0
-    fund_pts  = 0.5 if "Bullish" in funding_label else (0.0 if "Bearish" in funding_label else 0.25)
-    return round(min(spike_pts + ratio_pts + pos_pts + ob_pts + fund_pts, 10.0), 1)
+    # Spike only counts if ratio backs it up — weak ratio kills spike value
+    ratio_factor = min(ratio / 2.5, 1.0)
+    spike_pts = min(spike / 10.0, 1.0) * 3.0 * ratio_factor
+    ratio_pts = min(ratio / 5.0,  1.0) * 3.5
+    # Reward low range, penalize high range (> 60%)
+    if pos_from_bottom <= 60:
+        pos_pts = (1.0 - pos_from_bottom / 100.0) * 1.5
+    else:
+        pos_pts = -((pos_from_bottom - 60) / 40.0) * 1.0
+    ob_pts   = max((ob_pct - 50) / 50.0, 0.0) * 1.0
+    fund_pts = 0.5 if "Bullish" in funding_label else (0.0 if "Bearish" in funding_label else 0.25)
+    return round(min(max(spike_pts + ratio_pts + pos_pts + ob_pts + fund_pts, 0.0), 10.0), 1)
 
 def _conviction_label(score: float) -> str:
     if score >= 8.0: return "Very High Conviction"
@@ -506,6 +512,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
     score       = _signal_score(spike, ratio, pos_from_bottom, ob_pct, funding_label)
     conviction  = _conviction_label(score)
     move_icon   = "⚡️" if interval == "5m" else "📈"
+    dominance   = int(buy_v / (buy_v + sell_v) * 100) if (buy_v + sell_v) > 0 else 0
 
     return (
         f"⚡️ ALERT — {conviction}\n"
@@ -517,7 +524,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"\n"
         f"⚡️ Volume: `{spike:.1f}x` above avg\n"
         f"{int_icon} Interest: {interest}\n"
-        f"📊 Ratio: `{ratio:.1f}x` 🔥\n"
+        f"📊 Ratio: `{ratio:.1f}x` · Buy `{dominance}%` 🔥\n"
         f"💹 1h Flow:\n"
         f"  📥 In:  `{_fv(buy_v)}`\n"
         f"  📤 Out: `{_fv(sell_v)}`\n"
@@ -746,6 +753,11 @@ def _check(sym, ticker, interval):
     effective_spike_min = 1.5 if super_ratio else spike_min
     if spike < effective_spike_min:
         _rej("low_spike"); return
+
+    # Spike-dump guard: massive volume but weak directional buying
+    # (buyers and sellers both rushing in = distribution, not genuine demand)
+    if spike > 10.0 and _pre_ratio < 2.0:
+        _rej("spike_dump"); return
 
     # Spike candle must close in upper half — rejects pump-dump wicks
     try:
