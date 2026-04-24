@@ -894,6 +894,13 @@ def _check(sym, ticker, interval):
     # MEXC OB is thinner and easier to manipulate → stricter threshold
     # Trend signals: require stronger OB (compensates for lower spike/ratio)
     ob_spot_min = (0.58 if trend_signal else 0.44) if exchange == "MEXC" else (0.58 if trend_signal else 0.44)
+
+    # Weak Signal Gate: borderline spike (within 20% of minimum) + modest move
+    # → require green OB (strong buyers) to confirm (catches FIO-type weak signals)
+    weak_spike = not trend_signal and not super_spike and spike < effective_spike_min * 1.2
+    if weak_spike and move < 5.0 and ob_spot < 0.58:
+        _rej("weak_signal"); return
+
     if ob_spot < ob_spot_min:
         _rej("ob_sellers"); return
 
