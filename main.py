@@ -452,7 +452,8 @@ def _ts():
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
                  high24=0.0, low24=0.0, badge="🔔1",
-                 funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50):
+                 funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50,
+                 is_trend=False):
     global signal_count
     signal_count += 1
 
@@ -496,13 +497,14 @@ def build_signal(sym, price, change, buy_v, sell_v,
         interest = "⚪ Neutral"
         int_icon = "⚪"
 
+    signal_header = "📈 *TREND SIGNAL*" if is_trend else "💀 *MAFIO SNIPER* 📡"
     return (
         f"{'━' * 20}\n"
-        f"💀 *MAFIO SNIPER* 📡\n"
+        f"{signal_header}\n"
         f"\n"
         f"🆕 *#{base}* 💀 · Signal #{signal_count} {badge}\n"
         f"💰 Price: `${_fp(price)}`\n"
-        f"📈 1m/1h Move: `+{move:.2f}%` ⚡\n"
+        f"📈 24h/1h Move: `+{move:.2f}%` {'📈' if is_trend else '⚡'}\n"
         f"📍 Position: `%{pos_from_bottom} from Bottom` {pos_icon} *{pos_label}*\n"
         f"\n"
         f"⚡ Volume: `{spike:.1f}x` above avg\n"
@@ -782,7 +784,8 @@ def _check(sym, ticker, interval):
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
     super_ratio = _pre_ratio >= 20.0
     super_spike = spike >= 20.0  # extreme volume explosion → relax ratio req (e.g. XION 30x)
-    effective_spike_min = 1.5 if super_ratio else spike_min
+    # Trend signals: lower spike threshold — steady accumulation over day, not single candle explosion
+    effective_spike_min = 1.4 if trend_signal else (1.5 if super_ratio else spike_min)
     if spike < effective_spike_min:
         _rej("low_spike"); return
 
@@ -795,6 +798,10 @@ def _check(sym, ticker, interval):
         sc_close_pct = 0.5
     if sc_close_pct < 0.50:
         _rej("dump_wick"); return
+
+    # ── Trend signal detection: coin moving independently in flat/neutral market ──
+    # Criteria: 24h change ≥ 8% while market is not strongly bullish
+    trend_signal = change >= 8.0 and market_bias < 35
 
     # ── Pump & Dump filter ────────────────────────────────────────────────
     rng24 = ticker["high24"] - ticker["low24"]
@@ -813,8 +820,9 @@ def _check(sym, ticker, interval):
         if pump_size > 30.0 and crash_from_top > ctx["crash_limit"]:
             _rej("post_pump"); return
 
-    # Position guard — uses ctx.pos_limit (adaptive)
-    if pos24 > ctx["pos_limit"]:
+    # Position guard — trend signals allowed up to 88% of range
+    effective_pos_limit = 0.88 if trend_signal else ctx["pos_limit"]
+    if pos24 > effective_pos_limit:
         _rej("high_pos"); return
 
     # Position-adaptive ratio/spike: higher in range = need stronger conviction
@@ -842,14 +850,16 @@ def _check(sym, ticker, interval):
     net   = buy_v - sell_v
 
     # Super-Spike bypass: spike≥20x (e.g. XION 30.3x) can pass with lower ratio
-    effective_ratio_min = max(1.4, ratio_min * 0.45) if super_spike else ratio_min
+    # Trend signals: lower ratio requirement — coin has sustained buying over 24h
+    effective_ratio_min = max(1.4, ratio_min * 0.45) if super_spike else (max(1.3, ratio_min * 0.50) if trend_signal else ratio_min)
     if ratio < effective_ratio_min: _rej("low_ratio"); return
     if net   < net_min:   _rej("low_net"); return
 
     # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
     # MEXC OB is thinner and easier to manipulate → stricter threshold
-    ob_spot_min = 0.50 if exchange == "MEXC" else 0.44
+    # Trend signals: require stronger OB (compensates for lower spike/ratio)
+    ob_spot_min = (0.60 if trend_signal else 0.50) if exchange == "MEXC" else (0.58 if trend_signal else 0.44)
     if ob_spot < ob_spot_min:
         _rej("ob_sellers"); return
 
@@ -893,7 +903,8 @@ def _check(sym, ticker, interval):
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
                        badge=badge, funding_label=funding_label,
-                       ob_label=ob_label, ob_pct=int(ob_spot * 100))
+                       ob_label=ob_label, ob_pct=int(ob_spot * 100),
+                       is_trend=trend_signal)
     if not send(msg):
         log.error("SIGNAL SEND FAILED for %s — not tracking to avoid ghost signals", sym)
         return
