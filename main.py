@@ -799,6 +799,11 @@ def _check(sym, ticker, interval):
     spike_floor = 2.0 if market_bias >= 60 else (2.8 if market_bias >= 25 else (3.0 if market_bias >= -24 else (3.5 if market_bias >= -60 else 4.0)))
     spike_min = max(spike_min, spike_floor)
 
+    # Binance structurally has lower buy/sell ratios than MEXC — thresholds calibrated
+    # on MEXC data are too strict. Winners: GLMR 1.9x, HEMI 2.3x, API3 2.3x, LAYER 1.6x
+    if exchange == "Binance":
+        ratio_min = max(1.2, ratio_min * 0.60)
+
     # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
     rng = ticker["high24"] - ticker["low24"]
     if rng > 0 and (price - ticker["low24"]) / rng > ctx["late_pct"]:
@@ -840,7 +845,8 @@ def _check(sym, ticker, interval):
 
     if funding_bullish:
         spike_min = max(2.0, spike_min * 0.75)   # reduced discount: was 0.60
-        ratio_min = max(2.5, ratio_min * 0.85)   # reduced discount: was 0.70
+        _ratio_floor = 1.2 if exchange == "Binance" else 2.5
+        ratio_min = max(_ratio_floor, ratio_min * 0.85)   # reduced discount: was 0.70
         net_min   = max(net_min * 0.50, 100)     # less generous: was 0.25
         move_min  = -1.5              # tighter dip buying: was -5.0
     else:
