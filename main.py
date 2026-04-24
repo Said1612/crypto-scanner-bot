@@ -34,14 +34,14 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    # Micro: tiny liquidity — spike+OB protect quality (ratio can be lower)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 1.5, "net": 500},
-    # Small: medium liquidity
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.5, "ratio": 1.4, "net": 2_000},
-    # Mid: good liquidity
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.2, "ratio": 1.3, "net": 20_000},
-    # Large: deep liquidity
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.0, "ratio": 1.2, "net": 100_000},
+    # Micro: ratio≥3.0x and net≥$8K required (data: all losers had ratio<4x and net<$12K)
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 3.0, "net": 8_000},
+    # Small: ratio≥2.5x and net≥$15K (JCT/PTB/SIX/KAS all had net<$15K → losers)
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.5, "ratio": 2.5, "net": 15_000},
+    # Mid: ratio≥2.0x and net≥$30K
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.2, "ratio": 2.0, "net": 30_000},
+    # Large: ratio≥1.5x and net≥$150K
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.0, "ratio": 1.5, "net": 150_000},
 ]
 
 FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
@@ -53,7 +53,7 @@ MILESTONES  = [2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100,
                125, 150, 175, 200, 250, 300, 400, 500]
 TRACK_HOURS = 24
 
-STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT","AEUR","EURI","RLUSD","XUSD","USDE","USDS","FRAX"}
+STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB","USDX","EURC","USDT","AEUR","EURI","RLUSD","XUSD","USDE","USDS","FRAX","USD1"}
 SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","IBVOL"}
 SKIP_EXACT    = {"XAU","XAG","EUR","GBP","XPT","XPD"}  # commodities & forex — not crypto
 
@@ -469,7 +469,8 @@ def calc_signal_score(spike, ratio, ob_spot, move, pos24):
     s_ob   = min(10.0, max(0.0, (ob_spot - 0.44) / 0.36 * 10.0))
     s_move = min(10.0, max(0.0, move / 5.0 * 10.0))
     s_pos  = max(0.0, (1.0 - pos24 / 0.70) * 10.0)
-    return round(s_spike * 0.35 + s_ratio * 0.25 + s_ob * 0.20 + s_move * 0.12 + s_pos * 0.08, 1)
+    # Weights: ratio is the strongest predictor (ratio≥9x = 0 losses in dataset)
+    return round(s_ratio * 0.40 + s_ob * 0.20 + s_spike * 0.15 + s_move * 0.15 + s_pos * 0.10, 1)
 
 
 # ══════════════════════════════════════════════════════
@@ -836,10 +837,11 @@ def _check(sym, ticker, interval):
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
                                             minutes=60 if interval in ("60m", "1h") else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
-    super_ratio = _pre_ratio >= 20.0
-    super_spike = spike >= 20.0  # extreme volume explosion → relax ratio req (e.g. XION 30x)
-    # Trend signals: lower spike threshold — steady accumulation over day, not single candle explosion
-    effective_spike_min = 1.4 if trend_signal else (1.5 if super_ratio else spike_min)
+    super_ratio = _pre_ratio >= 20.0  # whale accumulation — bypasses most filters
+    high_ratio  = _pre_ratio >= 8.0   # ENJ (12.5x,2.1x spike→won), PE#9 (9.3x,66.9x spike→won)
+    super_spike = spike >= 20.0       # extreme volume explosion → relax ratio req
+    # Spike threshold: high ratio compensates for low spike (data: ENJ 2.1x spike, 12.5x ratio → won)
+    effective_spike_min = 1.4 if trend_signal else (1.5 if super_ratio else (2.0 if high_ratio else spike_min))
     if spike < effective_spike_min:
         _rej("low_spike"); return
 
@@ -874,10 +876,12 @@ def _check(sym, ticker, interval):
         if pump_size > 30.0 and crash_from_top > ctx["crash_limit"]:
             _rej("post_pump"); return
 
-    # Position guard — trend signals allowed up to 88% of range
-    effective_pos_limit = 0.88 if trend_signal else ctx["pos_limit"]
-    if pos24 > effective_pos_limit:
-        _rej("high_pos"); return
+    # Position guard — super_ratio bypasses (BLINKY: 86% position, 28.7x ratio → +26%)
+    # Whale accumulation can succeed at any position; normal signals respect pos_limit
+    if not super_ratio:
+        effective_pos_limit = 0.88 if trend_signal else ctx["pos_limit"]
+        if pos24 > effective_pos_limit:
+            _rej("high_pos"); return
 
     # Position-adaptive ratio/spike: higher in range = need stronger conviction
     # In bull market: penalty starts later and is gentler (coins naturally run higher)
@@ -921,9 +925,17 @@ def _check(sym, ticker, interval):
 
     # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
-    # MEXC OB is thinner and easier to manipulate → stricter threshold
-    # Trend signals: require stronger OB (compensates for lower spike/ratio)
-    ob_spot_min = (0.58 if trend_signal else 0.44) if exchange == "MEXC" else (0.58 if trend_signal else 0.44)
+    # OB threshold — data-driven from 25 signals (BEAT 46%/RIVER 48% → lost, PE#9 36% → won)
+    if super_ratio or super_spike:
+        # Whale accumulation absorbs sellers regardless of OB (MWXT: 267x ratio, 52% bids → +18%)
+        ob_spot_min = 0.30
+    elif trend_signal:
+        ob_spot_min = 0.58  # independent movers need stronger confirmation
+    elif ob_spot >= 0.45 and net >= net_min * 3:
+        # Absorption model: massive net flow overcomes weak bids (4/USDT: 48% bids, 216M vol → +30%)
+        ob_spot_min = 0.45
+    else:
+        ob_spot_min = 0.55  # raised from 0.44 — BEAT(46%)/RIVER(48%) lesson
 
     if ob_spot < ob_spot_min:
         _rej("ob_sellers"); return
