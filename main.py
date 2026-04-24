@@ -736,7 +736,7 @@ def _check(sym, ticker, interval):
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
     # MEXC volume is often inflated/wash-traded → require 2x the normal minimum
-    vol_min_eff = tier["vol_min"] * 2.0 if exchange == "MEXC" else tier["vol_min"]
+    vol_min_eff = tier["vol_min"] * 1.5 if exchange == "MEXC" else tier["vol_min"]
     if vol_24h < vol_min_eff:
         _rej("low_vol"); return
 
