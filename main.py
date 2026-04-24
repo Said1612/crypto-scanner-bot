@@ -443,6 +443,28 @@ def _fp(p):
 def _ts():
     return datetime.now(timezone.utc).strftime("%d %b %Y %H:%M")
 
+def _pos_range_label(pos: int) -> str:
+    if pos <= 20:  return "✅ Bottom Range"
+    if pos <= 40:  return "✅ Low Range"
+    if pos <= 60:  return "⚠️ Mid Range"
+    if pos <= 80:  return "🔴 High Range"
+    return "🔴 Top Range"
+
+def _signal_score(spike, ratio, pos_from_bottom, ob_pct, funding_label) -> float:
+    spike_pts = min(spike / 10.0, 1.0) * 3.5
+    ratio_pts = min(ratio / 5.0,  1.0) * 3.0
+    pos_pts   = (1.0 - pos_from_bottom / 100.0) * 1.5
+    ob_pts    = max((ob_pct - 50) / 50.0, 0.0) * 1.0
+    fund_pts  = 0.5 if "Bullish" in funding_label else (0.0 if "Bearish" in funding_label else 0.25)
+    return round(min(spike_pts + ratio_pts + pos_pts + ob_pts + fund_pts, 10.0), 1)
+
+def _conviction_label(score: float) -> str:
+    if score >= 8.0: return "Very High Conviction"
+    if score >= 6.5: return "High Conviction"
+    if score >= 5.0: return "Medium Conviction"
+    if score >= 3.5: return "Low Conviction"
+    return "Very Low Conviction"
+
 # ══════════════════════════════════════════════════════
 #  SIGNAL MESSAGE
 # ══════════════════════════════════════════════════════
@@ -462,7 +484,6 @@ def build_signal(sym, price, change, buy_v, sell_v,
     # Position from bottom (% of 24h range)
     rng = high24 - low24
     pos_from_bottom = int((price - low24) / rng * 100) if rng > 0 else 0
-    pos_ok = pos_from_bottom <= 60   # in lower 60% of range = good entry
 
     # Interest / Short Squeeze detection
     if ratio >= 30.0:
@@ -481,18 +502,19 @@ def build_signal(sym, price, change, buy_v, sell_v,
         interest = "⚪ Neutral"
         int_icon = "⚪"
 
-    pos_icon = "✅" if pos_ok else "⚠️"
+    range_label = _pos_range_label(pos_from_bottom)
+    score       = _signal_score(spike, ratio, pos_from_bottom, ob_pct, funding_label)
+    conviction  = _conviction_label(score)
 
     return (
-        f"{'━' * 20}\n"
-        f"💀 *MAFIO SNIPER 15.2* 📡\n"
+        f"⚡️ ALERT — {conviction}\n"
         f"\n"
         f"🆕 *#{base}* 💀 · Signal #{signal_count} {badge}\n"
         f"💰 Price: `${_fp(price)}`\n"
-        f"📈 1h Move: `+{move:.2f}%` ⚡\n"
-        f"📍 Position: `%{pos_from_bottom} from Bottom` {pos_icon}\n"
+        f"📈 24h/1h Move: `+{move:.2f}%` ⚡️\n"
+        f"📍 Position: `{pos_from_bottom}% from Bottom` {range_label}\n"
         f"\n"
-        f"⚡ Volume: `{spike:.1f}x` above avg\n"
+        f"⚡️ Volume: `{spike:.1f}x` above avg\n"
         f"{int_icon} Interest: {interest}\n"
         f"📊 Ratio: `{ratio:.1f}x` 🔥\n"
         f"💹 1h Flow:\n"
@@ -501,10 +523,10 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"  ▲ Net: `+{_fv(net)}` ✅\n"
         f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
         f"📌 Funding: {funding_label}\n"
+        f"🎯 Score: `{score}/10`\n"
         f"\n"
         f"{ex_icon} Exchange: `{exchange}`\n"
-        f"🕐 {_ts()} UTC\n"
-        f"{'━' * 20}"
+        f"🕐 {_ts()} UTC"
     )
 
 # ══════════════════════════════════════════════════════
