@@ -34,14 +34,14 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    # Micro: tiny liquidity → needs strong conviction to avoid fake pumps
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 3.5, "net": 500},
-    # Small: medium liquidity → solid ratio required
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 3.0, "ratio": 3.0, "net": 2_000},
+    # Micro: tiny liquidity — spike+OB protect quality (ratio can be lower)
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 1.5, "net": 500},
+    # Small: medium liquidity
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.5, "ratio": 1.4, "net": 2_000},
     # Mid: good liquidity
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.8, "ratio": 2.5, "net": 20_000},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.2, "ratio": 1.3, "net": 20_000},
     # Large: deep liquidity
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.5, "ratio": 2.0, "net": 100_000},
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.0, "ratio": 1.2, "net": 100_000},
 ]
 
 FAST_TICKER_MOVE = 1.0   # 30s price delta to trigger 5m klines fetch
@@ -869,7 +869,7 @@ def _check(sym, ticker, interval):
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
     # MEXC OB is thinner and easier to manipulate → stricter threshold
     # Trend signals: require stronger OB (compensates for lower spike/ratio)
-    ob_spot_min = (0.60 if trend_signal else 0.50) if exchange == "MEXC" else (0.58 if trend_signal else 0.44)
+    ob_spot_min = (0.58 if trend_signal else 0.44) if exchange == "MEXC" else (0.58 if trend_signal else 0.44)
     if ob_spot < ob_spot_min:
         _rej("ob_sellers"); return
 
@@ -1014,15 +1014,15 @@ def get_market_ctx(bias: int) -> dict:
     if bias >= 60:
         return {"pos_limit": 0.88, "crash_limit": 25.0,
                 "spike_mult": 0.65, "ratio_mult": 0.85, "ob_min": 0.38,
-                "move_min": 0.8,  "late_pct": 0.92}  # Strong Bull
+                "move_min": 0.3,  "late_pct": 0.92}  # Strong Bull
     if bias >= 25:
         return {"pos_limit": 0.80, "crash_limit": 20.0,
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
-                "move_min": 1.0,  "late_pct": 0.90}  # Bullish
+                "move_min": 0.5,  "late_pct": 0.90}  # Bullish
     if bias >= -24:
         return {"pos_limit": 0.72, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 1.5,  "late_pct": 0.88}  # Neutral
+                "move_min": 0.8,  "late_pct": 0.88}  # Neutral
     if bias >= -60:
         return {"pos_limit": 0.50, "crash_limit":  8.0,
                 "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
