@@ -23,7 +23,7 @@ REDIS_TOKEN    = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY      = "mafio_v31"
 PROXY_URL      = os.getenv("PROXY_URL", "")   # e.g. http://user:pass@host:port
 
-FAST_SCAN_S = 30    # every 30s
+FAST_SCAN_S = 5     # every 5s
 SLOW_SCAN_S = 300   # every 5min (1h klines)
 COOLDOWN    = 7200  # 2h per coin
 
@@ -1013,7 +1013,7 @@ def fast_scan(all_t):
     prev_prices = {sym: t["price"] for sym, t in all_t.items()}
     if not movers: return
     movers.sort(key=lambda x: -x[1])
-    for sym, _, ticker in movers[:30]:
+    for sym, _, ticker in movers[:50]:
         _check(sym, ticker, "5m")
         time.sleep(0.05)
 
