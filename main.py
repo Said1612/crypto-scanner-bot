@@ -471,7 +471,7 @@ def _conviction_label(score: float) -> str:
 
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
-                 high24=0.0, low24=0.0, badge="🔔1",
+                 high24=0.0, low24=0.0, badge="🔔1", interval="5m",
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50):
     global signal_count
     signal_count += 1
@@ -505,13 +505,14 @@ def build_signal(sym, price, change, buy_v, sell_v,
     range_label = _pos_range_label(pos_from_bottom)
     score       = _signal_score(spike, ratio, pos_from_bottom, ob_pct, funding_label)
     conviction  = _conviction_label(score)
+    move_icon   = "⚡️" if interval == "5m" else "📈"
 
     return (
         f"⚡️ ALERT — {conviction}\n"
         f"\n"
         f"🆕 *#{base}* 💀 · Signal #{signal_count} {badge}\n"
         f"💰 Price: `${_fp(price)}`\n"
-        f"📈 24h/1h Move: `+{move:.2f}%` ⚡️\n"
+        f"📈 24h/1h Move: `+{move:.2f}%` {move_icon}\n"
         f"📍 Position: `{pos_from_bottom}% from Bottom` {range_label}\n"
         f"\n"
         f"⚡️ Volume: `{spike:.1f}x` above avg\n"
@@ -828,7 +829,8 @@ def _check(sym, ticker, interval):
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
-                       badge=badge, funding_label=funding_label,
+                       badge=badge, interval=interval,
+                       funding_label=funding_label,
                        ob_label=ob_label, ob_pct=int(ob_spot * 100))
     if not send(msg):
         log.error("SIGNAL SEND FAILED for %s — not tracking to avoid ghost signals", sym)
