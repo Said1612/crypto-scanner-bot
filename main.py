@@ -819,7 +819,7 @@ def _check(sym, ticker, interval):
 
     # Position-adaptive ratio/spike: higher in range = need stronger conviction
     # In bull market: penalty starts later and is gentler (coins naturally run higher)
-    pf_start = 0.65 if market_bias >= 25 else 0.50
+    pf_start = 0.65 if market_bias >= 60 else (0.60 if market_bias >= 25 else (0.55 if market_bias >= -24 else 0.50))
     pf_coeff = 1.5  if market_bias >= 60 else (2.0 if market_bias >= 25 else 2.5)
     if pos24 > pf_start:
         pos_factor = 1.0 + (pos24 - pf_start) * pf_coeff
@@ -999,9 +999,9 @@ def get_market_ctx(bias: int) -> dict:
                 "spike_mult": 0.80, "ratio_mult": 0.80, "ob_min": 0.40,
                 "move_min": 1.0,  "late_pct": 0.90}  # Bullish
     if bias >= -24:
-        return {"pos_limit": 0.60, "crash_limit": 12.0,
+        return {"pos_limit": 0.72, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 1.5,  "late_pct": 0.84}  # Neutral
+                "move_min": 1.5,  "late_pct": 0.88}  # Neutral
     if bias >= -60:
         return {"pos_limit": 0.50, "crash_limit":  8.0,
                 "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
