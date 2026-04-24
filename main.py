@@ -590,13 +590,37 @@ def check_milestones(all_t):
     for s in expired:
         info = tracking.pop(s, None)
         if info:
+            peak_gain  = info.get("max", 0.0)
+            worst_loss = info.get("min", 0.0)
+            elapsed_s  = int(now - info["t0"])
+            base       = s[:-4]
+            ex_icon    = "🟡" if info.get("exchange") == "Binance" else "🟠"
+            if peak_gain >= 10.0:
+                result_icon = "🚀"
+            elif peak_gain >= 5.0:
+                result_icon = "✅"
+            elif peak_gain >= 2.0:
+                result_icon = "📈"
+            elif peak_gain >= 0.0:
+                result_icon = "➡️"
+            else:
+                result_icon = "❌"
+            send(
+                f"{result_icon} *SIGNAL CLOSED* — *#{base}USDT*\n"
+                f"{'━' * 20}\n"
+                f"🏔 Peak gain:   +{peak_gain:.2f}%\n"
+                f"📉 Worst drop:  {worst_loss:.2f}%\n"
+                f"🏁 Entry price: ${_fp(info['entry'])}\n"
+                f"⏱ Tracked for: {_tstr(elapsed_s)}\n"
+                f"{ex_icon} {info.get('exchange', 'Unknown')}"
+            )
             daily_results.append({
                 "sym":     s,
                 "entry":   info["entry"],
-                "max":     info.get("max", 0.0),
-                "min":     info.get("min", 0.0),
-                "elapsed": int(now - info["t0"]),
-                "success": info.get("max", 0.0) >= 5.0,
+                "max":     peak_gain,
+                "min":     worst_loss,
+                "elapsed": elapsed_s,
+                "success": peak_gain >= 5.0,
             })
 
 def send_daily_report():
