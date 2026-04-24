@@ -446,6 +446,33 @@ def _ts():
     return datetime.now(timezone.utc).strftime("%d %b %Y %H:%M")
 
 # ══════════════════════════════════════════════════════
+#  SIGNAL QUALITY SCORE
+# ══════════════════════════════════════════════════════
+
+def calc_signal_score(spike, ratio, ob_spot, move, pos24):
+    """Quality score 0-10. Higher = stronger conviction."""
+    # Spike: 2x=0, 5x=3, 10x=6, 15x=8, 20x+=10
+    if   spike >= 20: s_spike = 10.0
+    elif spike >= 15: s_spike = 8.0 + (spike - 15) / 5 * 2
+    elif spike >= 10: s_spike = 6.0 + (spike - 10) / 5 * 2
+    elif spike >=  5: s_spike = 3.0 + (spike -  5) / 5 * 3
+    elif spike >=  2: s_spike =       (spike -  2) / 3 * 3
+    else:             s_spike = 0.0
+    # Ratio: 1x=0, 2x=3, 3x=5, 5x=7, 8x=9, 10x+=10
+    if   ratio >= 10: s_ratio = 10.0
+    elif ratio >=  8: s_ratio = 9.0 + (ratio -  8) / 2 * 1
+    elif ratio >=  5: s_ratio = 7.0 + (ratio -  5) / 3 * 2
+    elif ratio >=  3: s_ratio = 5.0 + (ratio -  3) / 2 * 2
+    elif ratio >=  2: s_ratio = 3.0 + (ratio -  2) * 2
+    elif ratio >=  1: s_ratio =       (ratio -  1) * 3
+    else:             s_ratio = 0.0
+    s_ob   = min(10.0, max(0.0, (ob_spot - 0.44) / 0.36 * 10.0))
+    s_move = min(10.0, max(0.0, move / 5.0 * 10.0))
+    s_pos  = max(0.0, (1.0 - pos24 / 0.70) * 10.0)
+    return round(s_spike * 0.35 + s_ratio * 0.25 + s_ob * 0.20 + s_move * 0.12 + s_pos * 0.08, 1)
+
+
+# ══════════════════════════════════════════════════════
 #  SIGNAL MESSAGE
 # ══════════════════════════════════════════════════════
 
@@ -453,7 +480,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
                  high24=0.0, low24=0.0, badge="🔔1",
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50,
-                 is_trend=False):
+                 is_trend=False, score=0.0):
     global signal_count
     signal_count += 1
 
@@ -516,6 +543,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"  ▲ Net: `+{_fv(net)}` ✅\n"
         f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
         f"📌 Funding: {funding_label}\n"
+        f"🎯 Score: `{score:.1f}/10`\n"
         f"\n"
         f"{ex_icon} Exchange: `{exchange}`\n"
         f"🕐 {_ts()} UTC\n"
@@ -750,8 +778,10 @@ def _check(sym, ticker, interval):
     ctx = get_market_ctx(market_bias)
     spike_min *= ctx["spike_mult"]
     ratio_min *= ctx["ratio_mult"]
-    spike_floor = 1.5 if market_bias >= 60 else (1.6 if market_bias >= 25 else (1.8 if market_bias >= -24 else 2.0))
-    spike_min = max(spike_min, spike_floor)  # adaptive floor: lower in bull markets
+    # FIO lesson: 2.6x spike in bullish market = noise, not institutional buying.
+    # Real accumulation events show 3x+ (bullish) or 5x+ (neutral). Raise floors.
+    spike_floor = 2.0 if market_bias >= 60 else (2.8 if market_bias >= 25 else (3.0 if market_bias >= -24 else (3.5 if market_bias >= -60 else 4.0)))
+    spike_min = max(spike_min, spike_floor)
 
     # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
     rng = ticker["high24"] - ticker["low24"]
@@ -895,12 +925,6 @@ def _check(sym, ticker, interval):
     # Trend signals: require stronger OB (compensates for lower spike/ratio)
     ob_spot_min = (0.58 if trend_signal else 0.44) if exchange == "MEXC" else (0.58 if trend_signal else 0.44)
 
-    # Weak Signal Gate: borderline spike (within 20% of minimum) + modest move
-    # → require green OB (strong buyers) to confirm (catches FIO-type weak signals)
-    weak_spike = not trend_signal and not super_spike and spike < effective_spike_min * 1.2
-    if weak_spike and move < 5.0 and ob_spot < 0.58:
-        _rej("weak_signal"); return
-
     if ob_spot < ob_spot_min:
         _rej("ob_sellers"); return
 
@@ -940,12 +964,16 @@ def _check(sym, ticker, interval):
     _, badge = _register_confirm(sym, scanner)
 
     # Fire
+    rng24_pos = ticker["high24"] - ticker["low24"]
+    pos24_for_score = (price - ticker["low24"]) / rng24_pos if rng24_pos > 0 else 0.5
+    sig_score = calc_signal_score(spike, ratio, ob_spot, move, pos24_for_score)
+
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
                        badge=badge, funding_label=funding_label,
                        ob_label=ob_label, ob_pct=int(ob_spot * 100),
-                       is_trend=trend_signal)
+                       is_trend=trend_signal, score=sig_score)
     if not send(msg):
         log.error("SIGNAL SEND FAILED for %s — not tracking to avoid ghost signals", sym)
         return
