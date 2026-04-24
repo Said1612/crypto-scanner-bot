@@ -850,10 +850,20 @@ def _check(sym, ticker, interval):
     net   = buy_v - sell_v
 
     # Super-Spike bypass: spike≥20x (e.g. XION 30.3x) can pass with lower ratio
-    # Trend signals: lower ratio requirement — coin has sustained buying over 24h
-    effective_ratio_min = max(1.4, ratio_min * 0.45) if super_spike else (max(1.3, ratio_min * 0.50) if trend_signal else ratio_min)
+    # ENJ lesson: spike 33x + OB 74% → +250% even with ratio 0.6x
+    # When spike is massive AND OB shows strong buyers → ratio can be very low
+    ob_quick_for_ratio = fetch_ob_imbalance(sym, base_url, levels=5)
+    super_spike_strong_ob = super_spike and ob_quick_for_ratio >= 0.65
+    if super_spike_strong_ob:
+        effective_ratio_min = 0.4   # sell into buyer wall — OB is the real signal
+    elif super_spike:
+        effective_ratio_min = max(1.4, ratio_min * 0.45)
+    elif trend_signal:
+        effective_ratio_min = max(1.3, ratio_min * 0.50)
+    else:
+        effective_ratio_min = ratio_min
     if ratio < effective_ratio_min: _rej("low_ratio"); return
-    if net   < net_min:   _rej("low_net"); return
+    if net   < net_min and not super_spike_strong_ob: _rej("low_net"); return
 
     # ── Step 3: Order book imbalance (spot 70% + futures 30%) ────────────
     ob_spot  = fetch_ob_imbalance(sym, base_url, levels=20)
