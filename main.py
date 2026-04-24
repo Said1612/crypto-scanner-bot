@@ -525,10 +525,25 @@ def build_signal(sym, price, change, buy_v, sell_v,
         interest = "⚪ Neutral"
         int_icon = "⚪"
 
-    signal_header = "📈 *TREND SIGNAL*" if is_trend else "💀 *MAFIO SNIPER* 📡"
+    # Signal classification based on score + net flow
+    if net >= 500_000 and pos_from_bottom <= 60:
+        sig_class = "🐋 *MOONSHOT — Institutional Flow*"
+    elif score >= 7.5:
+        sig_class = "🚀 *WHALE ACTION — High Conviction*"
+    elif score >= 5.5:
+        sig_class = "🟡 *SCALP — Medium Conviction*"
+    else:
+        sig_class = "⚡ *ALERT — Low Conviction*"
+
+    if is_trend:
+        signal_header = "📈 *TREND SIGNAL*"
+    else:
+        signal_header = "💀 *MAFIO SNIPER* 📡"
+
     return (
         f"{'━' * 20}\n"
         f"{signal_header}\n"
+        f"{sig_class}\n"
         f"\n"
         f"🆕 *#{base}* 💀 · Signal #{signal_count} {badge}\n"
         f"💰 Price: `${_fp(price)}`\n"
@@ -941,8 +956,9 @@ def _check(sym, ticker, interval):
         _rej("ob_sellers"); return
 
     # MEXC wash-trading filter: extreme ratio with no real price move = fake volume
-    # (LINGO 378x/+0.39%, AFK 80x → reversed immediately, ARTX 82x/+0.31%)
-    if exchange == "MEXC" and ratio > 50.0 and move < 2.0:
+    # EXCEPTION: real accumulation has large net flow (MWXT: 267x ratio, net $38K → +18%)
+    # Wash trading has near-zero net (same buyer/seller loop) → net < net_min*2
+    if exchange == "MEXC" and ratio > 50.0 and move < 2.0 and net < net_min * 2:
         _rej("mexc_wash"); return
     if exchange == "Binance":
         ob_fut = fetch_ob_imbalance(sym, f"{BINANCE_FUTURES}/fapi/v1", levels=20)
