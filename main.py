@@ -854,6 +854,10 @@ def _check(sym, ticker, interval):
 
     if move < move_min: _rej("low_move"); return
 
+    # ── Trend signal detection: coin moving independently in flat/neutral market ──
+    # Criteria: 24h change ≥ 8% while market is not strongly bullish
+    trend_signal = change >= 8.0 and market_bias < 35
+
     # ── Pre-check real ratio for Super-Ratio / Super-Spike Bypass ───────
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
                                             minutes=60 if interval in ("60m", "1h") else 10)
@@ -875,10 +879,6 @@ def _check(sym, ticker, interval):
         sc_close_pct = 0.5
     if sc_close_pct < 0.50:
         _rej("dump_wick"); return
-
-    # ── Trend signal detection: coin moving independently in flat/neutral market ──
-    # Criteria: 24h change ≥ 8% while market is not strongly bullish
-    trend_signal = change >= 8.0 and market_bias < 35
 
     # ── Pump & Dump filter ────────────────────────────────────────────────
     rng24 = ticker["high24"] - ticker["low24"]
