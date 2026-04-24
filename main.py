@@ -23,7 +23,7 @@ REDIS_TOKEN    = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY      = "mafio_v31"
 PROXY_URL      = os.getenv("PROXY_URL", "")   # e.g. http://user:pass@host:port
 
-FAST_SCAN_S = 30    # every 30s
+FAST_SCAN_S = 5     # every 5s
 SLOW_SCAN_S = 300   # every 5min (1h klines)
 COOLDOWN    = 7200  # 2h per coin
 
@@ -34,8 +34,8 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    # Micro: tiny liquidity → ratio 2.0x+ in Bullish (Wolf Flow style)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 2.5, "net": 300},
+    # Micro: tiny liquidity — lower floors to catch early MEXC micro-cap pumps (Wolf Flow style)
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 20_000,    "spike": 3.0, "ratio": 2.5, "net": 300},
     # Small: medium liquidity
     {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.8, "ratio": 2.5, "net": 1_500},
     # Mid: good liquidity
@@ -443,13 +443,41 @@ def _fp(p):
 def _ts():
     return datetime.now(timezone.utc).strftime("%d %b %Y %H:%M")
 
+def _pos_range_label(pos: int) -> str:
+    if pos <= 20:  return "✅ Bottom Range"
+    if pos <= 40:  return "✅ Low Range"
+    if pos <= 60:  return "⚠️ Mid Range"
+    if pos <= 80:  return "🔴 High Range"
+    return "🔴 Top Range"
+
+def _signal_score(spike, ratio, pos_from_bottom, ob_pct, funding_label) -> float:
+    # Spike only counts if ratio backs it up — weak ratio kills spike value
+    ratio_factor = min(ratio / 2.5, 1.0)
+    spike_pts = min(spike / 10.0, 1.0) * 3.0 * ratio_factor
+    ratio_pts = min(ratio / 5.0,  1.0) * 3.5
+    # Reward low range, penalize high range (> 60%)
+    if pos_from_bottom <= 60:
+        pos_pts = (1.0 - pos_from_bottom / 100.0) * 1.5
+    else:
+        pos_pts = -((pos_from_bottom - 60) / 40.0) * 1.0
+    ob_pts   = max((ob_pct - 50) / 50.0, 0.0) * 1.0
+    fund_pts = 0.5 if "Bullish" in funding_label else (0.0 if "Bearish" in funding_label else 0.25)
+    return round(min(max(spike_pts + ratio_pts + pos_pts + ob_pts + fund_pts, 0.0), 10.0), 1)
+
+def _conviction_label(score: float) -> str:
+    if score >= 8.0: return "Very High Conviction"
+    if score >= 6.5: return "High Conviction"
+    if score >= 5.0: return "Medium Conviction"
+    if score >= 3.5: return "Low Conviction"
+    return "Very Low Conviction"
+
 # ══════════════════════════════════════════════════════
 #  SIGNAL MESSAGE
 # ══════════════════════════════════════════════════════
 
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
-                 high24=0.0, low24=0.0, badge="🔔1",
+                 high24=0.0, low24=0.0, badge="🔔1", interval="5m",
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50):
     global signal_count
     signal_count += 1
@@ -462,7 +490,6 @@ def build_signal(sym, price, change, buy_v, sell_v,
     # Position from bottom (% of 24h range)
     rng = high24 - low24
     pos_from_bottom = int((price - low24) / rng * 100) if rng > 0 else 0
-    pos_ok = pos_from_bottom <= 60   # in lower 60% of range = good entry
 
     # Interest / Short Squeeze detection
     if ratio >= 30.0:
@@ -481,30 +508,33 @@ def build_signal(sym, price, change, buy_v, sell_v,
         interest = "⚪ Neutral"
         int_icon = "⚪"
 
-    pos_icon = "✅" if pos_ok else "⚠️"
+    range_label = _pos_range_label(pos_from_bottom)
+    score       = _signal_score(spike, ratio, pos_from_bottom, ob_pct, funding_label)
+    conviction  = _conviction_label(score)
+    move_icon   = "⚡️" if interval == "5m" else "📈"
+    dominance   = int(buy_v / (buy_v + sell_v) * 100) if (buy_v + sell_v) > 0 else 0
 
     return (
-        f"{'━' * 20}\n"
-        f"💀 *MAFIO SNIPER 15.2* 📡\n"
+        f"⚡️ ALERT — {conviction}\n"
         f"\n"
         f"🆕 *#{base}* 💀 · Signal #{signal_count} {badge}\n"
         f"💰 Price: `${_fp(price)}`\n"
-        f"📈 1h Move: `+{move:.2f}%` ⚡\n"
-        f"📍 Position: `%{pos_from_bottom} from Bottom` {pos_icon}\n"
+        f"📈 24h/1h Move: `+{move:.2f}%` {move_icon}\n"
+        f"📍 Position: `{pos_from_bottom}% from Bottom` {range_label}\n"
         f"\n"
-        f"⚡ Volume: `{spike:.1f}x` above avg\n"
+        f"⚡️ Volume: `{spike:.1f}x` above avg\n"
         f"{int_icon} Interest: {interest}\n"
-        f"📊 Ratio: `{ratio:.1f}x` 🔥\n"
+        f"📊 Ratio: `{ratio:.1f}x` · Buy `{dominance}%` 🔥\n"
         f"💹 1h Flow:\n"
         f"  📥 In:  `{_fv(buy_v)}`\n"
         f"  📤 Out: `{_fv(sell_v)}`\n"
         f"  ▲ Net: `+{_fv(net)}` ✅\n"
         f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
         f"📌 Funding: {funding_label}\n"
+        f"🎯 Score: `{score}/10`\n"
         f"\n"
         f"{ex_icon} Exchange: `{exchange}`\n"
-        f"🕐 {_ts()} UTC\n"
-        f"{'━' * 20}"
+        f"🕐 {_ts()} UTC"
     )
 
 # ══════════════════════════════════════════════════════
@@ -669,8 +699,9 @@ def _check(sym, ticker, interval):
     ratio_min *= ctx["ratio_mult"]
 
     # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
-    rng = ticker["high24"] - ticker["low24"]
-    if rng > 0 and (price - ticker["low24"]) / rng > ctx["late_pct"]:
+    rng  = ticker["high24"] - ticker["low24"]
+    pos24 = (price - ticker["low24"]) / rng if rng > 0 else 0.5
+    if pos24 > ctx["late_pct"]:
         _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
@@ -691,8 +722,9 @@ def _check(sym, ticker, interval):
     # Real move_min (1.5%) is applied AFTER funding_rate check below
     if move < -1.0: _rej("low_move"); return
 
-    # Thin coin + big move = pump already over (AURORA, SIX type)
-    if move > 8.0 and vol_24h < 200_000:
+    # Thin coin + big move: only reject if already high in range (pump already over)
+    # Allow if still in lower 40% — could be a fresh Wolf-Flow-style micro-cap breakout
+    if move > 8.0 and vol_24h < 200_000 and pos24 > 0.40:
         _rej("thin_pump"); return
 
     # Reject dead coins (zero base volume)
@@ -723,6 +755,11 @@ def _check(sym, ticker, interval):
     effective_spike_min = 1.5 if super_ratio else spike_min
     if spike < effective_spike_min:
         _rej("low_spike"); return
+
+    # Spike-dump guard: massive volume but weak directional buying
+    # (buyers and sellers both rushing in = distribution, not genuine demand)
+    if spike > 10.0 and _pre_ratio < 2.0:
+        _rej("spike_dump"); return
 
     # Spike candle must close in upper half — rejects pump-dump wicks
     try:
@@ -806,7 +843,8 @@ def _check(sym, ticker, interval):
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
-                       badge=badge, funding_label=funding_label,
+                       badge=badge, interval=interval,
+                       funding_label=funding_label,
                        ob_label=ob_label, ob_pct=int(ob_spot * 100))
     if not send(msg):
         log.error("SIGNAL SEND FAILED for %s — not tracking to avoid ghost signals", sym)
@@ -975,7 +1013,7 @@ def fast_scan(all_t):
     prev_prices = {sym: t["price"] for sym, t in all_t.items()}
     if not movers: return
     movers.sort(key=lambda x: -x[1])
-    for sym, _, ticker in movers[:30]:
+    for sym, _, ticker in movers[:50]:
         _check(sym, ticker, "5m")
         time.sleep(0.05)
 
