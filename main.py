@@ -952,9 +952,10 @@ def _check(sym, ticker, interval):
         ob_spot_min = 0.30
     elif trend_signal:
         ob_spot_min = 0.58  # independent movers need stronger confirmation
-    elif ob_spot >= 0.45 and net >= net_min * 3:
-        # Absorption model: massive net flow overcomes weak bids (4/USDT: 48% bids, 216M vol → +30%)
-        ob_spot_min = 0.45
+    elif ob_spot >= 0.50 and net >= net_min * 3:
+        # Absorption model: buyers absorbing sellers with massive net flow
+        # Requires at least balanced OB (50%) — EDEN lesson: 46% bids is seller-side, not absorption
+        ob_spot_min = 0.50
     else:
         ob_spot_min = 0.55  # raised from 0.44 — BEAT(46%)/RIVER(48%) lesson
 
@@ -1001,6 +1002,11 @@ def _check(sym, ticker, interval):
     rng24_pos = ticker["high24"] - ticker["low24"]
     pos24_for_score = (price - ticker["low24"]) / rng24_pos if rng24_pos > 0 else 0.5
     sig_score = calc_signal_score(spike, ratio, ob_spot, move, pos24_for_score)
+
+    # Block very low-conviction signals — minimum score gate
+    # EDEN lesson: score 2.6 + OB 46% = noise. Allow super_ratio to bypass (whale accumulation).
+    if sig_score < 3.5 and not super_ratio and not super_spike:
+        _rej("low_score"); return
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
