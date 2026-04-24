@@ -34,8 +34,8 @@ COOLDOWN    = 7200  # 2h per coin
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    # Micro: tiny liquidity → ratio 2.0x+ in Bullish (Wolf Flow style)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 2.5, "net": 300},
+    # Micro: tiny liquidity — lower floors to catch early MEXC micro-cap pumps (Wolf Flow style)
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 20_000,    "spike": 3.0, "ratio": 2.5, "net": 300},
     # Small: medium liquidity
     {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.8, "ratio": 2.5, "net": 1_500},
     # Mid: good liquidity
@@ -699,8 +699,9 @@ def _check(sym, ticker, interval):
     ratio_min *= ctx["ratio_mult"]
 
     # ── Late entry filter (adaptive: looser in bull, stricter in bear) ────
-    rng = ticker["high24"] - ticker["low24"]
-    if rng > 0 and (price - ticker["low24"]) / rng > ctx["late_pct"]:
+    rng  = ticker["high24"] - ticker["low24"]
+    pos24 = (price - ticker["low24"]) / rng if rng > 0 else 0.5
+    if pos24 > ctx["late_pct"]:
         _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
@@ -721,8 +722,9 @@ def _check(sym, ticker, interval):
     # Real move_min (1.5%) is applied AFTER funding_rate check below
     if move < -1.0: _rej("low_move"); return
 
-    # Thin coin + big move = pump already over (AURORA, SIX type)
-    if move > 8.0 and vol_24h < 200_000:
+    # Thin coin + big move: only reject if already high in range (pump already over)
+    # Allow if still in lower 40% — could be a fresh Wolf-Flow-style micro-cap breakout
+    if move > 8.0 and vol_24h < 200_000 and pos24 > 0.40:
         _rej("thin_pump"); return
 
     # Reject dead coins (zero base volume)
