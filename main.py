@@ -23,9 +23,9 @@ except Exception as _ai_err:
 #  CONFIG
 # ══════════════════════════════════════════════════════
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7696119722:AAHtxydYz5qg4SmyF38M0X6agntIYSuOjXY")
 CHAT_ID        = os.getenv("CHAT_ID") or ""
-GROUP_ID       = os.getenv("GROUP_ID") or ""
+GROUP_ID       = os.getenv("GROUP_ID") or "-1003951885039"
 REDIS_URL      = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
 REDIS_TOKEN    = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY      = "mafio_v31"
