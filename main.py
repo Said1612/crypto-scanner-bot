@@ -1601,12 +1601,6 @@ def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
     elif ms >= 10: icon, title = "🔥", f"*{base}USDT*  +{ms}% milestone reached"
     else:          icon, title = "📈", f"*{base}USDT*  +{ms}% milestone reached"
 
-    # Send image card only for big milestones (>=20%)
-    if ms >= 20:
-        image_bytes = _make_milestone_image(base, gain, entry, now_price, exchange)
-        if image_bytes:
-            _send_photo(image_bytes)
-
     sig_msg_id = tracking.get(sym, {}).get("sig_msg_id", 0)
     keyboard   = _trade_keyboard(sym, exchange, sig_msg_id)
     _reply_to  = sig_msg_id if sig_msg_id and not _sig_link(sig_msg_id) else None
