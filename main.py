@@ -2459,13 +2459,13 @@ def calc_market_bias(all_t: dict) -> Tuple[int, float, float]:
 
 
 def bias_label(score: int) -> str:
-    if score >= 60:  return "🟢🟢 Strong Bull"
-    if score >= 25:  return "🟢 Bullish"
-    if score >= 5:   return "🟡 Mild Bullish"
-    if score >= -5:  return "⚪ Flat / Squeeze"
-    if score >= -25: return "🟠 Mild Bearish"
-    if score >= -60: return "🔴 Bearish"
-    return "🔴🔴 Strong Bear"
+    if score >= 60:  return "🐂🐂 Strong Bull"
+    if score >= 25:  return "🐂 Bullish"
+    if score >= 5:   return "🐂 Mild Bullish"
+    if score >= -5:  return "⚪ Neutral"
+    if score >= -25: return "🐻 Mild Bearish"
+    if score >= -60: return "🐻 Bearish"
+    return "🐻🐻 Strong Bear"
 
 
 def _calc_sector_performance(all_t: dict) -> dict:
@@ -2481,69 +2481,108 @@ def _calc_sector_performance(all_t: dict) -> dict:
 
 
 def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: str = ""):
-    """Format and send market stats to Telegram."""
-    label = bias_label(bias)
-
-    # Breadth
+    """Format and send market stats to Telegram — Wolf Flow style."""
     total = len(all_t)
-    up    = sum(1 for t in all_t.values() if t["change"] >  1.0)
-    down  = sum(1 for t in all_t.values() if t["change"] < -1.0)
-    flat  = total - up - down
-    up_pct   = int(up   / total * 100) if total else 0
-    flat_pct = int(flat / total * 100) if total else 0
-    down_pct = int(down / total * 100) if total else 0
 
-    # Visual bar  (10 blocks, centre = 0)
-    filled = max(0, min(10, int((bias + 100) / 200 * 10)))
-    bar    = "🟩" * filled + "⬜" * (10 - filled)
+    # ── Regime icon (bull 🐂 / bear 🐻) ──
+    if bias >= 60:
+        regime_icon = "🐂🐂"; regime_txt = "Strong Bull"
+    elif bias >= 25:
+        regime_icon = "🐂";   regime_txt = "Bullish"
+    elif bias >= 5:
+        regime_icon = "🐂";   regime_txt = "Mild Bullish"
+    elif bias >= -5:
+        regime_icon = "⚪";   regime_txt = "Neutral"
+    elif bias >= -25:
+        regime_icon = "🐻";   regime_txt = "Mild Bearish"
+    elif bias >= -60:
+        regime_icon = "🐻";   regime_txt = "Bearish"
+    else:
+        regime_icon = "🐻🐻"; regime_txt = "Strong Bear"
 
-    # Flow icons
-    tbr_icon = "🟢" if tbr > 53 else ("🔴" if tbr < 47 else "⚪")
+    # ── 5-dot visual: green dots on left, red on right ──
+    n_green = round((bias + 100) / 200 * 5)
+    dots    = "🟢" * n_green + "🔴" * (5 - n_green)
+
+    # ── Market Breadth (24h) ──
+    up   = sum(1 for t in all_t.values() if t["change"] >  1.0)
+    down = sum(1 for t in all_t.values() if t["change"] < -1.0)
+    flat = total - up - down
+    up_pct   = up   * 100 // total if total else 0
+    down_pct = down * 100 // total if total else 0
+    flat_pct = flat * 100 // total if total else 0
+    avg_up = (sum(t["change"] for t in all_t.values() if t["change"] >  1.0) / up)   if up   else 0.0
+    avg_dn = (sum(t["change"] for t in all_t.values() if t["change"] < -1.0) / down) if down else 0.0
+
+    # ── Top 5 movers (24h) ──
+    sorted_t = sorted(all_t.items(), key=lambda x: x[1]["change"], reverse=True)
+    gainers  = [(s[:-4] if s.endswith("USDT") else s, t["change"])
+                for s, t in sorted_t if t["change"] > 0][:5]
+    losers   = [(s[:-4] if s.endswith("USDT") else s, t["change"])
+                for s, t in sorted_t if t["change"] < 0][-5:][::-1]
+
+    # ── Sectors with symbol count ──
+    sec_data: Dict[str, list] = {}
+    for sym, t in all_t.items():
+        base   = sym[:-4] if sym.endswith("USDT") else sym.replace("USDT", "")
+        sector = SECTOR_REGISTRY.get(base, "")
+        if not sector or sector in ("Other", "BNB Alpha"):
+            continue
+        sec_data.setdefault(sector, []).append(t["change"])
+    sec_perf = sorted(
+        [(s, sum(v) / len(v), len(v)) for s, v in sec_data.items() if len(v) >= 2],
+        key=lambda x: -x[1]
+    )
+
+    # ── Flow icons ──
+    tbr_icon = "🟢 Buyers" if tbr > 53 else ("🔴 Sellers" if tbr < 47 else "⚪ Neutral")
     cvd_icon = "🟢" if cvd > 0 else "🔴"
+    cvd_dir  = "↑" if cvd > 0 else "↓"
 
-    # Sectors
-    sectors = _calc_sector_performance(all_t)
-    ranked  = sorted(sectors.items(), key=lambda x: -x[1])
-    best3   = ranked[:3]
-    worst3  = ranked[-3:]
-
+    # ── Build message ──
     lines = [
-        f"{'━' * 20}",
-        f"💀 *MAFIO SNIPER* 📡",
+        f"{'━' * 22}",
+        f"💀 *MAFIO SNIPER* — Market Stats",
+        f"🕐 {_ts()} UTC",
+        f"{'━' * 22}",
         f"",
-        f"📊 *Market Stats*",
+        f"🧭 *Market Bias*",
+        f"{regime_icon}  *{regime_txt}*  ·  Score: `{bias:+d} / 100`",
+        f"{dots}",
         f"",
-        f"🧭 *Bias:* {label}",
-        f"Score: `{bias:+d} / 100`",
-        f"`{bar}`",
-        f"",
-        f"📈 *Market Breadth (24h)*",
-        f"🟢 UP `{up_pct}%` ({up})  ·  ⚪ FLAT `{flat_pct}%`  ·  🔴 DOWN `{down_pct}%` ({down})",
+        f"📊 *Market Breadth* (24h)  —  {total} symbols",
+        f"🐂 UP    `{up_pct:3d}%`  {up} coins   avg `{avg_up:+.2f}%`",
+        f"⚪ FLAT  `{flat_pct:3d}%`  {flat} coins",
+        f"🐻 DOWN  `{down_pct:3d}%`  {down} coins   avg `{avg_dn:+.2f}%`",
         f"",
         f"💧 *Market Flow*",
-        f"Taker‑buy: `{tbr:.1f}%` {tbr_icon}  ·  CVD: `{_fv(abs(cvd))}` {cvd_icon}",
+        f"Taker‑buy: `{tbr:.1f}%`  {tbr_icon}",
+        f"CVD: `{cvd_dir}{_fv(abs(cvd))}`  {cvd_icon}",
     ]
 
-    if best3:
-        lines.append("")
-        lines.append("🏆 *Best Sectors*")
-        for sec, chg in best3:
-            disp = _SECTOR_DISPLAY.get(sec, f"📊 {sec}")
-            lines.append(f"  {disp}: `{chg:+.2f}%`")
+    if gainers:
+        lines += ["", "📈 *Top Gainers (24h)*"]
+        for i, (coin, chg) in enumerate(gainers, 1):
+            lines.append(f"  `{i}.` {coin}  `+{chg:.2f}%`")
 
-    if worst3 and worst3 != best3:
-        lines.append("")
-        lines.append("📉 *Worst Sectors*")
-        for sec, chg in worst3:
-            disp = _SECTOR_DISPLAY.get(sec, f"📊 {sec}")
-            lines.append(f"  {disp}: `{chg:+.2f}%`")
+    if losers:
+        lines += ["", "📉 *Top Losers (24h)*"]
+        for i, (coin, chg) in enumerate(losers, 1):
+            lines.append(f"  `{i}.` {coin}  `{chg:.2f}%`")
+
+    if sec_perf:
+        lines += ["", "🏆 *Sectors (24h avg)*"]
+        for sec, chg, cnt in sec_perf[:10]:
+            disp  = _SECTOR_DISPLAY.get(sec, f"📊 {sec}")
+            arrow = "↑" if chg >= 0 else "↓"
+            lines.append(f"  {disp}: `{chg:+.2f}%` {arrow} `({cnt} sym)`")
 
     if reason:
         lines += ["", f"⚡ _{reason}_"]
 
-    lines += ["", f"🕐 {_ts()} UTC", f"{'━' * 20}"]
+    lines.append(f"{'━' * 22}")
     send("\n".join(lines))
-    log.info("Market stats sent — bias=%+d %s reason=%s", bias, label, reason or "hourly")
+    log.info("Market stats sent — bias=%+d %s reason=%s", bias, regime_txt, reason or "periodic")
 
 
 def check_btc_health(all_t: dict):
