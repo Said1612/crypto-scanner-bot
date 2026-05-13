@@ -177,6 +177,10 @@ USE_MEXC     = os.getenv("USE_MEXC",    "false").lower() == "true" # disabled �
 # ══════════════════════════════════════════════════════
 
 prev_prices   : Dict[str, float] = {}
+_btc_prices   : List[Tuple[float, float]] = []   # [(ts, price), ...] — rolling 15min window
+_btc_alert_ts : float = 0.0                       # last BTC health alert sent
+_cascade_alert_ts : float = 0.0                   # last dump cascade alert sent
+_cascade_paused   : float = 0.0                   # signals paused until this ts
 alerted       : Dict[str, float] = {}
 tracking      : Dict[str, dict]  = {}
 daily_results : List[dict]       = []   # completed signals for daily report
@@ -1702,6 +1706,10 @@ def _calc_ema(closes, period):
 def _check(sym, ticker, interval, sector_boost=False):
     now      = time.time()
 
+    # ── Cascade / BTC danger pause ────────────────────────────────────────
+    if now < _cascade_paused:
+        return
+
     # ── Dedup: prevent re-signal for coin already in tracking or within 2h ──
     if sym in tracking:
         return   # already tracking this coin — no duplicate signal
@@ -2499,6 +2507,130 @@ def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: st
     lines += ["", f"🕐 {_ts()} UTC", f"{'━' * 20}"]
     send("\n".join(lines))
     log.info("Market stats sent — bias=%+d %s reason=%s", bias, label, reason or "hourly")
+
+
+def check_btc_health(all_t: dict):
+    """
+    Monitor BTC price and alert on sharp moves:
+      Drop  > -2% in 5min  → ⚠️ warning
+      Drop  > -4% in 5min  → 🚨 danger + pause signals 10min
+      Pump  > +3% in 5min  → 🚀 bull signal
+    """
+    global _btc_prices, _btc_alert_ts, _cascade_paused
+
+    btc = all_t.get("BTCUSDT")
+    if not btc:
+        return
+    now       = time.time()
+    btc_price = btc["price"]
+
+    # Rolling 15-min window
+    _btc_prices.append((now, btc_price))
+    _btc_prices = [(ts, p) for ts, p in _btc_prices if now - ts <= 900]
+
+    if len(_btc_prices) < 3:
+        return
+    if now - _btc_alert_ts < 300:   # cooldown 5min
+        return
+
+    # Compare to price 5 min ago
+    five_min_ago = [(ts, p) for ts, p in _btc_prices if now - ts >= 280]
+    if not five_min_ago:
+        return
+    ref_price = five_min_ago[0][1]
+    delta     = (btc_price - ref_price) / ref_price * 100
+
+    if delta <= -4.0:
+        send(
+            f"{'━' * 20}\n"
+            f"💀 *MAFIO SNIPER* 📡\n\n"
+            f"🚨 *BTC DANGER DROP*\n"
+            f"Bitcoin هبط `{delta:.2f}%` في 5 دقائق\n"
+            f"💰 السعر الآن: `${_fp(btc_price)}`\n"
+            f"⛔ تم إيقاف الإشارات مؤقتاً لـ 10 دقائق\n"
+            f"🕐 {_ts()} UTC\n"
+            f"{'━' * 20}"
+        )
+        _cascade_paused = now + 600   # pause 10 min
+        _btc_alert_ts   = now
+        log.warning("BTC danger drop %.2f%% — signals paused 10min", delta)
+
+    elif delta <= -2.0:
+        send(
+            f"{'━' * 20}\n"
+            f"💀 *MAFIO SNIPER* 📡\n\n"
+            f"⚠️ *BTC Health Warning*\n"
+            f"Bitcoin هبط `{delta:.2f}%` في 5 دقائق\n"
+            f"💰 السعر الآن: `${_fp(btc_price)}`\n"
+            f"📉 توقع ضغط على العملات البديلة\n"
+            f"🕐 {_ts()} UTC\n"
+            f"{'━' * 20}"
+        )
+        _btc_alert_ts = now
+        log.info("BTC warning drop %.2f%%", delta)
+
+    elif delta >= 3.0:
+        send(
+            f"{'━' * 20}\n"
+            f"💀 *MAFIO SNIPER* 📡\n\n"
+            f"🚀 *BTC Bull Move*\n"
+            f"Bitcoin ارتفع `+{delta:.2f}%` في 5 دقائق\n"
+            f"💰 السعر الآن: `${_fp(btc_price)}`\n"
+            f"📈 توقع ارتداد قوي في العملات البديلة\n"
+            f"🕐 {_ts()} UTC\n"
+            f"{'━' * 20}"
+        )
+        _btc_alert_ts = now
+        log.info("BTC bull move +%.2f%%", delta)
+
+
+def check_dump_cascade(all_t: dict):
+    """
+    Alert when >30% of coins drop >2% simultaneously.
+    Pauses new signals for 15 min.
+    """
+    global _cascade_alert_ts, _cascade_paused
+
+    now   = time.time()
+    if now - _cascade_alert_ts < 600:   # cooldown 10min
+        return
+
+    total   = len(all_t)
+    if total < 50:
+        return
+    dumping = sum(1 for t in all_t.values() if t["change"] < -2.0)
+    pct     = dumping / total * 100
+
+    if pct >= 40:
+        # Severe cascade
+        worst = sorted(all_t.items(), key=lambda x: x[1]["change"])[:5]
+        worst_lines = "  ".join(f"{s[:-4]} `{t['change']:.1f}%`" for s, t in worst)
+        send(
+            f"{'━' * 20}\n"
+            f"💀 *MAFIO SNIPER* 📡\n\n"
+            f"🚨 *DUMP CASCADE DETECTED*\n"
+            f"`{dumping}` عملة من أصل `{total}` تهبط بقوة (`{pct:.0f}%`)\n\n"
+            f"📉 الأسوأ:\n{worst_lines}\n\n"
+            f"⛔ تم إيقاف الإشارات لـ 15 دقيقة\n"
+            f"🕐 {_ts()} UTC\n"
+            f"{'━' * 20}"
+        )
+        _cascade_paused   = now + 900   # 15 min
+        _cascade_alert_ts = now
+        log.warning("Dump cascade: %d/%d (%.0f%%) — signals paused 15min", dumping, total, pct)
+
+    elif pct >= 30:
+        send(
+            f"{'━' * 20}\n"
+            f"💀 *MAFIO SNIPER* 📡\n\n"
+            f"⚠️ *Market Dump Warning*\n"
+            f"`{dumping}` عملة من أصل `{total}` تهبط (`{pct:.0f}%`)\n"
+            f"🔴 تجنّب الدخول حتى يستقر السوق\n"
+            f"🕐 {_ts()} UTC\n"
+            f"{'━' * 20}"
+        )
+        _cascade_alert_ts = now
+        log.info("Market dump warning: %d/%d (%.0f%%)", dumping, total, pct)
 
 
 def get_market_ctx(bias: int) -> dict:
@@ -3785,6 +3917,10 @@ def main():
                 _save_signal_db()
 
             check_milestones(all_t)
+
+            # ── BTC Health + Dump Cascade ────────────────────────────────────────
+            check_btc_health(all_t)
+            check_dump_cascade(all_t)
 
             # ── Daily / Weekly / Monthly Reports ────────────────────────────────
             global last_report, last_report_date, _last_report_time
