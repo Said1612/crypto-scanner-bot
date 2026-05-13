@@ -1084,6 +1084,8 @@ def check_milestones(all_t):
         gain = (t["price"] - info["entry"]) / info["entry"] * 100.0
         if gain > info.get("max", 0.0):
             info["max"] = gain
+        if gain < info.get("min", 0.0):
+            info["min"] = gain
             # Keep signal_history.json in sync so reports always show real gains
             for _rec in reversed(_signal_db):
                 if _rec["sym"] == sym and _rec["outcome"] == "active":
@@ -1491,89 +1493,84 @@ def _tstr(e):
         return f"{e // 60}m"
     return f"{e}s"
 
-def _make_milestone_image(base, gain, entry, now_price, exchange):
-    """Generate a premium dark card with gradient + glow for big milestones (>=20%)."""
+def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
+    """Clean dark card — no stars, Wolf Flow style layout."""
     try:
         from PIL import Image, ImageDraw, ImageFont, ImageFilter
-        import io, random
+        import io
 
         W, H = 700, 700
 
-        # ── Background: vertical gradient dark black → deep purple ──
-        img = Image.new("RGB", (W, H))
+        # ── Background: solid dark with subtle gradient ──
+        img  = Image.new("RGB", (W, H))
         draw = ImageDraw.Draw(img)
         for y in range(H):
             t = y / H
-            r = int(6  + 18 * (1 - t * 0.6))
-            g = int(2  + 4  * (1 - t))
-            b = int(18 + 42 * (1 - t * 0.5))
+            r = int(8  + 10 * (1 - t))
+            g = int(2  + 3  * (1 - t))
+            b = int(20 + 30 * (1 - t))
             draw.line([(0, y), (W, y)], fill=(r, g, b))
 
-        # ── Stars ──
-        random.seed(hash(base) % 9999)
-        for _ in range(220):
-            sx = random.randint(0, W - 1)
-            sy = random.randint(0, int(H * 0.75))
-            br = random.randint(130, 255)
-            sz = random.choice([1, 1, 1, 1, 2])
-            draw.ellipse([(sx, sy), (sx + sz, sy + sz)], fill=(br, br, int(br * 0.85)))
-
-        # ── Center radial glow (purple halo) ──
+        # ── Center radial glow ──
         glow_bg = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(glow_bg)
-        for r in range(280, 0, -8):
-            alpha = int(22 * (1 - r / 280))
-            gd.ellipse([(W//2 - r, H//2 - r), (W//2 + r, H//2 + r)],
-                       fill=(80, 0, 160, alpha))
-        img = img.convert("RGBA")
-        img = Image.alpha_composite(img, glow_bg)
-        img = img.convert("RGB")
+        gd      = ImageDraw.Draw(glow_bg)
+        for rad in range(300, 0, -8):
+            alpha = int(18 * (1 - rad / 300))
+            gd.ellipse([(W//2 - rad, H//2 - rad + 40),
+                        (W//2 + rad, H//2 + rad + 40)],
+                       fill=(70, 0, 140, alpha))
+        img  = img.convert("RGBA")
+        img  = Image.alpha_composite(img, glow_bg)
+        img  = img.convert("RGB")
         draw = ImageDraw.Draw(img)
 
         # ── Fonts ──
         FONT = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
         try:
             f_brand = ImageFont.truetype(FONT, 22)
-            f_coin  = ImageFont.truetype(FONT, 88)
-            f_gain  = ImageFont.truetype(FONT, 145)
-            f_label = ImageFont.truetype(FONT, 19)
-            f_price = ImageFont.truetype(FONT, 36)
+            f_coin  = ImageFont.truetype(FONT, 82)
+            f_gain  = ImageFont.truetype(FONT, 138)
+            f_label = ImageFont.truetype(FONT, 20)
+            f_price = ImageFont.truetype(FONT, 38)
         except Exception:
             f_brand = f_coin = f_gain = f_label = f_price = ImageFont.load_default()
 
         # ── Top branding ──
-        draw.text((26, 26), "💀 MAFIO SNIPER", fill=(225, 220, 240), anchor="lt", font=f_brand)
+        draw.text((26, 26), "MAFIO SNIPER", fill=(200, 190, 230), anchor="lt", font=f_brand)
         ex_color = (0, 195, 255) if exchange == "Binance" else (255, 165, 40)
-        draw.text((W - 26, 26), f"MAFIO {exchange.upper()}", fill=ex_color, anchor="rt", font=f_brand)
-        draw.line([(26, 62), (W - 26, 62)], fill=(55, 25, 90), width=1)
+        ex_label = "MAFIO BINANCE" if exchange == "Binance" else "MAFIO MEXC"
+        draw.text((W - 26, 26), ex_label, fill=ex_color, anchor="rt", font=f_brand)
+        draw.line([(26, 60), (W - 26, 60)], fill=(50, 25, 85), width=1)
 
         # ── Coin name ──
-        draw.text((W // 2, 210), f"{base}/USDT", fill=(255, 255, 255), anchor="mm", font=f_coin)
+        draw.text((W // 2, 195), f"{base}", fill=(255, 255, 255), anchor="mm", font=f_coin)
 
-        # ── Gain % — glow effect ──
-        gain_color = (165, 90, 255) if gain >= 0 else (255, 55, 55)
+        # ── Gain % with glow ──
+        gain_color = (160, 80, 255) if gain >= 0 else (255, 60, 60)
         gain_str   = f"+{gain:.2f}%" if gain >= 0 else f"{gain:.2f}%"
-
         glow_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        glw = ImageDraw.Draw(glow_layer)
-        glw.text((W // 2, 385), gain_str, fill=(*gain_color, 140), anchor="mm", font=f_gain)
-        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=10))
-        img = img.convert("RGBA")
-        img = Image.alpha_composite(img, glow_layer)
-        img = img.convert("RGB")
+        glw        = ImageDraw.Draw(glow_layer)
+        glw.text((W // 2, 370), gain_str, fill=(*gain_color, 130), anchor="mm", font=f_gain)
+        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=12))
+        img  = img.convert("RGBA")
+        img  = Image.alpha_composite(img, glow_layer)
+        img  = img.convert("RGB")
         draw = ImageDraw.Draw(img)
-        draw.text((W // 2, 385), gain_str, fill=gain_color, anchor="mm", font=f_gain)
+        draw.text((W // 2, 370), gain_str, fill=gain_color, anchor="mm", font=f_gain)
 
         # ── Divider ──
-        draw.line([(40, 510), (W - 40, 510)], fill=(70, 35, 115), width=2)
+        draw.line([(40, 510), (W - 40, 510)], fill=(60, 30, 100), width=2)
 
-        # ── Footer: entry | current price ──
-        lx, rx = W // 4, 3 * W // 4
-        label_col = (140, 110, 190)
+        # ── Footer: ENTRY | TAKE PROFIT ──
+        lx, rx    = W // 4, 3 * W // 4
+        label_col = (130, 105, 175)
+        tp_price  = tp1 if tp1 > 0 else now_price
+        tp_label  = "TAKE PROFIT" if tp1 > 0 else "CURRENT PRICE"
+
         draw.text((lx, 548), "ENTRY POSITION", fill=label_col, anchor="mm", font=f_label)
-        draw.text((lx, 592), f"${_fp(entry)}",    fill=(210, 200, 235), anchor="mm", font=f_price)
-        draw.text((rx, 548), "CURRENT PRICE",  fill=label_col, anchor="mm", font=f_label)
-        draw.text((rx, 592), f"${_fp(now_price)}", fill=gain_color,     anchor="mm", font=f_price)
+        draw.text((lx, 592), f"${_fp(entry)}",  fill=(210, 200, 235), anchor="mm", font=f_price)
+        draw.text((rx, 548), tp_label,           fill=label_col,       anchor="mm", font=f_label)
+        draw.text((rx, 592), f"${_fp(tp_price)}", fill=gain_color,     anchor="mm", font=f_price)
 
         buf = io.BytesIO()
         img.save(buf, "PNG")
@@ -1599,14 +1596,25 @@ def _send_photo(image_bytes, caption=""):
 
 
 def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
-    base    = sym[:-4]
-    ex_icon = "🟡" if exchange == "Binance" else "🟠"
+    base     = sym[:-4]
+    ex_icon  = "🟡" if exchange == "Binance" else "🟠"
+    max_loss = tracking.get(sym, {}).get("min", 0.0)
+    tp1      = tracking.get(sym, {}).get("tp1", 0.0)
+
     if ms == 5:
         icon  = "✅"
         title = f"*{base}USDT*  WIN confirmed  +{ms}% reached"
     elif ms >= 50: icon, title = "🚀", f"*{base}USDT*  +{ms}% milestone reached"
     elif ms >= 10: icon, title = "🔥", f"*{base}USDT*  +{ms}% milestone reached"
     else:          icon, title = "📈", f"*{base}USDT*  +{ms}% milestone reached"
+
+    # Send image for big milestones (>=20%)
+    if ms >= 20:
+        image_bytes = _make_milestone_image(base, gain, entry, now_price, exchange, tp1)
+        if image_bytes:
+            _send_photo(image_bytes)
+
+    max_loss_line = f"📉 Max loss:  `{max_loss:.2f}%`\n" if max_loss < -0.1 else ""
 
     sig_msg_id = tracking.get(sym, {}).get("sig_msg_id", 0)
     keyboard   = _trade_keyboard(sym, exchange, sig_msg_id)
@@ -1618,15 +1626,16 @@ def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
         f"{icon} {title}\n"
         f"📊 Max gain:   `+{gain:.2f}%`\n"
         f"💰 Price now:  `${_fp(now_price)}`\n"
-        f"🏁 Entry:      `${_fp(entry)}`\n"
+        f"🎯 Entry:      `${_fp(entry)}`\n"
+        f"{max_loss_line}"
         f"⏱ Achieved in: {_tstr(elapsed)}\n"
         f"{ex_icon} {exchange}\n"
         f"{'━' * 20}",
         keyboard,
         reply_to_msg_id=_reply_to
     )
-    log.info("MS %-14s +%d%% max=+%.2f%% in %s [%s]",
-             sym, ms, gain, _tstr(elapsed), exchange)
+    log.info("MS %-14s +%d%% max=+%.2f%% min=%.2f%% in %s [%s]",
+             sym, ms, gain, max_loss, _tstr(elapsed), exchange)
 
 
 def _fire_reversal(sym, gain, peak, now_price, entry, elapsed, exchange, is_flash=False):
@@ -2356,6 +2365,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         "t0":         now,
         "hit":        set(),
         "max":        0.0,
+        "min":        0.0,
         "exchange":   exchange,
         "is_flash":   is_flash,
         "sig_msg_id": sig_msg_id,
@@ -3108,6 +3118,7 @@ def scan_supertrend(all_t):
                 "t0":         now_ts,
                 "hit":        set(),
                 "max":        0.0,
+                "min":        0.0,
                 "exchange":   exchange,
                 "is_flash":   False,
                 "sig_msg_id": sig_msg_id,
@@ -3389,6 +3400,7 @@ def scan_quiet_accum(all_t):
                 "t0":         now,        # fixed: was "ts" — check_milestones needs "t0"
                 "hit":        set(),
                 "max":        0.0,
+                "min":        0.0,
                 "exchange":   exchange,
                 "is_flash":   False,
                 "sig_msg_id": sig_msg_id,
