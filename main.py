@@ -181,6 +181,8 @@ _btc_prices   : List[Tuple[float, float]] = []   # [(ts, price), ...] — rollin
 _btc_alert_ts : float = 0.0                       # last BTC health alert sent
 _cascade_alert_ts : float = 0.0                   # last dump cascade alert sent
 _cascade_paused   : float = 0.0                   # signals paused until this ts
+_snap_prices  : Dict[str, float] = {}             # price snapshot every 5min for cascade detection
+_snap_ts      : float = 0.0                       # timestamp of last snapshot
 alerted       : Dict[str, float] = {}
 tracking      : Dict[str, dict]  = {}
 daily_results : List[dict]       = []   # completed signals for daily report
@@ -2586,51 +2588,67 @@ def check_btc_health(all_t: dict):
 
 def check_dump_cascade(all_t: dict):
     """
-    Alert when >30% of coins drop >2% simultaneously.
-    Pauses new signals for 15 min.
+    Alert when >30% of coins drop >1.5% in the last 5 minutes.
+    Uses a rolling price snapshot (not 24h change) for accurate detection.
+    Pauses new signals for 15 min on severe cascade.
     """
-    global _cascade_alert_ts, _cascade_paused
+    global _cascade_alert_ts, _cascade_paused, _snap_prices, _snap_ts
 
-    now   = time.time()
-    if now - _cascade_alert_ts < 600:   # cooldown 10min
+    now = time.time()
+    if now - _cascade_alert_ts < 600:   # cooldown 10min between alerts
         return
 
-    total   = len(all_t)
+    # Refresh snapshot every 5 minutes
+    if now - _snap_ts >= 300:
+        _snap_prices = {sym: t["price"] for sym, t in all_t.items()}
+        _snap_ts     = now
+        return   # need at least one full 5-min window before comparing
+
+    total = len(all_t)
     if total < 50:
         return
-    dumping = sum(1 for t in all_t.values() if t["change"] < -2.0)
+
+    # Count coins that dropped >1.5% vs snapshot 5 min ago
+    drops = {}
+    for sym, t in all_t.items():
+        snap = _snap_prices.get(sym)
+        if snap and snap > 0:
+            delta = (t["price"] - snap) / snap * 100
+            if delta < -1.5:
+                drops[sym] = delta
+
+    dumping = len(drops)
     pct     = dumping / total * 100
 
     if pct >= 40:
-        # Severe cascade
-        worst = sorted(all_t.items(), key=lambda x: x[1]["change"])[:5]
-        worst_lines = "  ".join(f"{s[:-4]} `{t['change']:.1f}%`" for s, t in worst)
+        worst = sorted(drops.items(), key=lambda x: x[1])[:5]
+        worst_lines = "  ".join(f"{s[:-4]} `{d:.1f}%`" for s, d in worst)
         send(
             f"{'━' * 20}\n"
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"🚨 *DUMP CASCADE DETECTED*\n"
-            f"`{dumping}` عملة من أصل `{total}` تهبط بقوة (`{pct:.0f}%`)\n\n"
-            f"📉 الأسوأ:\n{worst_lines}\n\n"
+            f"`{dumping}` عملة من أصل `{total}` هبطت في 5 دقائق (`{pct:.0f}%`)\n\n"
+            f"📉 الأسوأ: {worst_lines}\n\n"
             f"⛔ تم إيقاف الإشارات لـ 15 دقيقة\n"
             f"🕐 {_ts()} UTC\n"
             f"{'━' * 20}"
         )
-        _cascade_paused   = now + 900   # 15 min
+        _cascade_paused   = now + 900
         _cascade_alert_ts = now
-        log.warning("Dump cascade: %d/%d (%.0f%%) — signals paused 15min", dumping, total, pct)
+        log.warning("Dump cascade: %d/%d (%.0f%%) in 5min — signals paused 15min", dumping, total, pct)
 
     elif pct >= 30:
         send(
             f"{'━' * 20}\n"
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"⚠️ *Market Dump Warning*\n"
-            f"`{dumping}` عملة من أصل `{total}` تهبط (`{pct:.0f}%`)\n"
+            f"`{dumping}` عملة من أصل `{total}` هبطت في 5 دقائق (`{pct:.0f}%`)\n"
             f"🔴 تجنّب الدخول حتى يستقر السوق\n"
             f"🕐 {_ts()} UTC\n"
             f"{'━' * 20}"
         )
         _cascade_alert_ts = now
-        log.info("Market dump warning: %d/%d (%.0f%%)", dumping, total, pct)
+        log.info("Market dump warning: %d/%d (%.0f%%) in 5min", dumping, total, pct)
 
 
 def get_market_ctx(bias: int) -> dict:
@@ -3885,7 +3903,7 @@ def main():
             # ── Market Stats — send on regime change or hourly ────────────
             _bias_changed   = _last_bias_label and cur_label != _last_bias_label
             _score_jumped   = abs(market_bias - _last_bias_score) >= 30
-            _hourly         = now - last_market_stats >= 3600
+            _hourly         = now - last_market_stats >= 14400  # every 4h
             if _bias_changed or _score_jumped or (_hourly and _last_bias_label):
                 if now - last_market_stats >= 120:   # min 2 min between sends
                     if _bias_changed:
