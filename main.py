@@ -226,6 +226,7 @@ _sector_heat_prev    : Dict[str, float] = {}  # previous heat per sector
 _sector_alerted      : Dict[str, float] = {}  # {sector: last_hot_scan_ts}
 _sector_warm_alerted : Dict[str, float] = {}  # {sector: last_warm_scan_ts}
 _trend_dedup         : Dict[str, float] = {}  # {sym: last_trend_signal_ts} 12h cooldown
+_dominance_hist      : List[Tuple[float, dict]] = []  # [(ts, {btcd, usdtd, usdcd, others})]
 
 # ══════════════════════════════════════════════════════
 #  LOGGING
@@ -2480,6 +2481,52 @@ def _calc_sector_performance(all_t: dict) -> dict:
     return {s: sum(v) / len(v) for s, v in data.items() if len(v) >= 2}
 
 
+def fetch_dominance() -> dict:
+    """Fetch BTC/USDT/USDC dominance from CoinGecko global API. Returns {} on failure."""
+    global _dominance_hist
+    try:
+        r = S.get("https://api.coingecko.com/api/v3/global", timeout=10)
+        if not r.ok:
+            return {}
+        data  = r.json().get("data", {})
+        pcts  = data.get("market_cap_percentage", {})
+        btcd  = pcts.get("btc",  0.0)
+        usdtd = pcts.get("usdt", 0.0)
+        usdcd = pcts.get("usdc", 0.0)
+        # OTHERS = 100 - BTC.D - (sum of top stables/ETH) is complex; use simple: 100 - btcd
+        others = round(100.0 - btcd, 4)
+        snap = {"btcd": btcd, "usdtd": usdtd, "usdcd": usdcd, "others": others}
+        now  = time.time()
+        _dominance_hist.append((now, snap))
+        # Keep only last 2h
+        _dominance_hist = [(ts, d) for ts, d in _dominance_hist if now - ts <= 7200]
+        return snap
+    except Exception as e:
+        log.warning("fetch_dominance failed: %s", e)
+        return {}
+
+
+def _dom_delta(key: str, seconds: int) -> float:
+    """Return change in dominance[key] over the last `seconds` seconds. 0 if not enough data."""
+    now = time.time()
+    old = [(ts, d) for ts, d in _dominance_hist if now - ts >= seconds * 0.8]
+    cur = [d for ts, d in _dominance_hist if now - ts <= 60]
+    if not old or not cur:
+        return 0.0
+    return cur[-1].get(key, 0) - old[0][1].get(key, 0)
+
+
+def _dom_dot(key: str, seconds: int, invert: bool = False) -> str:
+    """🟢/🔴 dot for dominance change direction. invert=True flips meaning (e.g. OTHERS: rising = 🟢)."""
+    delta = _dom_delta(key, seconds)
+    if abs(delta) < 0.01:
+        return "⚪"
+    rising = delta > 0
+    if invert:
+        return "🟢" if rising else "🔴"
+    return "🔴" if rising else "🟢"
+
+
 def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: str = ""):
     """Format and send market stats to Telegram — Wolf Flow style."""
     total = len(all_t)
@@ -2559,6 +2606,27 @@ def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: st
         f"Taker‑buy: `{tbr:.1f}%`  {tbr_icon}",
         f"CVD: `{cvd_dir}{_fv(abs(cvd))}`  {cvd_icon}",
     ]
+
+    # ── Market Structure: dominance ──
+    dom = _dominance_hist[-1][1] if _dominance_hist else {}
+    if dom:
+        btcd   = dom.get("btcd",   0.0)
+        usdtd  = dom.get("usdtd",  0.0)
+        usdcd  = dom.get("usdcd",  0.0)
+        others = dom.get("others", 0.0)
+        # dots: rising BTC.D/USDT.D/USDC.D = 🔴 (bad for alts); rising OTHERS = 🟢 (alt season)
+        lines += [
+            "",
+            "🌐 *Market Structure*",
+            f"₿ BTC.D `{btcd:.2f}%`   "
+            f"5m:{_dom_dot('btcd',300)}  1h:{_dom_dot('btcd',3600)}",
+            f"💵 USDT.D `{usdtd:.2f}%`   "
+            f"5m:{_dom_dot('usdtd',300)}  1h:{_dom_dot('usdtd',3600)}",
+            f"🔵 USDC.D `{usdcd:.2f}%`   "
+            f"5m:{_dom_dot('usdcd',300)}  1h:{_dom_dot('usdcd',3600)}",
+            f"📈 OTHERS `{others:.2f}%`   "
+            f"5m:{_dom_dot('others',300,invert=True)}  1h:{_dom_dot('others',3600,invert=True)}",
+        ]
 
     if gainers:
         lines += ["", "📈 *Top Gainers (24h)*"]
@@ -4060,6 +4128,7 @@ def main():
 
             if now - last_slow >= SLOW_SCAN_S:
                 last_slow = now
+                fetch_dominance()   # update BTC.D/USDT.D/USDC.D history
                 slow_scan(all_t)
 
             if now - last_super >= SUPER_SCAN_S:
