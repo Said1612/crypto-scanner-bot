@@ -504,9 +504,7 @@ def fetch_binance_futures_only(spot_syms):
 def fetch_binance_alpha():
     """
     Binance Alpha Web3 tokens (BSC) — shown in Binance Alpha section.
-    NOT on Binance Spot or FAPI; these trade on MEXC Spot.
-    API: developers.binance.com/docs/alpha/market-data/
-    OB and klines are fetched from MEXC via base_url=MEXC_BASE.
+    Klines and OB are fetched from Binance Spot via base_url=BINANCE_BASE.
     """
     if not USE_BINANCE:
         return {}
@@ -538,7 +536,7 @@ def fetch_binance_alpha():
                 "high24":        high,
                 "low24":         low,
                 "exchange":      "Binance",
-                "base_url":      MEXC_BASE,   # OB + klines routed to MEXC spot
+                "base_url":      BINANCE_BASE,
                 "binance_alpha": True,
                 "futures_only":  False,
             }
@@ -2140,7 +2138,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         if ticker.get("futures_only"):
             ob_fut = ob_spot  # base_url already points to FAPI — no double call
         elif ticker.get("binance_alpha"):
-            ob_fut = ob_spot  # no FAPI contract — MEXC spot OB only
+            ob_fut = ob_spot  # no FAPI contract — use spot OB only
         else:
             ob_fut = fetch_ob_imbalance(sym, f"{BINANCE_FUTURES}/fapi/v1", levels=20)
     else:
