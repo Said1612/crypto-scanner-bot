@@ -205,6 +205,9 @@ TRACKING_FILE = "tracking_state.json" # local fallback when Redis not configured
 REPORT_SENT_FILE = "report_sent.json" # dedup: prevents duplicate daily/weekly/monthly reports
 _signal_db : List[dict] = []    # ML training DB — loaded from SIGNAL_DB on start
 market_cvd    = 0.0
+_last_bias_label  = ""    # previous bias label — detect regime change
+_last_bias_score  = 0     # previous bias score
+last_market_stats = 0.0   # last time market stats was sent
 _diag : Dict[str, int] = {}   # diagnostic: rejection counts per filter
 _multi_confirm       : Dict[str, dict] = {}   # {sym: {"count": N, "scanners": [], "last_time": ts}}
 MULTI_CONFIRM_WINDOW = 1800  # 30 min window for multi-scanner confirmation
@@ -2420,6 +2423,84 @@ def bias_label(score: int) -> str:
     return "🔴🔴 Strong Bear"
 
 
+def _calc_sector_performance(all_t: dict) -> dict:
+    """Returns {sector: avg_change} for sectors with ≥2 coins."""
+    data: Dict[str, list] = {}
+    for sym, t in all_t.items():
+        base   = sym[:-4] if sym.endswith("USDT") else sym.replace("USDT", "")
+        sector = SECTOR_REGISTRY.get(base, "")
+        if not sector or sector in ("Other", "BNB Alpha"):
+            continue
+        data.setdefault(sector, []).append(t["change"])
+    return {s: sum(v) / len(v) for s, v in data.items() if len(v) >= 2}
+
+
+def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: str = ""):
+    """Format and send market stats to Telegram."""
+    label = bias_label(bias)
+
+    # Breadth
+    total = len(all_t)
+    up    = sum(1 for t in all_t.values() if t["change"] >  1.0)
+    down  = sum(1 for t in all_t.values() if t["change"] < -1.0)
+    flat  = total - up - down
+    up_pct   = int(up   / total * 100) if total else 0
+    flat_pct = int(flat / total * 100) if total else 0
+    down_pct = int(down / total * 100) if total else 0
+
+    # Visual bar  (10 blocks, centre = 0)
+    filled = max(0, min(10, int((bias + 100) / 200 * 10)))
+    bar    = "🟩" * filled + "⬜" * (10 - filled)
+
+    # Flow icons
+    tbr_icon = "🟢" if tbr > 53 else ("🔴" if tbr < 47 else "⚪")
+    cvd_icon = "🟢" if cvd > 0 else "🔴"
+
+    # Sectors
+    sectors = _calc_sector_performance(all_t)
+    ranked  = sorted(sectors.items(), key=lambda x: -x[1])
+    best3   = ranked[:3]
+    worst3  = ranked[-3:]
+
+    lines = [
+        f"{'━' * 20}",
+        f"💀 *MAFIO SNIPER* 📡",
+        f"",
+        f"📊 *Market Stats*",
+        f"",
+        f"🧭 *Bias:* {label}",
+        f"Score: `{bias:+d} / 100`",
+        f"`{bar}`",
+        f"",
+        f"📈 *Market Breadth (24h)*",
+        f"🟢 UP `{up_pct}%` ({up})  ·  ⚪ FLAT `{flat_pct}%`  ·  🔴 DOWN `{down_pct}%` ({down})",
+        f"",
+        f"💧 *Market Flow*",
+        f"Taker‑buy: `{tbr:.1f}%` {tbr_icon}  ·  CVD: `{_fv(abs(cvd))}` {cvd_icon}",
+    ]
+
+    if best3:
+        lines.append("")
+        lines.append("🏆 *Best Sectors*")
+        for sec, chg in best3:
+            disp = _SECTOR_DISPLAY.get(sec, f"📊 {sec}")
+            lines.append(f"  {disp}: `{chg:+.2f}%`")
+
+    if worst3 and worst3 != best3:
+        lines.append("")
+        lines.append("📉 *Worst Sectors*")
+        for sec, chg in worst3:
+            disp = _SECTOR_DISPLAY.get(sec, f"📊 {sec}")
+            lines.append(f"  {disp}: `{chg:+.2f}%`")
+
+    if reason:
+        lines += ["", f"⚡ _{reason}_"]
+
+    lines += ["", f"🕐 {_ts()} UTC", f"{'━' * 20}"]
+    send("\n".join(lines))
+    log.info("Market stats sent — bias=%+d %s reason=%s", bias, label, reason or "hourly")
+
+
 def get_market_ctx(bias: int) -> dict:
     """
     Returns adaptive thresholds based on market bias — Sniper Mode active in Bull conditions.
@@ -3660,12 +3741,35 @@ def main():
 
             # ── Market Bias ───────────────────────────
             global market_bias, market_cvd, last_bias_log
+            global _last_bias_label, _last_bias_score, last_market_stats
             market_bias, market_cvd, tbr = calc_market_bias(all_t)
+            cur_label = bias_label(market_bias)
             if now - last_bias_log >= 300:   # log every 5 min
                 last_bias_log = now
                 log.info("Market Bias: %+d  %s  CVD=%s  TakerBuy=%.1f%%",
-                         market_bias, bias_label(market_bias),
+                         market_bias, cur_label,
                          _fv(abs(market_cvd)), tbr)
+
+            # ── Market Stats — send on regime change or hourly ────────────
+            _bias_changed   = _last_bias_label and cur_label != _last_bias_label
+            _score_jumped   = abs(market_bias - _last_bias_score) >= 30
+            _hourly         = now - last_market_stats >= 3600
+            if _bias_changed or _score_jumped or (_hourly and _last_bias_label):
+                if now - last_market_stats >= 120:   # min 2 min between sends
+                    if _bias_changed:
+                        reason = f"Regime change: {_last_bias_label} → {cur_label}"
+                    elif _score_jumped:
+                        reason = f"Score jump: {_last_bias_score:+d} → {market_bias:+d}"
+                    else:
+                        reason = "Hourly update"
+                    send_market_stats(all_t, market_bias, market_cvd, tbr, reason)
+                    last_market_stats = now
+            elif not _last_bias_label:
+                # First run — send initial stats after 60s warmup
+                if now - last_market_stats >= 60 and last_market_stats == 0.0:
+                    last_market_stats = now   # mark so we don't spam
+            _last_bias_label = cur_label
+            _last_bias_score = market_bias
 
             # Cleanup stale multi-confirm entries once per hour
             if int(now) % 3600 < 35:
