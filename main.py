@@ -1494,34 +1494,58 @@ def _tstr(e):
     return f"{e}s"
 
 def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
-    """Clean dark card — no stars, Wolf Flow style layout."""
+    """Anime background milestone card — Wolf Flow style layout."""
     try:
-        from PIL import Image, ImageDraw, ImageFont, ImageFilter
-        import io
+        from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+        import io, os
 
         W, H = 700, 700
 
-        # ── Background: solid dark with subtle gradient ──
-        img  = Image.new("RGB", (W, H))
-        draw = ImageDraw.Draw(img)
-        for y in range(H):
-            t = y / H
-            r = int(8  + 10 * (1 - t))
-            g = int(2  + 3  * (1 - t))
-            b = int(20 + 30 * (1 - t))
-            draw.line([(0, y), (W, y)], fill=(r, g, b))
+        # ── Pick background image based on gain level ──
+        BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backgrounds")
+        if gain >= 100:
+            bg_file = "bg6_zoro_wings.jpg"      # Zoro fire wings — legendary gain
+        elif gain >= 60:
+            bg_file = "bg5_luffy_clouds.jpg"    # Luffy flying — epic gain
+        elif gain >= 40:
+            bg_file = "bg3_luffy_fire.jpg"      # Luffy fire/lightning — big gain
+        elif gain >= 30:
+            bg_file = "bg1_luffy_storm.jpg"     # Luffy storm — strong gain
+        elif gain >= 25:
+            bg_file = "bg4_luffy_energy.jpg"    # Luffy energy ball — solid gain
+        else:
+            bg_file = "bg2_demon.jpg"           # Dark demon — baseline ≥20%
 
-        # ── Center radial glow ──
-        glow_bg = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gd      = ImageDraw.Draw(glow_bg)
-        for rad in range(300, 0, -8):
-            alpha = int(18 * (1 - rad / 300))
-            gd.ellipse([(W//2 - rad, H//2 - rad + 40),
-                        (W//2 + rad, H//2 + rad + 40)],
-                       fill=(70, 0, 140, alpha))
-        img  = img.convert("RGBA")
-        img  = Image.alpha_composite(img, glow_bg)
-        img  = img.convert("RGB")
+        bg_path = os.path.join(BASE_DIR, bg_file)
+        if os.path.exists(bg_path):
+            bg = Image.open(bg_path).convert("RGB")
+            bg = bg.resize((W, H), Image.LANCZOS)
+            # Darken slightly so text remains readable
+            bg = ImageEnhance.Brightness(bg).enhance(0.55)
+            img = bg
+        else:
+            # Fallback: dark gradient
+            img  = Image.new("RGB", (W, H))
+            draw = ImageDraw.Draw(img)
+            for y in range(H):
+                t = y / H
+                r = int(8  + 10 * (1 - t))
+                g = int(2  + 3  * (1 - t))
+                b = int(20 + 30 * (1 - t))
+                draw.line([(0, y), (W, y)], fill=(r, g, b))
+
+        # ── Dark semi-transparent overlay for text panels ──
+        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        od = ImageDraw.Draw(overlay)
+        # Top bar
+        od.rectangle([(0, 0), (W, 74)], fill=(0, 0, 0, 155))
+        # Bottom info panel
+        od.rectangle([(0, 500), (W, H)], fill=(0, 0, 0, 170))
+        # Center text shadow behind gain
+        od.ellipse([(W//2 - 240, 270), (W//2 + 240, 470)], fill=(0, 0, 0, 100))
+        img = img.convert("RGBA")
+        img = Image.alpha_composite(img, overlay)
+        img = img.convert("RGB")
         draw = ImageDraw.Draw(img)
 
         # ── Fonts ──
@@ -1542,8 +1566,9 @@ def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
         draw.text((W - 26, 26), ex_label, fill=ex_color, anchor="rt", font=f_brand)
         draw.line([(26, 60), (W - 26, 60)], fill=(50, 25, 85), width=1)
 
-        # ── Coin name ──
-        draw.text((W // 2, 195), f"{base}", fill=(255, 255, 255), anchor="mm", font=f_coin)
+        # ── Coin name (shadow + text for readability over busy backgrounds) ──
+        draw.text((W // 2 + 3, 203), f"{base}", fill=(10, 0, 20),        anchor="mm", font=f_coin)
+        draw.text((W // 2,     200), f"{base}", fill=(255, 255, 255),    anchor="mm", font=f_coin)
 
         # ── Gain % with glow ──
         gain_color = (160, 80, 255) if gain >= 0 else (255, 60, 60)
