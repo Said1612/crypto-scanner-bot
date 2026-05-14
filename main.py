@@ -62,7 +62,7 @@ REPORT_HOUR      = int(os.getenv("REPORT_HOUR", "23"))  # UTC hour — Morocco U
 
 MILESTONES  = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100,
                125, 150, 175, 200, 250, 300, 400, 500]
-TRACK_HOURS      = 24
+TRACK_HOURS      = 240   # 10-day safety cap — signals close via SL, not timeout
 SIGNAL_TIMEOUT_H = 8      # expire signal if no +5% within 8h (weak/slow signals)
 SIGNAL_SL_PCT    = -5.0   # stop-loss: exit tracking if -5% below entry
 SIGNAL_DB        = "signal_history.json"  # ML training data — append only, never reset
@@ -1093,16 +1093,15 @@ def check_milestones(all_t):
                     _rec["max_gain_pct"] = round(gain, 2)
                     break
 
-        # 2. Stop-loss alert only — no auto-close, signal stays active
-        if gain <= SIGNAL_SL_PCT and not info.get("sl_alerted"):
-            info["sl_alerted"] = True
-            save_state()   # persist flag before firing — prevents duplicate on restart
-            _fire_stoploss(sym, gain, t["price"], info["entry"],
-                           int(elapsed), info["exchange"])
-
-        # 3. Timeout removed — signals run for full 24h window
-        if False and elapsed > SIGNAL_TIMEOUT_H * 3600 and info.get("max", 0.0) < 5.0:
-            expired.append((sym, "timeout")); continue
+        # 2. Stop-loss hit → alert AND close tracking
+        if gain <= SIGNAL_SL_PCT:
+            if not info.get("sl_alerted"):
+                info["sl_alerted"] = True
+                save_state()
+                _fire_stoploss(sym, gain, t["price"], info["entry"],
+                               int(elapsed), info["exchange"])
+            expired.append((sym, "stoploss"))   # close immediately on SL
+            continue
 
         # ── Milestone alerts ─────────────────────────────────────────────
         pending = [ms for ms in MILESTONES if ms not in info["hit"] and gain >= ms]
