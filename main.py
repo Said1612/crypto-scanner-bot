@@ -2087,7 +2087,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # MOONSHOT override: whale accumulation bypasses soft filters
     _low_price_moon = (
         price < 0.25 and spike >= 10.0 and
-        net > 20_000 and pos24 < 0.50 and ob_spot >= 0.55
+        net > 20_000 and pos24 < 0.50
     )
     is_moonshot = (
         (net > 500_000 and pos24 < 0.60) or   # Whale: $500K+ net near bottom
