@@ -4049,13 +4049,13 @@ def main():
             _score_jumped   = abs(market_bias - _last_bias_score) >= 30
             _hourly         = now - last_market_stats >= 14400  # every 4h
             if _bias_changed or _score_jumped or (_hourly and _last_bias_label):
-                if now - last_market_stats >= 120:   # min 2 min between sends
+                if now - last_market_stats >= 1800:   # min 30 min between sends (prevent oscillation)
                     if _bias_changed:
                         reason = f"Regime change: {_last_bias_label} → {cur_label}"
                     elif _score_jumped:
                         reason = f"Score jump: {_last_bias_score:+d} → {market_bias:+d}"
                     else:
-                        reason = "Hourly update"
+                        reason = "Periodic update"
                     send_market_stats(all_t, market_bias, market_cvd, tbr, reason)
                     last_market_stats = now
             elif not _last_bias_label:
