@@ -3353,16 +3353,16 @@ def scan_sleeping_giant(all_t):
 def scan_quiet_accum(all_t):
     """
     Catches coins being accumulated quietly near their 24h low
-    BEFORE price breaks out — the pattern Wolf Flow used to catch HYPER at $0.1148.
+    BEFORE price breaks out — the pattern Wolf Flow used to catch AI +50%.
 
-    Conditions:
-      pos24 < 0.35  — price in bottom 35% of 24h range (not yet moved)
-      change: -35% to +12% — not already pumped or crashing
-      vol >= 200K   — real liquidity
-      ratio >= 1.8  — buyers clearly dominate sellers
-      spike >= 1.5x — 1h volume above hourly average
-      ob >= 0.56    — order book favours buyers
-      score >= 4.5  — minimum signal quality
+    Stricter v2 conditions (re-enabled after AIUSDT analysis):
+      pos24 < 0.30  — price in bottom 30% of 24h range (tighter than before)
+      change: -25% to +10%
+      vol >= 500K   — real liquidity (raised from 200K)
+      ratio >= 3.5x — strong buyer dominance (raised from 2.5x)
+      spike >= 2.5x — clear volume surge (raised from 1.5x)
+      ob >= 0.60    — order book clearly favours buyers
+      score >= 8.0  — high quality only (raised from 7.0)
     """
     now = time.time()
 
@@ -3373,13 +3373,13 @@ def scan_quiet_accum(all_t):
         if rng <= 0:
             continue
         pos24 = (t["price"] - l24) / rng
-        if pos24 > 0.35:
+        if pos24 > 0.30:
             continue
         vol_24h = t["vol"]
-        if vol_24h < 200_000:
+        if vol_24h < 500_000:
             continue
         chg = t["change"]
-        if chg > 12.0 or chg < -35.0:
+        if chg > 10.0 or chg < -25.0:
             continue
         # Post-pump trap: coin pumped big intraday then crashed to "bottom" — P&D setup
         # GT pattern: pumped to $0.179 → fell to $0.128 (pos≈3%) → fake ratio 34.9x → dump
@@ -3420,7 +3420,7 @@ def scan_quiet_accum(all_t):
         # Ratio floors: winners show ≥2.5x minimum (PGVERSE=3.5x, SXT=9.3x, GT=34.9x)
         # SKL(1.9x) and TREE(2.0x) were weak signals — raise floor to match Micro tier
         # Ultra-low price (DENT type): accept 2.0x — USD flows are small at $0.000061
-        _ratio_min = 2.0 if price < 0.001 else 2.5
+        _ratio_min = 2.5 if price < 0.001 else 3.5
         if ratio < _ratio_min:
             continue
 
@@ -3431,7 +3431,7 @@ def scan_quiet_accum(all_t):
         # Volume spike: 1h traded volume vs expected hourly (vol_24h / 24)
         avg_1h = vol_24h / 24.0
         spike  = (buy_v + sell_v) / avg_1h if avg_1h > 0 else 0.0
-        if spike < 1.5:
+        if spike < 2.5:
             continue
 
         # Adaptive net floor by price level — DENT $0.000061 type needs lower floor
@@ -3469,13 +3469,9 @@ def scan_quiet_accum(all_t):
 
         tier  = get_tier(vol_24h)
         score = _calc_score(pos24, net, _net_floor, ob_spot, spike)
-        if exchange == "MEXC":
-            if score < 8.0: continue
-        else:
-            _ac_ok = (score >= 7.0
-                      or (ob_spot >= 0.70 and ratio >= 2.5 and net >= _net_floor)
-                      or (net > 100_000 and ob_spot >= 0.62))
-            if not _ac_ok: continue
+        # Strict v2: require high score for all exchanges
+        if score < 8.0:
+            continue
 
         _, badge = _register_confirm(sym, "accum")
         ob_lbl   = "🟢 Buyers" if ob_spot > 0.58 else "⚪ Balanced"
@@ -4116,11 +4112,10 @@ def main():
                 last_super = now
                 scan_supertrend(all_t)
 
-            # DATA: quiet_accum avg=4.0% (1/8 wins) — disabled based on signal_history analysis
-            # global last_accum
-            # if now - last_accum >= ACCUM_SCAN_S:
-            #     last_accum = now
-            #     scan_quiet_accum(all_t)
+            global last_accum
+            if now - last_accum >= ACCUM_SCAN_S:
+                last_accum = now
+                scan_quiet_accum(all_t)
 
             global last_sg
             if now - last_sg >= SLEEP_GIANT_S:
