@@ -4045,13 +4045,6 @@ def main():
                 log.info("Market Bias: %+d  %s  CVD=%s  TakerBuy=%.1f%%",
                          market_bias, cur_label,
                          _fv(abs(market_cvd)), tbr)
-
-            # ── Market Stats — send every 4 hours only ───────────────────
-            if now - last_market_stats >= 14400 and _last_bias_label:
-                send_market_stats(all_t, market_bias, market_cvd, tbr, "")
-                last_market_stats = now
-            elif last_market_stats == 0.0 and _last_bias_label:
-                last_market_stats = now   # first run — start the 4h clock without sending
             _last_bias_label = cur_label
             _last_bias_score = market_bias
 
