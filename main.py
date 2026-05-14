@@ -2507,19 +2507,21 @@ def fetch_dominance() -> dict:
 
 
 def _dom_delta(key: str, seconds: int) -> float:
-    """Return change in dominance[key] over the last `seconds` seconds. 0 if not enough data."""
-    now = time.time()
-    old = [(ts, d) for ts, d in _dominance_hist if now - ts >= seconds * 0.8]
-    cur = [d for ts, d in _dominance_hist if now - ts <= 60]
-    if not old or not cur:
+    """Change in dominance[key] over the last `seconds`. Falls back to oldest available data."""
+    if len(_dominance_hist) < 2:
         return 0.0
-    return cur[-1].get(key, 0) - old[0][1].get(key, 0)
+    now = time.time()
+    cur_val = _dominance_hist[-1][1].get(key, 0)
+    # Find a reference point ~`seconds` ago; if not enough history, use oldest we have
+    candidates = [(ts, d) for ts, d in _dominance_hist if now - ts >= seconds * 0.7]
+    ref = candidates[0][1] if candidates else _dominance_hist[0][1]
+    return cur_val - ref.get(key, 0)
 
 
 def _dom_dot(key: str, seconds: int, invert: bool = False) -> str:
     """🟢/🔴 dot for dominance change direction. invert=True flips meaning (e.g. OTHERS: rising = 🟢)."""
     delta = _dom_delta(key, seconds)
-    if abs(delta) < 0.01:
+    if abs(delta) < 0.002:   # 0.002% minimum — dominance moves slowly
         return "⚪"
     rising = delta > 0
     if invert:
@@ -2615,17 +2617,22 @@ def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: st
         usdcd  = dom.get("usdcd",  0.0)
         others = dom.get("others", 0.0)
         # dots: rising BTC.D/USDT.D/USDC.D = 🔴 (bad for alts); rising OTHERS = 🟢 (alt season)
+        def _dom_row(icon, label, key, pct, invert=False):
+            d5  = _dom_delta(key, 300)
+            d1h = _dom_delta(key, 3600)
+            dot5  = _dom_dot(key, 300,  invert)
+            dot1h = _dom_dot(key, 3600, invert)
+            s5  = f"{d5:+.3f}%" if abs(d5)  >= 0.001 else "flat"
+            s1h = f"{d1h:+.3f}%" if abs(d1h) >= 0.001 else "flat"
+            return f"{icon} {label} `{pct:.2f}%`  5m:{dot5}`{s5}`  1h:{dot1h}`{s1h}`"
+
         lines += [
             "",
             "🌐 *Market Structure*",
-            f"₿ BTC.D `{btcd:.2f}%`   "
-            f"5m:{_dom_dot('btcd',300)}  1h:{_dom_dot('btcd',3600)}",
-            f"💵 USDT.D `{usdtd:.2f}%`   "
-            f"5m:{_dom_dot('usdtd',300)}  1h:{_dom_dot('usdtd',3600)}",
-            f"🔵 USDC.D `{usdcd:.2f}%`   "
-            f"5m:{_dom_dot('usdcd',300)}  1h:{_dom_dot('usdcd',3600)}",
-            f"📈 OTHERS `{others:.2f}%`   "
-            f"5m:{_dom_dot('others',300,invert=True)}  1h:{_dom_dot('others',3600,invert=True)}",
+            _dom_row("₿",  "BTC.D",  "btcd",   btcd),
+            _dom_row("💵", "USDT.D", "usdtd",  usdtd),
+            _dom_row("🔵", "USDC.D", "usdcd",  usdcd),
+            _dom_row("📈", "OTHERS", "others", others, invert=True),
         ]
 
     if gainers:
