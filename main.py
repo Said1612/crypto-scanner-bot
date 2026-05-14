@@ -2171,14 +2171,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     if momentum_bypass and exchange == "MEXC" and ob_spot < 0.62:
         momentum_bypass = False
         log.debug("MOMENTUM_BYPASS cancelled %s MEXC ob=%.0f%% < 62%%", sym, ob_spot * 100)
-    # DATA-DRIVEN (signal_history.json 172 signals):
-    # OB<0.50 → avg 47.2% | OB>=0.60 → avg 31.1% — lower OB signals outperform
-    # Lowered from 0.60 to 0.52 to capture more explosive moves
-    _ob_min_spot = 0.52
-    # Absorption bypass: ob_spot >= 0.50 (was 0.55)
-    absorption = (net >= net_min * 3 and ob_spot >= 0.50)
-    # volume_explosion bypass: ob >= 0.46 (was 0.50)
-    _vol_exp_ob_ok = volume_explosion and ob_spot >= 0.46
+    # ob_sellers threshold: 60% fixed — all winners had ≥60% bids (REPAI=60%, BLINKY=68%)
+    # BEAT=46% and RIVER=48% were losers — sub-60% bids = no real buyer conviction
+    _ob_min_spot = 0.60
+    # Absorption bypass: ob_spot >= 0.55 required even with strong net flow
+    absorption = (net >= net_min * 3 and ob_spot >= 0.55)
+    # volume_explosion bypass: only when ob >= 0.50 (RAY=59% ✅, BANK=48% ❌)
+    _vol_exp_ob_ok = volume_explosion and ob_spot >= 0.50
     if ob_spot < _ob_min_spot and not absorption and not is_moonshot and not momentum_bypass and not _vol_exp_ob_ok:
         _rej("ob_sellers"); return
     if exchange == "Binance":
@@ -2296,9 +2295,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # TST pattern: ratio≥4x = strong buyer dominance compensates weak OB
     _extreme_vol = spike >= 30.0 and net > 0   # real demand confirmed by volume alone
     _strong_ratio = ratio >= 4.0 and net > 0   # buy/sell imbalance confirms real demand
-    # DATA: score<6 → avg 49.7% vs score>=6 → avg 24.1% — score is NOT a strong predictor
-    # Relaxed: only block truly weak signals (score<5 AND ob<0.58)
-    if score < 5.0 and ob_spot < 0.58 and not is_moonshot and not momentum_bypass and not volume_explosion and not _extreme_vol and not _strong_ratio:
+    if score < 6.0 and ob_spot < 0.65 and not is_moonshot and not momentum_bypass and not volume_explosion and not _extreme_vol and not _strong_ratio:
         _rej("weak_ob_score"); return
 
     # ── Bear market + high bids score penalty ────────────────────────────
