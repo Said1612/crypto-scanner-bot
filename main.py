@@ -2549,9 +2549,9 @@ def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: st
     else:
         regime_icon = "🐻🐻"; regime_txt = "Strong Bear"
 
-    # ── 5-dot visual: green dots on left, red on right ──
-    n_green = round((bias + 100) / 200 * 5)
-    dots    = "🟢" * n_green + "🔴" * (5 - n_green)
+    # ── 5-dot visual: 🐂 bulls on left, 🐻 bears on right ──
+    n_bull = round((bias + 100) / 200 * 5)
+    dots   = "🐂" * n_bull + "🐻" * (5 - n_bull)
 
     # ── Market Breadth (24h) ──
     up   = sum(1 for t in all_t.values() if t["change"] >  1.0)
@@ -2639,11 +2639,6 @@ def send_market_stats(all_t: dict, bias: int, cvd: float, tbr: float, reason: st
         lines += ["", "📈 *Top Gainers (24h)*"]
         for i, (coin, chg) in enumerate(gainers, 1):
             lines.append(f"  `{i}.` {coin}  `+{chg:.2f}%`")
-
-    if losers:
-        lines += ["", "📉 *Top Losers (24h)*"]
-        for i, (coin, chg) in enumerate(losers, 1):
-            lines.append(f"  `{i}.` {coin}  `{chg:.2f}%`")
 
     if sec_perf:
         lines += ["", "🏆 *Sectors (24h avg)*"]
