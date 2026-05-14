@@ -4044,24 +4044,12 @@ def main():
                          market_bias, cur_label,
                          _fv(abs(market_cvd)), tbr)
 
-            # ── Market Stats — send on regime change or hourly ────────────
-            _bias_changed   = _last_bias_label and cur_label != _last_bias_label
-            _score_jumped   = abs(market_bias - _last_bias_score) >= 30
-            _hourly         = now - last_market_stats >= 14400  # every 4h
-            if _bias_changed or _score_jumped or (_hourly and _last_bias_label):
-                if now - last_market_stats >= 1800:   # min 30 min between sends (prevent oscillation)
-                    if _bias_changed:
-                        reason = f"Regime change: {_last_bias_label} → {cur_label}"
-                    elif _score_jumped:
-                        reason = f"Score jump: {_last_bias_score:+d} → {market_bias:+d}"
-                    else:
-                        reason = "Periodic update"
-                    send_market_stats(all_t, market_bias, market_cvd, tbr, reason)
-                    last_market_stats = now
-            elif not _last_bias_label:
-                # First run — send initial stats after 60s warmup
-                if now - last_market_stats >= 60 and last_market_stats == 0.0:
-                    last_market_stats = now   # mark so we don't spam
+            # ── Market Stats — send every 4 hours only ───────────────────
+            if now - last_market_stats >= 14400 and _last_bias_label:
+                send_market_stats(all_t, market_bias, market_cvd, tbr, "")
+                last_market_stats = now
+            elif last_market_stats == 0.0 and _last_bias_label:
+                last_market_stats = now   # first run — start the 4h clock without sending
             _last_bias_label = cur_label
             _last_bias_score = market_bias
 
