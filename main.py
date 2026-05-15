@@ -19,6 +19,14 @@ except Exception as _ai_err:
     _ai_agent = None
     logging.getLogger(__name__).warning("AI agent not loaded: %s", _ai_err)
 
+# Fractal agent — optional, Bill Williams fractal analysis
+try:
+    from fractal_agent import FractalAgent as _FractalAgentCls
+    _fractal_agent = _FractalAgentCls()
+except Exception as _fra_err:
+    _fractal_agent = None
+    logging.getLogger(__name__).warning("Fractal agent not loaded: %s", _fra_err)
+
 # ══════════════════════════════════════════════════════
 #  CONFIG
 # ══════════════════════════════════════════════════════
@@ -456,9 +464,11 @@ def _db_close(sym, outcome, max_gain, price_exit, duration_min, reason):
             rec["duration_min"] = duration_min
             rec["close_reason"] = reason
             _save_signal_db()
-            # Notify AI agent so it retrains after 10 new outcomes
+            # Notify agents so they retrain after enough new outcomes
             if _ai_agent is not None:
                 _ai_agent.notify_outcome()
+            if _fractal_agent is not None:
+                _fractal_agent.record_outcome(sym, max_gain)
             return
 
 # ══════════════════════════════════════════════════════
@@ -1691,6 +1701,13 @@ def poll_telegram():
                     send("❌ AI Agent غير مفعّل")
                 else:
                     send(_ai_agent.summary(), parse_mode="Markdown")
+
+            if text.lower().split("@")[0] == "/fractal_summary":
+                log.info("Manual /fractal_summary from chat %s", cid)
+                if _fractal_agent is None:
+                    send("❌ Fractal Agent غير مفعّل")
+                else:
+                    send(_fractal_agent.summary(), parse_mode="Markdown")
     except Exception as e:
         log.warning("poll_telegram: %s", e)
 
@@ -1704,10 +1721,11 @@ def register_commands():
         S.post(f"{_TG}/deleteWebhook", json={"drop_pending_updates": False}, timeout=5)
         S.post(f"{_TG}/setMyCommands",
                json={"commands": [
-                                   {"command": "report",     "description": "📊 التقرير اليومي"},
-                                   {"command": "weekly",     "description": "📊 التقرير الأسبوعي"},
-                                   {"command": "monthly",    "description": "📊 التقرير الشهري"},
-                                   {"command": "ai_summary", "description": "🤖 ملخص AI Agent المتعلِّم"},
+                                   {"command": "report",          "description": "📊 التقرير اليومي"},
+                                   {"command": "weekly",          "description": "📊 التقرير الأسبوعي"},
+                                   {"command": "monthly",         "description": "📊 التقرير الشهري"},
+                                   {"command": "ai_summary",      "description": "🤖 ملخص AI Agent المتعلِّم"},
+                                   {"command": "fractal_summary", "description": "📐 ملخص Fractal Agent"},
                                ]},
                timeout=5)
         log.info("Webhook cleared. /report command registered.")
@@ -2591,6 +2609,14 @@ def _check(sym, ticker, interval, sector_boost=False):
     if _fighting_bear and score >= 5.0:
         _score_floor = min(_score_floor, 5.0)
 
+    # ── Fractal Analysis ─────────────────────────────────────────────────
+    _fra = None
+    if _fractal_agent is not None:
+        try:
+            _fra = _fractal_agent.analyze(candles, price)
+        except Exception as _fe:
+            log.debug("fractal_agent error: %s", _fe)
+
     # Fire
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
@@ -2608,6 +2634,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
+
+    # Append fractal line to signal
+    if _fra and _fra["detail"]:
+        _fra_line = f"\n📐 *Fractal*: {_fra['verdict']} · {_fra['detail']}"
+        if _fra.get("warning"):
+            _fra_line += f"\n   ⚠️ {_fra['warning']}"
+        msg += _fra_line
     _kb_exchange = "MEXC" if ticker.get("binance_alpha") else exchange
     keyboard = _trade_keyboard(sym, _kb_exchange)   # signal has no orig link yet
     ok, sig_msg_id = send_ex(msg, keyboard)
@@ -2638,6 +2671,9 @@ def _check(sym, ticker, interval, sector_boost=False):
                      else "main")
     _db_add(sym, price, exchange, tier["name"], _scanner_type,
             ratio, ob_spot, score, pos24, spike, net, move, funding_label)
+    # Record fractal snapshot for self-learning
+    if _fractal_agent is not None and _fra and _fra.get("_features"):
+        _fractal_agent.record_signal(sym, _fra["_features"])
     save_state()
 
 # ══════════════════════════════════════════════════════
