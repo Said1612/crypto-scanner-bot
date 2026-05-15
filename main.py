@@ -228,6 +228,12 @@ _sector_warm_alerted : Dict[str, float] = {}  # {sector: last_warm_scan_ts}
 _trend_dedup         : Dict[str, float] = {}  # {sym: last_trend_signal_ts} 12h cooldown
 _dominance_hist      : List[Tuple[float, dict]] = []  # [(ts, {btcd, usdtd, usdcd, others})]
 
+# ── Circuit Breaker ──────────────────────────────────────────────────────────
+CB_MAX_CONSECUTIVE_SL = 3      # SL hits in a row before blocking new signals
+CB_PAUSE_HOURS        = 4      # hours to block after circuit breaks
+_cb_consecutive_sl    = 0      # rolling counter of consecutive SL outcomes
+_cb_blocked_until     = 0.0    # unix ts — signals blocked until this time
+
 # ══════════════════════════════════════════════════════
 #  LOGGING
 # ══════════════════════════════════════════════════════
@@ -237,6 +243,40 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S",
                     stream=__import__("sys").stdout)
 log = logging.getLogger("mafio")
+
+# ══════════════════════════════════════════════════════
+#  CIRCUIT BREAKER
+# ══════════════════════════════════════════════════════
+
+def _cb_is_active() -> bool:
+    """Return True if circuit breaker is currently blocking new signals."""
+    return time.time() < _cb_blocked_until
+
+def _cb_record_outcome(is_sl: bool, sym: str = ""):
+    """Call after every signal closes. Increments SL counter or resets it."""
+    global _cb_consecutive_sl, _cb_blocked_until
+    if is_sl:
+        _cb_consecutive_sl += 1
+        log.info("CB: SL streak=%d/%d (%s)", _cb_consecutive_sl, CB_MAX_CONSECUTIVE_SL, sym)
+        if _cb_consecutive_sl >= CB_MAX_CONSECUTIVE_SL:
+            _cb_blocked_until = time.time() + CB_PAUSE_HOURS * 3600
+            _cb_consecutive_sl = 0
+            resume_str = datetime.fromtimestamp(_cb_blocked_until, tz=timezone.utc).strftime("%H:%M UTC")
+            log.warning("CB: TRIGGERED — signals blocked for %dh (resumes %s)", CB_PAUSE_HOURS, resume_str)
+            try:
+                send(
+                    f"⛔ *Circuit Breaker مفعّل*\n"
+                    f"السبب: `{CB_MAX_CONSECUTIVE_SL}` إشارات SL متتالية\n"
+                    f"آخر خسارة: `{sym}`\n"
+                    f"الإجراء: لا إشارات لمدة `{CB_PAUSE_HOURS}` ساعات\n"
+                    f"يعود في: `{resume_str}`"
+                )
+            except Exception:
+                pass
+    else:
+        if _cb_consecutive_sl > 0:
+            log.info("CB: streak reset (success on %s)", sym)
+        _cb_consecutive_sl = 0
 
 # ══════════════════════════════════════════════════════
 #  HTTP
@@ -1143,6 +1183,7 @@ def check_milestones(all_t):
             _exit  = all_t.get(sym, {}).get("price", info["entry"])
             _out   = "success" if _max >= 5.0 else reason
             _db_close(sym, _out, _max, _exit, _dur, reason)
+            _cb_record_outcome(is_sl=(reason == "stoploss"), sym=sym)
             daily_results.append({
                 "sym":      sym,
                 "entry":    info["entry"],
@@ -1933,6 +1974,12 @@ def _calc_ema(closes, period):
 
 def _check(sym, ticker, interval, sector_boost=False):
     now      = time.time()
+
+    # ── Circuit Breaker — blocks signals after 3 consecutive SL hits ──────
+    if _cb_is_active():
+        resume = datetime.fromtimestamp(_cb_blocked_until, tz=timezone.utc).strftime("%H:%M UTC")
+        log.debug("CB: blocking %s — resumes %s", sym, resume)
+        return
 
     # ── Cascade / BTC danger pause ────────────────────────────────────────
     if now < _cascade_paused:
@@ -3244,6 +3291,8 @@ def scan_supertrend(all_t):
     - Relaxed net_min vs spike scanner (1h window, trend-based)
     Runs every SUPER_SCAN_S (15 min).
     """
+    if _cb_is_active():
+        return
     now_ts   = time.time()
     _st_diag = {}
 
@@ -3555,6 +3604,8 @@ def scan_quiet_accum(all_t):
       ob >= 0.60    — order book clearly favours buyers
       score >= 8.0  — high quality only (raised from 7.0)
     """
+    if _cb_is_active():
+        return
     now = time.time()
 
     candidates = []
