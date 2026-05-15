@@ -314,8 +314,8 @@ def load_state():
             now = time.time()
             for k, v in s.get("tracking", {}).items():
                 v["hit"] = set(v.get("hit", []))
-                # Only restore signals within 24h window
-                if now - v.get("t0", 0) < TRACK_HOURS * 3600:
+                # Restore all signals not yet closed by SL (no time limit — TRACK_HOURS is safety cap)
+                if not v.get("sl_alerted") or now - v.get("t0", 0) < TRACK_HOURS * 3600:
                     tracking[k] = v
             log.info("tracking_state loaded: %d active signals", len(tracking))
         except Exception:
@@ -416,6 +416,9 @@ def _db_close(sym, outcome, max_gain, price_exit, duration_min, reason):
             rec["duration_min"] = duration_min
             rec["close_reason"] = reason
             _save_signal_db()
+            # Notify AI agent so it retrains after 10 new outcomes
+            if _ai_agent is not None:
+                _ai_agent.notify_outcome()
             return
 
 # ══════════════════════════════════════════════════════
@@ -1640,6 +1643,13 @@ def poll_telegram():
                 except Exception as report_err:
                     log.error("/report failed: %s", report_err, exc_info=True)
                     send(f"❌ *تعذّر إنشاء التقرير*\n`{report_err}`")
+
+            if text.lower().split("@")[0] == "/ai_summary":
+                log.info("Manual /ai_summary from chat %s", cid)
+                if _ai_agent is None:
+                    send("❌ AI Agent غير مفعّل")
+                else:
+                    send(_ai_agent.summary(), parse_mode="Markdown")
     except Exception as e:
         log.warning("poll_telegram: %s", e)
 
@@ -1653,9 +1663,10 @@ def register_commands():
         S.post(f"{_TG}/deleteWebhook", json={"drop_pending_updates": False}, timeout=5)
         S.post(f"{_TG}/setMyCommands",
                json={"commands": [
-                                   {"command": "report",  "description": "📊 التقرير اليومي"},
-                                   {"command": "weekly",  "description": "📊 التقرير الأسبوعي"},
-                                   {"command": "monthly", "description": "📊 التقرير الشهري"},
+                                   {"command": "report",     "description": "📊 التقرير اليومي"},
+                                   {"command": "weekly",     "description": "📊 التقرير الأسبوعي"},
+                                   {"command": "monthly",    "description": "📊 التقرير الشهري"},
+                                   {"command": "ai_summary", "description": "🤖 ملخص AI Agent المتعلِّم"},
                                ]},
                timeout=5)
         log.info("Webhook cleared. /report command registered.")
