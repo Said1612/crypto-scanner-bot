@@ -835,8 +835,10 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         emoji   = r.get("emoji", "⚪")
         warns   = r.get("warnings", [])
         model   = r.get("model", exchange)
-        warn_str = f"\n   ⚠️ _{warns[0]}_" if warns else ""
-        text = f"\n🤖 *AI [{model}]:* {emoji} `{prob}%` · {verdict}{warn_str}\n{'━'*20}"
+        warn_str    = f"\n   ⚠️ _{warns[0]}_" if warns else ""
+        reasoning   = _build_reasoning(ratio, ob_spot, pos24, spike, net_usd, move_pct, funding, prob, score)
+        reason_str  = f"\n   {reasoning}" if reasoning else ""
+        text = f"\n🤖 *AI [{model}]:* {emoji} `{prob}%` · {verdict}{warn_str}{reason_str}\n{'━'*20}"
         # Block condition 1: AI below 35% is a clear avoid regardless of OB
         extreme_avoid = prob < 35
         # Block condition 2: moderate AI + sellers dominate OB (dump pattern)
@@ -1257,6 +1259,10 @@ def send_daily_report(reset=True):
     if not ok:
         log.error("Daily report FAILED to send")
         raise RuntimeError("send() returned False — Telegram delivery failed")
+
+    # ── EOD Self-Reflection ───────────────────────────────────────────────
+    _send_eod_reflection(all_entries)
+
     log.info("Daily report: total=%d wins=%d losses=%d active=%d avg=%.1f%%",
              total, len(wins), len(losses), len(active_c), avg_pk)
 
@@ -1264,6 +1270,181 @@ def send_daily_report(reset=True):
         daily_results = []
         daily_diag.clear()
         save_state()
+
+
+def _send_eod_reflection(all_entries: list):
+    """Analyze today's signals and send a self-reflection report with lessons learned."""
+    if not all_entries:
+        return
+    try:
+        # ── Load today's signals from signal_history.json ──
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            with open("signal_history.json", "r") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
+        today_sigs = [
+            s for s in history
+            if s.get("ts", "")[:10] == today_str and s.get("max_gain_pct") is not None
+        ]
+        if not today_sigs:
+            today_sigs = [
+                {"scanner": e.get("scanner", "?"), "tier": e.get("tier", "?"),
+                 "max_gain_pct": e["max"], "score": 0, "ob_spot": 0,
+                 "ratio": 0, "spike": 0, "net_usd": 0}
+                for e in all_entries if "max" in e
+            ]
+        if not today_sigs:
+            return
+
+        wins  = [s for s in today_sigs if s.get("max_gain_pct", 0) >= 5]
+        loses = [s for s in today_sigs if s.get("max_gain_pct", 0) < 0]
+        total = len(today_sigs)
+
+        def _avg(lst, key):
+            vals = [s.get(key) or 0 for s in lst]
+            return sum(vals) / len(vals) if vals else 0
+
+        # ── By Scanner ──
+        sc: Dict[str, list] = {}
+        for s in today_sigs:
+            sc.setdefault(s.get("scanner", "?"), []).append(s.get("max_gain_pct", 0))
+        sc_ranked = sorted(sc.items(), key=lambda x: -sum(x[1]) / len(x[1]))
+
+        # ── By Tier ──
+        tc: Dict[str, list] = {}
+        for s in today_sigs:
+            tc.setdefault(s.get("tier", "?"), []).append(s.get("max_gain_pct", 0))
+        tc_ranked = sorted(tc.items(), key=lambda x: -sum(x[1]) / len(x[1]))
+
+        # ── Lessons Learned ──
+        lessons = []
+
+        # Win pattern analysis
+        if wins:
+            avg_ob_w  = _avg(wins, "ob_spot")
+            avg_rat_w = _avg(wins, "ratio")
+            avg_spk_w = _avg(wins, "spike")
+            if avg_ob_w >= 0.65:
+                lessons.append(f"✅ الإشارات الرابحة كان OB فيها `{avg_ob_w:.0%}` — الـ OB القوي يتنبأ بالنجاح")
+            if avg_rat_w >= 4.0:
+                lessons.append(f"✅ نسبة الشراء/البيع في الرابحة `{avg_rat_w:.1f}x` — ratio≥4x علامة جيدة")
+            if avg_spk_w >= 8.0:
+                lessons.append(f"✅ حجم الـ spike في الرابحة `{avg_spk_w:.1f}x` — volume explosion يسبق الصعود")
+
+        # Loss pattern analysis
+        if loses:
+            avg_ob_l  = _avg(loses, "ob_spot")
+            avg_pos_l = _avg(loses, "pos24")
+            if avg_ob_l < 0.60:
+                lessons.append(f"⚠️ الإشارات الخاسرة كان OB فيها `{avg_ob_l:.0%}` — OB ضعيف = خطر")
+            if avg_pos_l > 0.60:
+                lessons.append(f"⚠️ الإشارات الخاسرة دخلت عند `{avg_pos_l:.0%}` من النطاق — دخول متأخر")
+
+        # Best scanner today
+        if sc_ranked:
+            best_sc, best_sc_vals = sc_ranked[0]
+            best_sc_avg = sum(best_sc_vals) / len(best_sc_vals)
+            if best_sc_avg >= 10:
+                lessons.append(f"🏆 أفضل scanner اليوم: `{best_sc}` بمتوسط `+{best_sc_avg:.1f}%`")
+
+        # Worst scanner today
+        if len(sc_ranked) > 1:
+            worst_sc, worst_sc_vals = sc_ranked[-1]
+            worst_avg = sum(worst_sc_vals) / len(worst_sc_vals)
+            if worst_avg < 3:
+                lessons.append(f"📉 أضعف scanner اليوم: `{worst_sc}` بمتوسط `{worst_avg:.1f}%` — راقبه")
+
+        # ── Build message ──
+        lines = [
+            "━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "🧠 *MAFIO — التحليل الذاتي اليومي*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "",
+            f"📊 *أداء Scanners اليوم*",
+        ]
+        for sc_name, vals in sc_ranked:
+            avg_v = sum(vals) / len(vals)
+            w_cnt = sum(1 for v in vals if v >= 5)
+            lines.append(f"  `{sc_name:<18}` {len(vals)} إشارة  avg `{avg_v:+.1f}%`  wins: {w_cnt}")
+
+        lines += ["", "📦 *أداء Tiers اليوم*"]
+        for t_name, vals in tc_ranked:
+            avg_v = sum(vals) / len(vals)
+            lines.append(f"  `{t_name:<8}` {len(vals)} إشارة  avg `{avg_v:+.1f}%`")
+
+        if lessons:
+            lines += ["", "💡 *الدروس المستخلصة*"]
+            lines += [f"  {l}" for l in lessons]
+
+        # Win/Loss comparison
+        if wins and loses:
+            lines += [
+                "",
+                "🔬 *مقارنة الرابحة vs الخاسرة*",
+                f"  OB:    رابحة `{_avg(wins,'ob_spot'):.0%}`  vs  خاسرة `{_avg(loses,'ob_spot'):.0%}`",
+                f"  Ratio: رابحة `{_avg(wins,'ratio'):.1f}x`    vs  خاسرة `{_avg(loses,'ratio'):.1f}x`",
+                f"  Spike: رابحة `{_avg(wins,'spike'):.1f}x`    vs  خاسرة `{_avg(loses,'spike'):.1f}x`",
+            ]
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━")
+        send("\n".join(lines))
+        log.info("EOD reflection sent: %d signals analyzed", total)
+    except Exception as e:
+        log.warning("EOD reflection failed: %s", e)
+
+
+def _build_reasoning(ratio, ob_spot, pos24, spike, net_usd, move_pct, funding, prob, score) -> str:
+    """Generate a 1-sentence AI reasoning log based on signal parameters."""
+    strengths, warnings = [], []
+
+    # Order book & ratio
+    if ob_spot >= 0.75 and ratio >= 4.0:
+        strengths.append(f"strong buyer dominance ({ratio:.1f}x ratio, {int(ob_spot*100)}% bids)")
+    elif ob_spot >= 0.65:
+        strengths.append(f"healthy OB ({int(ob_spot*100)}% bids)")
+    elif ratio >= 6.0:
+        strengths.append(f"aggressive buy flow ({ratio:.1f}x)")
+    elif ob_spot < 0.55:
+        warnings.append(f"weak OB ({int(ob_spot*100)}% bids)")
+
+    # Position in 24h range
+    if pos24 < 0.20:
+        strengths.append("very early entry near 24h low")
+    elif pos24 < 0.35:
+        strengths.append(f"good entry position ({int(pos24*100)}% from bottom)")
+    elif pos24 > 0.70:
+        warnings.append("late position — exhaustion risk")
+
+    # Volume spike
+    if spike >= 20.0:
+        strengths.append(f"explosive volume ({spike:.0f}x above avg)")
+    elif spike >= 8.0:
+        strengths.append(f"strong volume surge ({spike:.1f}x)")
+    elif spike < 3.0:
+        warnings.append(f"weak volume ({spike:.1f}x)")
+
+    # Net flow
+    if net_usd >= 300_000:
+        strengths.append(f"massive net inflow (${net_usd/1000:.0f}K)")
+    elif net_usd >= 80_000:
+        strengths.append(f"strong net inflow (${net_usd/1000:.0f}K)")
+    elif net_usd < 15_000:
+        warnings.append(f"low net flow (${net_usd/1000:.0f}K)")
+
+    # Funding
+    if "Bullish" in str(funding):
+        strengths.append("bullish funding")
+
+    # Build sentence
+    quality = "exceptional" if score >= 9.0 else "solid" if score >= 7.5 else "moderate" if score >= 6.0 else "weak"
+    parts = strengths[:3] + ([f"⚠ {warnings[0]}"] if warnings else [])
+    if parts:
+        return f"🧠 _{quality.capitalize()} setup: {', '.join(parts)}_"
+    return f"🧠 _Score {score:.1f} — mixed signals, no dominant factor_"
+
 
 
 _SECTOR_DISPLAY: Dict[str, str] = {
