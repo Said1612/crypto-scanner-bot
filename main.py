@@ -2522,8 +2522,9 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("ob_sellers"); return
     # Moonshot OB floor: 30% bids = 70% sellers ready to dump on any spike
     # BANANAS31: ratio 29.7x but OB 30% → big buyer ran out → -8% SL
-    # Even moonshots need minimum buyer presence in the book
-    if is_moonshot and ob_spot < 0.40 and not funding_bullish:
+    # AI: OB 37% + bullish fractal (QUAD + 5-wave) → +19% ✅ (correct to allow)
+    # Threshold 35%: blocks BANANAS31 (30%) while allowing AI (37%)
+    if is_moonshot and ob_spot < 0.35 and not funding_bullish:
         _rej(f"moonshot_ob_floor({ob_spot:.0%})"); return
     if exchange == "Binance":
         if ticker.get("futures_only"):
