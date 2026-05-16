@@ -86,7 +86,7 @@ class FractalValidationAgent:
           noise        : 0.0–1.0 noise score
         """
         if not klines or len(klines) < 15:
-            return self._neutral("بيانات غير كافية")
+            return self._neutral("insufficient data")
 
         n = len(klines)
         # Macro view: all candles | Micro view: last ~20% (recent action)
@@ -102,7 +102,7 @@ class FractalValidationAgent:
                 swing_low  = min(float(k[3]) for k in macro_klines)
                 swing_high = max(float(k[2]) for k in macro_klines)
             except (ValueError, IndexError):
-                return self._neutral("بيانات تالفة")
+                return self._neutral("corrupted data")
         else:
             swing_low  = min(macro_lows[-3:])  if len(macro_lows)  >= 3 else min(macro_lows)
             swing_high = max(macro_highs[-3:]) if len(macro_highs) >= 3 else max(macro_highs)
@@ -135,41 +135,41 @@ class FractalValidationAgent:
             tags.append("🚨 1.618 Fib Exhaust — False Breakout Risk")
         elif fb_result["approach"]:
             fcf *= _FCF_1618_APPROACH
-            tags.append(f"⚠️ قرب 1.618 ({fb_result['proximity_pct']:.1f}% منه)")
+            tags.append(f"⚠️ Approaching 1.618 ({fb_result['proximity_pct']:.1f}% away)")
 
         # Rule 2: Wave Structure
         if wave_macro == "impulse_5" and wave_micro == "impulse_5":
             fcf *= _FCF_5WAVE_ALIGN
-            tags.append("✅ موجة 5 (macro+micro متوافقتان)")
+            tags.append("✅ 5-Wave Impulse (macro+micro aligned)")
         elif wave_micro == "correction_3":
             fcf += _FCF_3WAVE_CORRECTION   # additive penalty
-            tags.append("〽️ موجة تصحيح 3 — انتبه")
+            tags.append("〽️ 3-Wave Correction — Caution")
 
         # Rule 3: MTF Trend Alignment
         if mtf_agree:
             fcf *= _FCF_MTF_AGREE
-            tags.append(f"📈 MTF متوافق ({macro_trend})")
+            tags.append(f"📈 MTF Aligned ({macro_trend})")
         elif macro_trend != "neutral" and micro_trend != "neutral":
             fcf *= _FCF_MTF_DIVERGE
-            tags.append(f"⚡ تباين MTF (macro={macro_trend} · micro={micro_trend})")
+            tags.append(f"⚡ MTF Divergence (macro={macro_trend} · micro={micro_trend})")
 
         # Rule 4: Noise
         if noise > 0.68:
             fcf *= _FCF_NOISE_HIGH
-            tags.append(f"📊 ضوضاء عالية ({noise:.0%})")
+            tags.append(f"📊 High Noise ({noise:.0%})")
 
         # Rule 5: Cycle Bottom support
         if cycle_pos == "bottom" and micro_trend == "bullish":
             fcf *= _FCF_CYCLE_BOTTOM
-            tags.append("🔵 قاع الدورة — Deep Cliff Support")
+            tags.append("🔵 Cycle Bottom — Deep Cliff Support")
         elif cycle_pos == "top" and fb_result["breach"]:
             fcf *= 0.80   # top + 1.618 = double exhaustion warning
-            tags.append("🔴 قمة الدورة + 1.618 = إرهاق مضاعف")
+            tags.append("🔴 Cycle Top + 1.618 = Double Exhaustion")
 
         # ── Clamp ──────────────────────────────────────────
         fcf = max(0.40, min(1.40, round(fcf, 3)))
 
-        detail = " · ".join(tags) if tags else "✅ لا مخاطر فراكتلية"
+        detail = " · ".join(tags) if tags else "✅ No fractal risks"
 
         return {
             "fcf":            fcf,
@@ -363,7 +363,7 @@ class FractalValidationAgent:
     def _neutral(reason: str = "") -> dict:
         return {
             "fcf":            1.0,
-            "detail":         reason or "محايد",
+            "detail":         reason or "neutral",
             "false_breakout": False,
             "fib_1618":       None,
             "wave_macro":     "unknown",

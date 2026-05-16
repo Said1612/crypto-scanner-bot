@@ -451,55 +451,55 @@ class FractalAgent:
 
         # ── Verdict ──
         if score >= 80:
-            verdict = "✅✅ فراكتل قوي جداً"
+            verdict = "✅✅ Very Strong Fractal"
         elif score >= 65:
-            verdict = "✅ فراكتل قوي"
+            verdict = "✅ Strong Fractal"
         elif score >= 50:
-            verdict = "🟡 فراكتل معتدل"
+            verdict = "🟡 Moderate Fractal"
         else:
-            verdict = "🔴 فراكتل ضعيف"
+            verdict = "🔴 Weak Fractal"
 
         # ── Detail text ──
         parts = []
         if bearish_end:
-            parts.append("🔄 نهاية فراكتل هابط — بداية صاعد")
+            parts.append("🔄 Bearish Fractal End — Bullish Start")
         if tornado:
-            parts.append("🌪️ Tornado — نسخ محدود → استمرار")
+            parts.append("🌪️ Tornado — Bounded Copy → Runaway")
         if compression["detected"]:
             n_c = compression.get("candles_compressed", 0)
             r_p = compression.get("range_pct", 0)
-            parts.append(f"💥 انفجار ضغط ({n_c} شمعة · {r_p:.1f}%)")
+            parts.append(f"💥 Compression Breakout ({n_c} candles · {r_p:.1f}%)")
         if wave3:
-            parts.append("〽️ دخول موجة 3")
+            parts.append("〽️ Wave 3 Entry")
         if quad["valid"]:
-            parts.append("✅ QUAD صحيح (F4>F2)")
+            parts.append("✅ QUAD Valid (F4>F2)")
         if fractal_break:
             n_broken = len(broken_levels)
-            parts.append(f"كسر {n_broken} مقاومة فراكتلية ✅")
+            parts.append(f"✅ Broke {n_broken} Fractal Resistance(s)")
         if near_support and nearest_sup:
-            parts.append(f"دعم فراكتلي ${nearest_sup:.4g} ({sup_dist:.1f}%↓)")
+            parts.append(f"Fractal Support ${nearest_sup:.4g} ({sup_dist:.1f}% below)")
         elif above_support and nearest_sup:
-            parts.append(f"فوق دعم ${nearest_sup:.4g}")
+            parts.append(f"Above Support ${nearest_sup:.4g}")
         if higher_lows:
             parts.append("Higher Lows ↗")
         if quad["magnification"]:
-            parts.append("تكبير الموجات ✅")
+            parts.append("✅ Wave Magnification")
         if quad["miniaturization"]:
-            parts.append("تصغير الموجات ⚠️")
+            parts.append("⚠️ Wave Miniaturization")
         if lower_highs:
             parts.append("Lower Highs ↘ ⚠️")
 
         # Hurst info line
         if hurst_trending:
-            parts.append(f"📊 H={H:.2f} سوق ذو ذاكرة ({round(H*100)}% استمرار)")
+            parts.append(f"📊 H={H:.2f} Persistent Market ({round(H*100)}% continuation)")
         elif hurst_chaotic:
-            parts.append(f"📊 H={H:.2f} سوق عشوائي ⚠️")
+            parts.append(f"📊 H={H:.2f} ⚠️ Random Market (no edge)")
 
-        detail = " · ".join(parts) if parts else "بنية فراكتلية محايدة"
+        detail = " · ".join(parts) if parts else "Neutral Fractal Structure"
 
         warning = None
         if near_resistance and nearest_res:
-            warning = f"مقاومة فراكتلية ${nearest_res:.4g} (+{res_dist:.1f}%) ⚠️"
+            warning = f"Fractal Resistance ${nearest_res:.4g} (+{res_dist:.1f}%) ⚠️"
 
         features = {
             "bearish_end":          bearish_end,
@@ -540,7 +540,7 @@ class FractalAgent:
 
     def _empty_result(self) -> dict:
         return {
-            "score": 50, "verdict": "⚪ لا بيانات فراكتلية",
+            "score": 50, "verdict": "⚪ No Fractal Data",
             "detail": "", "warning": None, "hurst": 0.5,
             "support": None, "resistance": None,
             "bull_trend": "neutral", "bear_trend": "neutral",
@@ -637,11 +637,11 @@ class FractalAgent:
     def summary(self) -> str:
         """Human-readable summary for /fractal_summary command."""
         lines = [
-            "📐 *Fractal Agent v3 — الاستراتيجية الموحدة*",
-            f"مُدرَّب على: `{self._trained_on}` إشارة مكتملة",
-            f"سجل التاريخ: `{len(self._history)}` نقطة",
+            "📐 *Fractal Agent v3 — Unified Strategy*",
+            f"Trained on: `{self._trained_on}` completed signals",
+            f"History: `{len(self._history)}` records",
             "",
-            "*أوزان الميزات المتعلَّمة:*",
+            "*Learned Feature Weights:*",
         ]
         for feat, w in self._weights.items():
             src  = "📘 S1" if feat not in ("hurst_trending", "hurst_chaotic",
@@ -650,17 +650,17 @@ class FractalAgent:
             lines.append(f"  {src} `{feat:<24}` `{w:+.3f}` {icon}")
         lines += [
             "",
-            "*المصدر 1 — دورة الفراكتل (الأنماط الهيكلية):*",
-            "  • QUAD الكسور الثنائية (F1→F4، الثاني يجتاز الأول)",
-            "  • Tornado — القالب الثاني لا يتجاوز قمة الأول → استمرار",
-            "  • نهاية الفراكتل الهابط — أقوى إشارة شراء (القاعدة 2)",
-            "  • مكبر/مصغر — حجم الموجات المتتالية يحدد قوة الترند",
+            "*Source 1 — Fractal Course (Structural Patterns):*",
+            "  • QUAD Fractal (F1→F4, second main must surpass first)",
+            "  • Tornado — bounded copy stays below impulse peak → runaway",
+            "  • Bearish Fractal End — strongest buy signal (Rule 2)",
+            "  • Magnification/Miniaturization — wave size trend",
             "",
-            "*المصدر 2 — نظرية ألمازوف (التأكيد الإحصائي):*",
-            "  • Hurst H>0.62: سوق ذو ذاكرة → احتمال الاستمرار = H×100%",
-            "  • Hurst H≈0.5: سوق عشوائي → لا ميزة إحصائية",
-            "  • Compression Breakout: انطلاق بسرعة البرق من نطاق ضيق",
+            "*Source 2 — Almazov Theory (Statistical Confirmation):*",
+            "  • Hurst H>0.62: persistent market → P(continuation) = H×100%",
+            "  • Hurst H≈0.5: random market → no statistical edge",
+            "  • Compression Breakout: lightning-fast move from tight range",
             "",
-            "*القاعدة الموحدة:* نقتنص الإشارة عندما يتفق المصدران ✅",
+            "*Unified Rule:* Signal only when both sources agree ✅",
         ]
         return "\n".join(lines)
