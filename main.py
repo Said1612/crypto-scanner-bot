@@ -2663,7 +2663,25 @@ def _check(sym, ticker, interval, sector_boost=False):
         except Exception as _cqe:
             log.debug("chaos_quant error: %s", _cqe)
 
-    # Fire
+    # ── Fractal Structure Gate ────────────────────────────────────────────
+    # Blocks signals where the fractal layer signals strong structural risk,
+    # even when raw flow metrics (volume spike, ratio) are impressive.
+    #
+    # FCF ≤ 0.75 means at least one of: approaching 1.618 exhaustion,
+    # 3-wave correction (corrective bounce ≠ impulse), or MTF bearish.
+    # Combined with a post-adjustment score < 7.5, the risk/reward is poor.
+    #
+    # Moonshots bypass — they operate on different dynamics (parabolic momentum).
+    if _fva_result and not is_moonshot:
+        _fcf_val = _fva_result["fcf"]
+        if _fcf_val <= 0.75 and score < 7.5:
+            _rej(f"fcf_structure({_fcf_val:.2f})"); return
+        # Double-weak: both FCF and Hurst agree the market is unfavorable
+        if (_cq_result and _fcf_val < 0.85
+                and _cq_result["H"] < 0.50 and score < 7.0):
+            _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
+
+
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
