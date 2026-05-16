@@ -2520,6 +2520,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     _vol_exp_ob_ok = volume_explosion and ob_spot >= 0.50
     if ob_spot < _ob_min_spot and not absorption and not is_moonshot and not momentum_bypass and not _vol_exp_ob_ok:
         _rej("ob_sellers"); return
+    # Moonshot OB floor: 30% bids = 70% sellers ready to dump on any spike
+    # BANANAS31: ratio 29.7x but OB 30% → big buyer ran out → -8% SL
+    # Even moonshots need minimum buyer presence in the book
+    if is_moonshot and ob_spot < 0.40 and not funding_bullish:
+        _rej(f"moonshot_ob_floor({ob_spot:.0%})"); return
     if exchange == "Binance":
         if ticker.get("futures_only"):
             ob_fut = ob_spot  # base_url already points to FAPI — no double call
