@@ -104,11 +104,14 @@ _DEFAULT_WEIGHTS: Dict[str, float] = {
     "near_resistance":     -2.0,   # fractal resistance within 5% = ceiling risk
     "miniaturization":     -1.5,   # Rule 3: smaller copies = weakening trend
     "count_bonus":          0.5,   # more confirmed fractals = stronger reading
-    # ── Statistical confirmation (Source 2 — Almazov) ────────────────────────
-    "hurst_trending":       2.0,   # H > 0.65: market has memory → trend continues
-    "hurst_chaotic":       -1.5,   # H ≈ 0.5: random market → no statistical edge
-    # ── Compression breakout (Source 2 — Path of Least Resistance) ──────────
-    "compression_breakout": 3.0,   # tight range → explosive breakout (بسرعة البرق)
+    # ── Statistical confirmation (Source 2 — Almazov + Weierstrass PDF) ─────
+    "hurst_trending":       2.0,   # H > 0.62: persistent market → trend continues
+    "hurst_chaotic":       -1.5,   # H ≈ 0.5: random → no statistical edge
+    # ── Source 3 — Mathematics (Nigmatullin & Chen 2023) ──────────────────────
+    "jy_bullish":           2.0,   # Jy flow rising: net buying pressure (Eq. 28)
+    "jy_bearish":          -1.5,   # Jy flow falling: net selling pressure
+    # ── Compression breakout (Path of Least Resistance) ──────────────────────
+    "compression_breakout": 3.0,   # tight range → explosive breakout
 }
 
 
@@ -264,60 +267,84 @@ class FractalAgent:
         return valid_correction and wave3_start
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # SOURCE 2 METHODS — Statistical confirmation (Almazov)
+    # SOURCE 2 + 3 METHODS — Statistical (Almazov + Nigmatullin)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     @staticmethod
     def _calc_hurst(klines: list) -> float:
         """
-        Simplified Hurst exponent estimation from closing prices.
-        Based on Almazov's principle: market has long-term memory, H ≠ 0.5.
+        Hurst exponent via R/S (Rescaled Range) analysis.
+        Source: Weierstrass Fractal PDF — more accurate than variance scaling.
 
-        H > 0.65 → persistent (trending): P(continuation) = H
-        H ≈ 0.50 → random (no edge): avoid
-        H < 0.35 → anti-persistent (mean-reverting): expect reversals
-
-        Uses variance scaling: log(variance) scales as 2H * log(lag).
+        H > 0.62 → persistent (trending): continuation probability = H
+        H ≈ 0.50 → random walk: no statistical edge
+        H < 0.38 → anti-persistent: mean-reverting, expect reversals
         """
         try:
             if len(klines) < 20:
                 return 0.5
-            closes = [float(k[4]) for k in klines[-40:]]
+            closes = [float(k[4]) for k in klines[-50:]]
             if len(closes) < 16:
                 return 0.5
-
-            lags = [2, 4, 8, 16]
-            log_lags: List[float] = []
-            log_vars: List[float] = []
-
-            for lag in lags:
-                if lag >= len(closes):
-                    continue
-                diffs = [closes[i] - closes[i - lag] for i in range(lag, len(closes))]
-                if not diffs:
-                    continue
-                var = sum(d * d for d in diffs) / len(diffs)
-                if var > 1e-12:
-                    log_lags.append(math.log(lag))
-                    log_vars.append(math.log(var))
-
-            if len(log_vars) < 3:
+            # Log returns
+            rets = [math.log(closes[i] / closes[i - 1])
+                    for i in range(1, len(closes)) if closes[i - 1] > 0]
+            n = len(rets)
+            if n < 10:
                 return 0.5
-
-            # OLS slope of log(var) vs log(lag) ≈ 2H
-            n    = len(log_vars)
-            sx   = sum(log_lags)
-            sy   = sum(log_vars)
-            sxy  = sum(x * y for x, y in zip(log_lags, log_vars))
-            sxx  = sum(x * x for x in log_lags)
-            denom = n * sxx - sx * sx
-            if abs(denom) < 1e-12:
+            mean_r = sum(rets) / n
+            # Cumulative deviation from mean
+            dev = [r - mean_r for r in rets]
+            cumdev: List[float] = []
+            s = 0.0
+            for d in dev:
+                s += d
+                cumdev.append(s)
+            R = max(cumdev) - min(cumdev)
+            # Standard deviation
+            var = sum(d * d for d in dev) / n
+            S = math.sqrt(var) if var > 1e-16 else 1e-10
+            if R <= 0:
                 return 0.5
-            slope = (n * sxy - sx * sy) / denom
-            H = slope / 2.0
+            H = math.log(R / S) / math.log(n)
             return max(0.1, min(0.9, H))
         except Exception:
             return 0.5
+
+    @staticmethod
+    def _jy_flow(klines: list) -> Tuple[float, str]:
+        """
+        Jy-inspired weighted momentum flow — Nigmatullin & Chen (2023).
+
+        Concept from Eq. 28: integrating demeaned price detects whether
+        the curve spends more time above or below its mean in recent vs early periods.
+        Practical implementation: linear-weighted mean vs simple mean.
+
+        w[i] = (i+1)/N → recent candles get higher weight.
+        If w_mean > mean: recent prices above average → BULLISH momentum.
+        If w_mean < mean: recent prices below average → BEARISH momentum.
+
+        Normalised by price range → scale-independent, works on any coin.
+        """
+        try:
+            closes = [float(k[4]) for k in klines]
+            if len(closes) < 8:
+                return 0.0, "neutral"
+            n      = len(closes)
+            mean_c = sum(closes) / n
+            # Linear weights: w[i] = i+1 (last candle = highest weight)
+            w_sum  = n * (n + 1) / 2.0
+            w_mean = sum((i + 1) * c for i, c in enumerate(closes)) / w_sum
+            rng    = max(closes) - min(closes)
+            if rng < 1e-12:
+                return 0.0, "neutral"
+            jy_norm   = (w_mean - mean_c) / rng
+            direction = ("bullish" if jy_norm >  0.04
+                         else "bearish" if jy_norm < -0.04
+                         else "neutral")
+            return round(jy_norm, 4), direction
+        except Exception:
+            return 0.0, "neutral"
 
     @staticmethod
     def _compression_breakout(klines: list, price: float,
@@ -418,10 +445,14 @@ class FractalAgent:
         tornado     = self._tornado(swing_lows, swing_highs, price)
         wave3       = self._wave3_entry(swing_lows, swing_highs, price)
 
-        # ── Source 2: Statistical confirmation ──
-        H           = self._calc_hurst(klines)
-        hurst_trending = H >= 0.62           # persistent market → reliable signals
-        hurst_chaotic  = 0.45 <= H <= 0.55  # near-random → reduce confidence
+        # ── Source 2+3: Statistical confirmation ──
+        H              = self._calc_hurst(klines)         # R/S method (PDF 2)
+        hurst_trending = H >= 0.62
+        hurst_chaotic  = 0.45 <= H <= 0.55
+
+        jy_norm, jy_dir = self._jy_flow(klines)           # Jy flow (PDF 3, Eq.28)
+        jy_bullish = jy_dir == "bullish"
+        jy_bearish = jy_dir == "bearish"
 
         compression = self._compression_breakout(klines, price)
 
@@ -442,9 +473,11 @@ class FractalAgent:
         raw += w["near_resistance"]      * (1 if near_resistance          else 0)
         raw += w["miniaturization"]      * (1 if quad["miniaturization"]  else 0)
         raw += w["count_bonus"]          * (count_bonus / 10.0)
-        # Statistical (Source 2)
+        # Statistical (Sources 2 + 3)
         raw += w["hurst_trending"]       * (1 if hurst_trending           else 0)
         raw += w["hurst_chaotic"]        * (1 if hurst_chaotic            else 0)
+        raw += w["jy_bullish"]           * (1 if jy_bullish               else 0)
+        raw += w["jy_bearish"]           * (1 if jy_bearish               else 0)
         raw += w["compression_breakout"] * (1 if compression["detected"]  else 0)
 
         score = max(10, min(100, round(raw)))
@@ -489,11 +522,15 @@ class FractalAgent:
         if lower_highs:
             parts.append("Lower Highs ↘ ⚠️")
 
-        # Hurst info line
+        # Hurst + Jy info
         if hurst_trending:
-            parts.append(f"📊 H={H:.2f} Persistent Market ({round(H*100)}% continuation)")
+            parts.append(f"📊 H={H:.2f} Persistent ({round(H*100)}% continuation)")
         elif hurst_chaotic:
-            parts.append(f"📊 H={H:.2f} ⚠️ Random Market (no edge)")
+            parts.append(f"📊 H={H:.2f} ⚠️ Random Market")
+        if jy_bullish:
+            parts.append(f"〰️ Jy={jy_norm:+.3f} Bullish Flow")
+        elif jy_bearish:
+            parts.append(f"〰️ Jy={jy_norm:+.3f} ⚠️ Bearish Flow")
 
         detail = " · ".join(parts) if parts else "Neutral Fractal Structure"
 
@@ -517,6 +554,8 @@ class FractalAgent:
             "count_bonus":          count_bonus,
             "hurst_trending":       hurst_trending,
             "hurst_chaotic":        hurst_chaotic,
+            "jy_bullish":           jy_bullish,
+            "jy_bearish":           jy_bearish,
             "compression_breakout": compression["detected"],
         }
 
@@ -526,6 +565,7 @@ class FractalAgent:
             "detail":       detail,
             "warning":      warning,
             "hurst":        round(H, 3),
+            "jy":           jy_norm,
             "support":      round(nearest_sup, 8) if nearest_sup else None,
             "resistance":   round(nearest_res, 8) if nearest_res else None,
             "bull_trend":   bull_trend,
@@ -541,7 +581,7 @@ class FractalAgent:
     def _empty_result(self) -> dict:
         return {
             "score": 50, "verdict": "⚪ No Fractal Data",
-            "detail": "", "warning": None, "hurst": 0.5,
+            "detail": "", "warning": None, "hurst": 0.5, "jy": 0.0,
             "support": None, "resistance": None,
             "bull_trend": "neutral", "bear_trend": "neutral",
             "bulls_count": 0, "bears_count": 0,

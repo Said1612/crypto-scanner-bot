@@ -59,6 +59,7 @@ _FCF_MTF_AGREE        =  1.12   # macro/micro trends agree → boost
 _FCF_MTF_DIVERGE      =  0.85   # macro/micro diverge → reduce
 _FCF_NOISE_HIGH       =  0.88   # excessive noise on fast TF → reduce
 _FCF_CYCLE_BOTTOM     =  1.10   # price near cycle bottom (Deep Cliff Support) → boost
+_FCF_EXT_FRACTAL      =  1.18   # external fractality = breakout imminent (PDF 3)
 
 
 class FractalValidationAgent:
@@ -165,6 +166,12 @@ class FractalValidationAgent:
         elif cycle_pos == "top" and fb_result["breach"]:
             fcf *= 0.80   # top + 1.618 = double exhaustion warning
             tags.append("🔴 Cycle Top + 1.618 = Double Exhaustion")
+
+        # Rule 6: External Fractality — breakout imminent (Nigmatullin & Chen 2023)
+        ext_fractal = self._external_fractality(macro_klines)
+        if ext_fractal and micro_trend == "bullish" and not fb_result["breach"]:
+            fcf *= _FCF_EXT_FRACTAL
+            tags.append("⚡ External Fractality — Breakout Imminent")
 
         # ── Clamp ──────────────────────────────────────────
         fcf = max(0.40, min(1.40, round(fcf, 3)))
@@ -354,6 +361,42 @@ class FractalValidationAgent:
             return "mid"
         except (ValueError, ZeroDivisionError):
             return "mid"
+
+    # ─────────────────────────────────────────────────────
+    # EXTERNAL FRACTALITY (Nigmatullin & Chen 2023)
+    # ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _external_fractality(klines: list) -> bool:
+        """
+        External Fractality Detection — Nigmatullin & Chen, Mathematics 2023.
+        When the fractal scale (xi) exceeds the log-price range (Rg),
+        the market is in an "anomalous" state → breakout/structural change imminent.
+
+        Approximation: compare recent log-range (last 20%) scaled by N/n
+        against total log-range. If scaled recent > total → external fractality.
+
+        This is a novel signal not present in classical technical analysis.
+        """
+        try:
+            closes = [float(k[4]) for k in klines if float(k[4]) > 0]
+            if len(closes) < 15:
+                return False
+            import math as _math
+            log_p = [_math.log(c) for c in closes]
+            Rg    = max(log_p) - min(log_p)          # total log-range
+            if Rg < 1e-8:
+                return False
+            # Recent = last 20% of candles
+            n_recent  = max(5, len(log_p) // 5)
+            recent_lp = log_p[-n_recent:]
+            recent_rg = max(recent_lp) - min(recent_lp)
+            # Scale factor: ratio of window sizes → approx xi exponent
+            scale     = _math.log(len(log_p) / n_recent) if n_recent < len(log_p) else 0
+            ln_xi_approx = scale + recent_rg
+            return ln_xi_approx > Rg                 # external fractality condition
+        except Exception:
+            return False
 
     # ─────────────────────────────────────────────────────
     # HELPERS
