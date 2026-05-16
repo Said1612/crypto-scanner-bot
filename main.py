@@ -4391,23 +4391,25 @@ def main():
     load_state()
     load_signal_db()
 
-    send(
-        "🎯 *MAFIO SNIPER v3.2*\n"
+    _startup_msg = (
+        "🔄 *MAFIO SNIPER v3.2 — Online*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✅ Bot started\n"
+        f"✅ Bot restarted — {datetime.now(timezone.utc).strftime('%d %b %Y %H:%M')} UTC\n"
         f"📡 Exchange: {'*MEXC* 🟠  +  ' if USE_MEXC else ''}*Binance* 🟡\n"
-        f"⚡ Fast scan (1m):   every {FAST_SCAN_S}s   δ≥{FAST_TICKER_MOVE}%\n"
-        f"😴 Sleep Giant (1m): every {SLEEP_GIANT_S}s  vol≥20x flat coins\n"
-        f"🎯 Mid scan  (5m):   every {MID_SCAN_S}s   top 60 movers\n"
-        f"📊 Slow scan (1h):   every {SLOW_SCAN_S//60}min\n"
-        f"📈 Super scan (1h):  every {SUPER_SCAN_S//60}min — Supertrend flip\n"
-        "📊 Tiers: Micro / Small / Mid / Large cap\n"
-        "📈 Market Bias: Breadth + CVD + Taker-buy\n"
-        "💰 Funding Rate: Bullish/Bearish detection\n"
+        f"⚡ Fast scan:    every {FAST_SCAN_S}s\n"
+        f"😴 Sleep Giant: every {SLEEP_GIANT_S}s\n"
+        f"🎯 Mid scan:    every {MID_SCAN_S}s\n"
+        f"📊 Slow scan:   every {SLOW_SCAN_S//60}min\n"
+        f"📐 Fractal + FCF + Chaos-Quant: ✅ Active\n"
         f"🔕 Cooldown: {COOLDOWN//3600}h per coin\n"
-        f"🌊 Sector Liquidity: every {SECTOR_SCAN_S//60}min — {len(set(SECTOR_REGISTRY.values()))} sectors\n"
-        f"📈 Trend Follow: every {TREND_FOLLOW_S//60}min — Binance Mid/Large grind"
+        f"📍 Open positions: {len(tracking)}"
     )
+    # Retry up to 5 times — network may not be ready immediately after restart
+    for _attempt in range(5):
+        if send(_startup_msg):
+            break
+        log.warning("Startup message failed (attempt %d/5) — retrying in 5s", _attempt + 1)
+        time.sleep(5)
 
     while True:
         try:
