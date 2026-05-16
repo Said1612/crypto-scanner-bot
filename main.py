@@ -35,6 +35,14 @@ except Exception as _fva_err:
     _fva = None
     logging.getLogger(__name__).warning("FractalValidationAgent not loaded: %s", _fva_err)
 
+# Chaos-Quant Engine — DFA Hurst + Edgar Peters Regime + Young Ho Seo Symmetry Box + Noah Effect
+try:
+    from chaos_quant import integrate_with_mafio_core as _cq_integrate
+    _cq_ok = True
+except Exception as _cq_err:
+    _cq_ok = False
+    logging.getLogger(__name__).warning("chaos_quant not loaded: %s", _cq_err)
+
 # ══════════════════════════════════════════════════════
 #  CONFIG
 # ══════════════════════════════════════════════════════
@@ -2641,6 +2649,20 @@ def _check(sym, ticker, interval, sector_boost=False):
         except Exception as _fve:
             log.debug("FractalValidationAgent error: %s", _fve)
 
+    # ── Chaos-Quant Engine (Edgar Peters Hurst + Young Ho Seo + Noah Effect) ──
+    _cq_result = None
+    if _cq_ok:
+        try:
+            _cq_result = _cq_integrate(candles, price, score, is_moonshot)
+            _cq_score_before = score
+            score = _cq_result["score"]
+            if score != _cq_score_before:
+                log.debug("CQ %s H=%.3f regime=%s score %.1f→%.1f",
+                          sym, _cq_result["H"], _cq_result["regime"],
+                          _cq_score_before, score)
+        except Exception as _cqe:
+            log.debug("chaos_quant error: %s", _cqe)
+
     # Fire
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
@@ -2676,6 +2698,18 @@ def _check(sym, ticker, interval, sector_boost=False):
             if _part.strip():
                 _fra_line2 += f"\n   {_part.strip()}"
         msg += _fra_line2
+    # Chaos-Quant: Hurst regime + symmetry + Noah tags
+    if _cq_result and _cq_result.get("tags"):
+        _cq_regime_icons = {
+            "persistent": "🟢", "weak_persistent": "🟡",
+            "random": "⚪", "anti_persistent": "🔴"
+        }
+        _cq_icon = _cq_regime_icons.get(_cq_result["regime"], "⚪")
+        _cq_line = (f"\n🧬 *Chaos-Quant*: H={_cq_result['H']:.3f} "
+                    f"{_cq_icon} {_cq_result['regime'].replace('_', ' ').title()}")
+        for _tag in _cq_result["tags"]:
+            _cq_line += f"\n   {_tag}"
+        msg += _cq_line
     _kb_exchange = "MEXC" if ticker.get("binance_alpha") else exchange
     keyboard = _trade_keyboard(sym, _kb_exchange)   # signal has no orig link yet
     ok, sig_msg_id = send_ex(msg, keyboard)
