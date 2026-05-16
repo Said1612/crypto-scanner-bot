@@ -1284,9 +1284,9 @@ def send_daily_report(reset=True):
     # ── Header ────────────────────────────────────────────────────────────
     header = "\n".join([
         "🎯 *MAFIO SNIPER*",
-        f"📊 التقرير اليومي — {date_str}",
+        f"📊 Daily Report — {date_str}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"🔔 {total} إشارة  |  ✅ {len(wins)} نجاح  |  ⏳ {len(active_c)} نشطة  |  ❌ {len(losses)} فشل",
+        f"🔔 {total} signals  |  ✅ {len(wins)} wins  |  ⏳ {len(active_c)} active  |  ❌ {len(losses)} losses",
         f"📈 avg: `{avg_pk:+.2f}%`  |  total wins: `+{win_pct:.2f}%`",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
     ])
@@ -1398,65 +1398,65 @@ def _send_eod_reflection(all_entries: list):
             avg_rat_w = _avg(wins, "ratio")
             avg_spk_w = _avg(wins, "spike")
             if avg_ob_w >= 0.65:
-                lessons.append(f"✅ الإشارات الرابحة كان OB فيها `{avg_ob_w:.0%}` — الـ OB القوي يتنبأ بالنجاح")
+                lessons.append(f"✅ Winning signals had OB `{avg_ob_w:.0%}` — strong OB predicts success")
             if avg_rat_w >= 4.0:
-                lessons.append(f"✅ نسبة الشراء/البيع في الرابحة `{avg_rat_w:.1f}x` — ratio≥4x علامة جيدة")
+                lessons.append(f"✅ Winning signals ratio `{avg_rat_w:.1f}x` — ratio≥4x is a strong indicator")
             if avg_spk_w >= 8.0:
-                lessons.append(f"✅ حجم الـ spike في الرابحة `{avg_spk_w:.1f}x` — volume explosion يسبق الصعود")
+                lessons.append(f"✅ Winning signals spike `{avg_spk_w:.1f}x` — volume explosion precedes the move")
 
         # Loss pattern analysis
         if loses:
             avg_ob_l  = _avg(loses, "ob_spot")
             avg_pos_l = _avg(loses, "pos24")
             if avg_ob_l < 0.60:
-                lessons.append(f"⚠️ الإشارات الخاسرة كان OB فيها `{avg_ob_l:.0%}` — OB ضعيف = خطر")
+                lessons.append(f"⚠️ Losing signals had OB `{avg_ob_l:.0%}` — weak OB = danger")
             if avg_pos_l > 0.60:
-                lessons.append(f"⚠️ الإشارات الخاسرة دخلت عند `{avg_pos_l:.0%}` من النطاق — دخول متأخر")
+                lessons.append(f"⚠️ Losing signals entered at `{avg_pos_l:.0%}` from range — late entry")
 
         # Best scanner today
         if sc_ranked:
             best_sc, best_sc_vals = sc_ranked[0]
             best_sc_avg = sum(best_sc_vals) / len(best_sc_vals)
             if best_sc_avg >= 10:
-                lessons.append(f"🏆 أفضل scanner اليوم: `{best_sc}` بمتوسط `+{best_sc_avg:.1f}%`")
+                lessons.append(f"🏆 Best scanner today: `{best_sc}` avg `+{best_sc_avg:.1f}%`")
 
         # Worst scanner today
         if len(sc_ranked) > 1:
             worst_sc, worst_sc_vals = sc_ranked[-1]
             worst_avg = sum(worst_sc_vals) / len(worst_sc_vals)
             if worst_avg < 3:
-                lessons.append(f"📉 أضعف scanner اليوم: `{worst_sc}` بمتوسط `{worst_avg:.1f}%` — راقبه")
+                lessons.append(f"📉 Weakest scanner today: `{worst_sc}` avg `{worst_avg:.1f}%` — monitor it")
 
         # ── Build message ──
         lines = [
             "━━━━━━━━━━━━━━━━━━━━━━━━━",
-            "🧠 *MAFIO — التحليل الذاتي اليومي*",
+            "🧠 *MAFIO — Daily Self-Analysis*",
             "━━━━━━━━━━━━━━━━━━━━━━━━━",
             "",
-            f"📊 *أداء Scanners اليوم*",
+            f"📊 *Scanner Performance Today*",
         ]
         for sc_name, vals in sc_ranked:
             avg_v = sum(vals) / len(vals)
             w_cnt = sum(1 for v in vals if v >= 5)
-            lines.append(f"  `{sc_name:<18}` {len(vals)} إشارة  avg `{avg_v:+.1f}%`  wins: {w_cnt}")
+            lines.append(f"  `{sc_name:<18}` {len(vals)} signals  avg `{avg_v:+.1f}%`  wins: {w_cnt}")
 
-        lines += ["", "📦 *أداء Tiers اليوم*"]
+        lines += ["", "📦 *Tier Performance Today*"]
         for t_name, vals in tc_ranked:
             avg_v = sum(vals) / len(vals)
-            lines.append(f"  `{t_name:<8}` {len(vals)} إشارة  avg `{avg_v:+.1f}%`")
+            lines.append(f"  `{t_name:<8}` {len(vals)} signals  avg `{avg_v:+.1f}%`")
 
         if lessons:
-            lines += ["", "💡 *الدروس المستخلصة*"]
+            lines += ["", "💡 *Key Takeaways*"]
             lines += [f"  {l}" for l in lessons]
 
         # Win/Loss comparison
         if wins and loses:
             lines += [
                 "",
-                "🔬 *مقارنة الرابحة vs الخاسرة*",
-                f"  OB:    رابحة `{_avg(wins,'ob_spot'):.0%}`  vs  خاسرة `{_avg(loses,'ob_spot'):.0%}`",
-                f"  Ratio: رابحة `{_avg(wins,'ratio'):.1f}x`    vs  خاسرة `{_avg(loses,'ratio'):.1f}x`",
-                f"  Spike: رابحة `{_avg(wins,'spike'):.1f}x`    vs  خاسرة `{_avg(loses,'spike'):.1f}x`",
+                "🔬 *Winners vs Losers Comparison*",
+                f"  OB:    winners `{_avg(wins,'ob_spot'):.0%}`  vs  losers `{_avg(loses,'ob_spot'):.0%}`",
+                f"  Ratio: winners `{_avg(wins,'ratio'):.1f}x`    vs  losers `{_avg(loses,'ratio'):.1f}x`",
+                f"  Spike: winners `{_avg(wins,'spike'):.1f}x`    vs  losers `{_avg(loses,'spike'):.1f}x`",
             ]
 
         lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -1553,7 +1553,7 @@ def _period_report(period_label: str, days: int):
         and r.get("sym", "")[:-4] not in STABLECOINS
     ]
     if not entries:
-        send(f"📊 *{period_label}*\nلا توجد إشارات في هذه الفترة.")
+        send(f"📊 *{period_label}*\nNo signals found for this period.")
         return
 
     WIN_OUT  = {"success", "partial"}
@@ -1584,7 +1584,7 @@ def _period_report(period_label: str, days: int):
         "🎯 *MAFIO SNIPER*",
         f"📊 {period_label}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"🔔 {total} إشارة  |  ✅ {len(wins)} نجاح  |  ❌ {len(losses)} فشل  |  ⏳ {len(active)} نشط",
+        f"🔔 {total} signals  |  ✅ {len(wins)} wins  |  ❌ {len(losses)} losses  |  ⏳ {len(active)} active",
         f"📈 avg: `{avg_pk:+.2f}%`  |  win rate: `{win_pct:.0f}%`  |  total wins: `+{win_sum:.2f}%`",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
     ])
@@ -1629,7 +1629,7 @@ def _period_report(period_label: str, days: int):
 def send_weekly_report():
     now_utc = datetime.now(timezone.utc)
     _period_report(
-        f"التقرير الأسبوعي — {now_utc.strftime('%d %b %Y')}",
+        f"Weekly Report — {now_utc.strftime('%d %b %Y')}",
         days=7,
     )
 
@@ -1637,7 +1637,7 @@ def send_weekly_report():
 def send_monthly_report():
     now_utc = datetime.now(timezone.utc)
     _period_report(
-        f"التقرير الشهري — {now_utc.strftime('%B %Y')}",
+        f"Monthly Report — {now_utc.strftime('%B %Y')}",
         days=30,
     )
 
@@ -1678,20 +1678,20 @@ def poll_telegram():
             # Accept /report with any bot suffix (e.g. /report@mybot)
             if text.lower().split("@")[0] == "/weekly":
                 log.info("Manual /weekly from chat %s", cid)
-                send("⏳ جاري إنشاء التقرير الأسبوعي...")
+                send("⏳ Generating weekly report...")
                 try:
                     send_weekly_report()
                 except Exception as e:
-                    send(f"❌ *تعذّر إنشاء التقرير*\n`{e}`")
+                    send(f"❌ *Report failed*\n`{e}`")
                 continue
 
             if text.lower().split("@")[0] == "/monthly":
                 log.info("Manual /monthly from chat %s", cid)
-                send("⏳ جاري إنشاء التقرير الشهري...")
+                send("⏳ Generating monthly report...")
                 try:
                     send_monthly_report()
                 except Exception as e:
-                    send(f"❌ *تعذّر إنشاء التقرير*\n`{e}`")
+                    send(f"❌ *Report failed*\n`{e}`")
                 continue
 
             if text.lower().split("@")[0] == "/report":
@@ -1704,17 +1704,17 @@ def poll_telegram():
                 _last_report_time = now_ts
                 log.info("Manual /report from chat %s", cid)
                 # Immediate acknowledgment so user knows it's working
-                send("⏳ جاري إنشاء التقرير...")
+                send("⏳ Generating daily report...")
                 try:
                     send_daily_report(reset=False)
                 except Exception as report_err:
                     log.error("/report failed: %s", report_err, exc_info=True)
-                    send(f"❌ *تعذّر إنشاء التقرير*\n`{report_err}`")
+                    send(f"❌ *Report failed*\n`{report_err}`")
 
             if text.lower().split("@")[0] == "/ai_summary":
                 log.info("Manual /ai_summary from chat %s", cid)
                 if _ai_agent is None:
-                    send("❌ AI Agent غير مفعّل")
+                    send("❌ AI Agent not active")
                 else:
                     send(_ai_agent.summary(), parse_mode="Markdown")
 
