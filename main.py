@@ -2659,16 +2659,22 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("ai_block"); return
     msg += ai_str
 
-    # Append fractal lines to signal
+    # Append fractal lines to signal — each tag on its own indented line
     if _fra and _fra["detail"]:
-        _fra_line = f"\n📐 *Fractal*: {_fra['verdict']} · {_fra['detail']}"
+        _fra_line = f"\n📐 *Fractal*: {_fra['verdict']}"
+        for _part in _fra["detail"].split(" · "):
+            if _part.strip():
+                _fra_line += f"\n   {_part.strip()}"
         if _fra.get("warning"):
             _fra_line += f"\n   ⚠️ {_fra['warning']}"
         msg += _fra_line
     # FCF line: only show when it meaningfully adjusted the score
     if _fva_result and _fva_result["fcf"] != 1.0:
         _fcf_icon = "⬆️" if _fva_result["fcf"] > 1.0 else "⬇️"
-        _fra_line2 = (f"\n🔬 *FCF*: x{_fva_result['fcf']:.2f} {_fcf_icon} · {_fva_result['detail']}")
+        _fra_line2 = f"\n🔬 *FCF*: x{_fva_result['fcf']:.2f} {_fcf_icon}"
+        for _part in _fva_result["detail"].split(" · "):
+            if _part.strip():
+                _fra_line2 += f"\n   {_part.strip()}"
         msg += _fra_line2
     _kb_exchange = "MEXC" if ticker.get("binance_alpha") else exchange
     keyboard = _trade_keyboard(sym, _kb_exchange)   # signal has no orig link yet

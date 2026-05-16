@@ -468,7 +468,7 @@ class FractalAgent:
         if compression["detected"]:
             n_c = compression.get("candles_compressed", 0)
             r_p = compression.get("range_pct", 0)
-            parts.append(f"💥 Compression Breakout ({n_c} candles · {r_p:.1f}%)")
+            parts.append(f"💥 Compression Breakout ({n_c} candles, {r_p:.1f}%)")
         if wave3:
             parts.append("〽️ Wave 3 Entry")
         if quad["valid"]:
