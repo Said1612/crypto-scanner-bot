@@ -2367,11 +2367,10 @@ def _check(sym, ticker, interval, sector_boost=False):
         _low_price_moon                         # Low-price pump: HIGH/ALICE/PORTAL type
     )
 
-    # Momentum Bypass: smart money early entry — MEXC threshold 5x (more sensitive)
-    # Binance threshold 8x (larger baseline noise, need stronger confirmation)
-    # net > 0 required: APR bug — negative net flow must NEVER bypass net check
+    # Momentum Bypass: DISABLED — data shows 8% win rate (1 win / 8 SL across 23 signals)
+    # ratio alone is insufficient confirmation; high ratio in downtrend = distribution trap
     _ratio_bypass   = 5.0 if exchange == "MEXC" else 8.0
-    momentum_bypass = (ratio >= _ratio_bypass and pos24 < 0.85 and net > 0 and move < 10.0)
+    momentum_bypass = False
 
     # Volume Explosion: 10x+ spike + REAL net (> abs_floor already passed) = extraordinary event
     # net > 0 replaced by net > _abs_net_floor (already enforced above — but redundant safety)
