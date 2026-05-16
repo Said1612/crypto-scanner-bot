@@ -26,6 +26,13 @@ PRICE vs TIME FRACTALS:
   - Time fractal: moves on X-axis (duration)
   - Must alternate — impossible to have all price or all time fractals
 
+COMPRESSION BREAKOUT (ضغط → انطلاق):
+  Based on Almazov's "Path of Least Resistance" (مسار المقاومة الأقل):
+  - Price oscillating in a tight range = energy / pressure building up
+  - The longer the compression, the more powerful the breakout
+  - When price breaks above the compression ceiling → "بسرعة البرق" (lightning-fast move)
+  - Tight range threshold: < 5% over 12-15 candles
+
 Self-learning:
   - Records fractal conditions at signal entry
   - Adjusts feature weights from real signal outcomes
@@ -56,7 +63,9 @@ _DEFAULT_WEIGHTS: Dict[str, float] = {
     "lower_highs":      -1.5,   # series of falling fractal highs = downtrend pressure
     "near_resistance":  -2.0,   # fractal resistance within 5% above price = ceiling
     "miniaturization":  -1.5,   # each fractal copy is smaller = weakening trend
-    "count_bonus":       0.5,   # more confirmed fractals = stronger structure reading
+    "count_bonus":         0.5,   # more confirmed fractals = stronger structure reading
+    # ── Compression breakout (Almazov — Path of Least Resistance) ──────────
+    "compression_breakout": 3.0,  # tight range consolidation → explosive breakout
 }
 
 
@@ -238,6 +247,65 @@ class FractalAgent:
         wave3_start = price >= f1_high * 0.98
         return valid_correction and wave3_start
 
+    # ── Compression Breakout Detection (Almazov — Path of Least Resistance) ──
+
+    @staticmethod
+    def _compression_breakout(klines: list, price: float,
+                              window: int = 13, threshold_pct: float = 5.0) -> dict:
+        """
+        Detects price compression (tight consolidation) followed by upside breakout.
+
+        Almazov's principle: consolidation in a narrow range = energy accumulation.
+        When price breaks above the compression ceiling → explosive move follows.
+
+        Returns {detected, range_pct, ceiling, candles_compressed}
+        """
+        result = {"detected": False, "range_pct": None, "ceiling": None,
+                  "candles_compressed": 0}
+        if len(klines) < window + 3:
+            return result
+
+        # Use the candles BEFORE the last 2 (avoid looking at the breakout candle itself)
+        comp_candles = klines[-(window + 2):-2]
+        try:
+            highs = [float(k[2]) for k in comp_candles]
+            lows  = [float(k[3]) for k in comp_candles]
+        except (IndexError, ValueError):
+            return result
+
+        high_max = max(highs)
+        low_min  = min(lows)
+        if low_min <= 0:
+            return result
+
+        range_pct = (high_max - low_min) / low_min * 100.0
+
+        # Compression: range < threshold (tight consolidation)
+        if range_pct >= threshold_pct:
+            result["range_pct"] = round(range_pct, 2)
+            return result
+
+        # Count how many consecutive candles stayed inside the compressed range
+        # (checks from the end of the window backwards)
+        count = 0
+        for h, l in zip(reversed(highs), reversed(lows)):
+            if h <= high_max * 1.002 and l >= low_min * 0.998:
+                count += 1
+            else:
+                break
+
+        # Breakout: current price is above the compression ceiling
+        ceiling    = high_max
+        breakout   = price >= ceiling * 1.002   # price cleared the top of the range
+
+        result.update({
+            "detected":           breakout and count >= 5,
+            "range_pct":          round(range_pct, 2),
+            "ceiling":            round(ceiling, 8),
+            "candles_compressed": count,
+        })
+        return result
+
     # ── Main Analysis ─────────────────────────────────────────────────────────
 
     def analyze(self, klines: list, price: float) -> dict:
@@ -284,6 +352,7 @@ class FractalAgent:
         bearish_end = self._bearish_end(swing_lows, price)
         tornado     = self._tornado(swing_lows, swing_highs, price)
         wave3       = self._wave3_entry(swing_lows, swing_highs, price)
+        compression = self._compression_breakout(klines, price)
 
         # ── Score ──
         w   = self._weights
@@ -299,8 +368,9 @@ class FractalAgent:
         raw += w["magnification"]   * (1 if quad["magnification"]  else 0)
         raw += w["lower_highs"]     * (1 if lower_highs            else 0)
         raw += w["near_resistance"] * (1 if near_resistance        else 0)
-        raw += w["miniaturization"] * (1 if quad["miniaturization"] else 0)
-        raw += w["count_bonus"]     * (count_bonus / 10.0)
+        raw += w["miniaturization"]      * (1 if quad["miniaturization"]   else 0)
+        raw += w["count_bonus"]          * (count_bonus / 10.0)
+        raw += w["compression_breakout"] * (1 if compression["detected"]  else 0)
 
         score = max(10, min(100, round(raw)))
 
@@ -324,6 +394,10 @@ class FractalAgent:
             parts.append("〽️ دخول موجة 3")
         if quad["valid"]:
             parts.append("✅ QUAD صحيح (F4>F2)")
+        if compression["detected"]:
+            n_comp = compression.get("candles_compressed", 0)
+            r_pct  = compression.get("range_pct", 0)
+            parts.append(f"💥 انفجار ضغط ({n_comp} شمعة · {r_pct:.1f}% نطاق)")
         if fractal_break:
             parts.append("كسر مقاومة فراكتلية ✅")
         if near_support and nearest_sup:
@@ -346,19 +420,20 @@ class FractalAgent:
             warning = f"مقاومة فراكتلية ${nearest_res:.4g} (+{res_dist:.1f}%) ⚠️"
 
         features = {
-            "bearish_end":     bearish_end,
-            "tornado_setup":   tornado,
-            "quad_valid":      quad["valid"],
-            "wave3_entry":     wave3,
-            "above_support":   above_support,
-            "near_support":    near_support,
-            "fractal_break":   fractal_break,
-            "higher_lows":     higher_lows,
-            "magnification":   quad["magnification"],
-            "lower_highs":     lower_highs,
-            "near_resistance": near_resistance,
-            "miniaturization": quad["miniaturization"],
-            "count_bonus":     count_bonus,
+            "bearish_end":          bearish_end,
+            "tornado_setup":        tornado,
+            "quad_valid":           quad["valid"],
+            "wave3_entry":          wave3,
+            "above_support":        above_support,
+            "near_support":         near_support,
+            "fractal_break":        fractal_break,
+            "higher_lows":          higher_lows,
+            "magnification":        quad["magnification"],
+            "lower_highs":          lower_highs,
+            "near_resistance":      near_resistance,
+            "miniaturization":      quad["miniaturization"],
+            "count_bonus":          count_bonus,
+            "compression_breakout": compression["detected"],
         }
 
         return {
@@ -484,5 +559,6 @@ class FractalAgent:
             "  • Tornado/Runaway — تصحيح محدود → استمرار",
             "  • نهاية الفراكتل الهابط — أقوى إشارة شراء",
             "  • Higher/Lower Lows — اتجاه البنية الفراكتلية",
+            "  • Compression Breakout — مسار المقاومة الأقل (ألمازوف) 💥",
         ]
         return "\n".join(lines)
