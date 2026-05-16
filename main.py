@@ -27,6 +27,14 @@ except Exception as _fra_err:
     _fractal_agent = None
     logging.getLogger(__name__).warning("Fractal agent not loaded: %s", _fra_err)
 
+# Fractal Validation Agent — multi-source confluence engine (Almazov 5-book synthesis)
+try:
+    from fractal_validator import FractalValidationAgent as _FVACls
+    _fva = _FVACls()
+except Exception as _fva_err:
+    _fva = None
+    logging.getLogger(__name__).warning("FractalValidationAgent not loaded: %s", _fva_err)
+
 # ══════════════════════════════════════════════════════
 #  CONFIG
 # ══════════════════════════════════════════════════════
@@ -2609,13 +2617,29 @@ def _check(sym, ticker, interval, sector_boost=False):
     if _fighting_bear and score >= 5.0:
         _score_floor = min(_score_floor, 5.0)
 
-    # ── Fractal Analysis ─────────────────────────────────────────────────
+    # ── Fractal Analysis (Bill Williams patterns + self-learning) ────────
     _fra = None
     if _fractal_agent is not None:
         try:
             _fra = _fractal_agent.analyze(candles, price)
         except Exception as _fe:
             log.debug("fractal_agent error: %s", _fe)
+
+    # ── Fractal Confluence Factor (Almazov 5-book synthesis) ─────────────
+    # FCF adjusts signal score based on: 1.618 false-breakout risk,
+    # wave structure (3 vs 5-wave), MTF alignment, noise, cycle position.
+    _fva_result = None
+    if _fva is not None:
+        try:
+            _fva_result = _fva.evaluate_fractal_confluence(candles, price)
+            _fcf = _fva_result["fcf"]
+            if _fcf != 1.0:
+                _score_before = score
+                score = round(min(10.0, max(0.0, score * _fcf)), 1)
+                log.debug("FCF %s x%.2f score %.1f→%.1f | %s",
+                          sym, _fcf, _score_before, score, _fva_result.get("detail", ""))
+        except Exception as _fve:
+            log.debug("FractalValidationAgent error: %s", _fve)
 
     # Fire
     msg = build_signal(sym, price, change, buy_v, sell_v,
@@ -2635,12 +2659,17 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("ai_block"); return
     msg += ai_str
 
-    # Append fractal line to signal
+    # Append fractal lines to signal
     if _fra and _fra["detail"]:
         _fra_line = f"\n📐 *Fractal*: {_fra['verdict']} · {_fra['detail']}"
         if _fra.get("warning"):
             _fra_line += f"\n   ⚠️ {_fra['warning']}"
         msg += _fra_line
+    # FCF line: only show when it meaningfully adjusted the score
+    if _fva_result and _fva_result["fcf"] != 1.0:
+        _fcf_icon = "⬆️" if _fva_result["fcf"] > 1.0 else "⬇️"
+        _fra_line2 = (f"\n🔬 *FCF*: x{_fva_result['fcf']:.2f} {_fcf_icon} · {_fva_result['detail']}")
+        msg += _fra_line2
     _kb_exchange = "MEXC" if ticker.get("binance_alpha") else exchange
     keyboard = _trade_keyboard(sym, _kb_exchange)   # signal has no orig link yet
     ok, sig_msg_id = send_ex(msg, keyboard)
