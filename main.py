@@ -1711,6 +1711,59 @@ def poll_telegram():
                     log.error("/report failed: %s", report_err, exc_info=True)
                     send(f"❌ *Report failed*\n`{report_err}`")
 
+            if text.lower().split("@")[0] == "/positions":
+                log.info("Manual /positions from chat %s", cid)
+                if not tracking:
+                    send("📭 *No open positions*")
+                else:
+                    try:
+                        now_ts  = time.time()
+                        lines   = ["📊 *Open Positions*", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
+                        rows    = []
+                        for sym, info in tracking.items():
+                            try:
+                                entry    = info["entry"]
+                                exch     = info.get("exchange", "MEXC")
+                                t0       = info.get("t0", now_ts)
+                                max_gain = info.get("max", 0.0)
+                                elapsed  = int(now_ts - t0)
+                                base_url = BINANCE_BASE if exch == "Binance" else MEXC_BASE
+                                pd = _get(f"{base_url}/ticker/price",
+                                          params={"symbol": sym})
+                                cur = float(pd.get("price", 0)) if isinstance(pd, dict) else 0.0
+                                pct = (cur - entry) / entry * 100 if cur > 0 else 0.0
+                                rows.append((pct, sym, entry, cur, max_gain, elapsed, exch))
+                            except Exception:
+                                rows.append((0.0, sym, info["entry"], 0.0,
+                                             info.get("max", 0.0),
+                                             int(now_ts - info.get("t0", now_ts)), "?"))
+                        # Sort: worst P&L first (most at-risk on top)
+                        rows.sort(key=lambda x: x[0])
+                        for pct, sym, entry, cur, mx, elapsed, exch in rows:
+                            base = sym[:-4] if sym.endswith("USDT") else sym
+                            if pct >= 5.0:
+                                icon = "✅"
+                            elif pct <= SIGNAL_SL_PCT:
+                                icon = "🔴"
+                            elif pct < -2.0:
+                                icon = "⚠️"
+                            elif pct >= 2.0:
+                                icon = "🟢"
+                            else:
+                                icon = "⏳"
+                            cur_str = f"${cur:.6g}" if cur > 0 else "N/A"
+                            dist_sl = pct - SIGNAL_SL_PCT   # how far above SL
+                            lines.append(
+                                f"{icon} *{base}*  `{pct:+.1f}%`\n"
+                                f"   Entry `${entry:.6g}` → Now `{cur_str}`\n"
+                                f"   Peak `+{mx:.1f}%` · {_tstr(elapsed)} · {exch}\n"
+                                f"   SL buffer: `{dist_sl:+.1f}%`  TP1 gap: `{12.0-pct:+.1f}%`"
+                            )
+                        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        send("\n".join(lines))
+                    except Exception as pos_err:
+                        send(f"❌ *Positions failed*\n`{pos_err}`")
+
             if text.lower().split("@")[0] == "/ai_summary":
                 log.info("Manual /ai_summary from chat %s", cid)
                 if _ai_agent is None:
@@ -1737,11 +1790,12 @@ def register_commands():
         S.post(f"{_TG}/deleteWebhook", json={"drop_pending_updates": False}, timeout=5)
         S.post(f"{_TG}/setMyCommands",
                json={"commands": [
-                                   {"command": "report",          "description": "📊 التقرير اليومي"},
-                                   {"command": "weekly",          "description": "📊 التقرير الأسبوعي"},
-                                   {"command": "monthly",         "description": "📊 التقرير الشهري"},
-                                   {"command": "ai_summary",      "description": "🤖 ملخص AI Agent المتعلِّم"},
-                                   {"command": "fractal_summary", "description": "📐 ملخص Fractal Agent"},
+                                   {"command": "positions",       "description": "📍 Open positions — live P&L"},
+                                   {"command": "report",          "description": "📊 Daily report"},
+                                   {"command": "weekly",          "description": "📊 Weekly report"},
+                                   {"command": "monthly",         "description": "📊 Monthly report"},
+                                   {"command": "ai_summary",      "description": "🤖 AI Agent summary"},
+                                   {"command": "fractal_summary", "description": "📐 Fractal Agent summary"},
                                ]},
                timeout=5)
         log.info("Webhook cleared. /report command registered.")
