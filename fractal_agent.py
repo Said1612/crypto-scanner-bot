@@ -387,8 +387,10 @@ class FractalAgent:
             return self._empty_result()
 
         # Fractal support/resistance levels
+        # Support: fractal lows BELOW current price (or within 2% above — dip-buy range)
+        # Resistance: fractal highs STRICTLY ABOVE current price
         supports    = [b for b in bulls if b <= price * 1.02]
-        resistances = [b for b in bears if b >= price * 0.98]
+        resistances = [b for b in bears if b > price]          # strictly above only
         nearest_sup = max(supports)    if supports    else None
         nearest_res = min(resistances) if resistances else None
         sup_dist    = ((price - nearest_sup) / price * 100) if nearest_sup  else None
@@ -396,11 +398,14 @@ class FractalAgent:
 
         above_support   = nearest_sup is not None and sup_dist is not None and sup_dist <= 8.0
         near_support    = nearest_sup is not None and sup_dist is not None and sup_dist <= 2.0
+        # res_dist is always positive now (resistance strictly above price)
         near_resistance = nearest_res is not None and res_dist is not None and res_dist <= 5.0
 
-        fractal_break = False
-        if len(bears) >= 2 and (nearest_res is None or (res_dist is not None and res_dist > 5.0)):
-            fractal_break = price > bears[-2]
+        # fractal_break: price cleared a former fractal high that was previously resistance
+        broken_levels = [b for b in bears if b <= price]       # former resistances now below
+        fractal_break = len(broken_levels) > 0 and (
+            nearest_res is None or (res_dist is not None and res_dist > 5.0)
+        )
 
         bull_trend  = self._trend(bulls)
         bear_trend  = self._trend(bears)
@@ -469,7 +474,8 @@ class FractalAgent:
         if quad["valid"]:
             parts.append("✅ QUAD صحيح (F4>F2)")
         if fractal_break:
-            parts.append("كسر مقاومة فراكتلية ✅")
+            n_broken = len(broken_levels)
+            parts.append(f"كسر {n_broken} مقاومة فراكتلية ✅")
         if near_support and nearest_sup:
             parts.append(f"دعم فراكتلي ${nearest_sup:.4g} ({sup_dist:.1f}%↓)")
         elif above_support and nearest_sup:
