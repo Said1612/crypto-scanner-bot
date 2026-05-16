@@ -1220,6 +1220,12 @@ def check_milestones(all_t):
                 "exchange": info.get("exchange", "MEXC"),
                 "ts":       int(now),
             })
+            # SL hit → extend cooldown to 24h to prevent re-entry on downtrending coins
+            # CLO pattern: bot re-entered 4 days later at -15% from previous signal → SL again
+            if reason == "stoploss":
+                _SL_BLOCK = 86400  # 24h
+                alerted[sym] = now + (_SL_BLOCK - COOLDOWN)
+                log.info("SL_BLOCK %s — cooldown extended to 24h", sym)
             save_state()
 
 def _get_category(sym):
@@ -2100,6 +2106,15 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Frozen price guard — same exact price as last signal = ghost/cached data
     if sym in _alerted_price and _alerted_price[sym] == price:
         _rej("frozen_price"); return
+
+    # Downtrend repeat guard — CLO pattern: coin fired before but is now significantly lower
+    # If current price is 15%+ below the last signal price = sustained downtrend = block
+    # Volume spikes in downtrends are distribution, not accumulation
+    if sym in _alerted_price and _alerted_price[sym] > 0:
+        _prev_sig_price = _alerted_price[sym]
+        _drop_from_prev = (_prev_sig_price - price) / _prev_sig_price * 100
+        if _drop_from_prev >= 15.0:
+            _rej(f"downtrend_repeat({_drop_from_prev:.0f}%)"); return
 
 
     # Skip already pumped — MEXC micro-caps: allow up to 70% (REDO +56% still valid)
