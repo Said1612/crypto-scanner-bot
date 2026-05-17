@@ -2255,7 +2255,7 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Early move filter: only block clear downtrends (< -1%)
     # Real move_min (1.5%) is applied AFTER funding_rate check below
-    if move < -1.0: _rej("low_move"); return
+    if move < -1.0: _rej(f"low_move({move:.1f}%)"); return
 
     # Thin coin + big move = pump already over (AURORA, SIX type)
     if move > 8.0 and vol_24h < 200_000:
@@ -2296,10 +2296,14 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Sleeping giant (1m klines, volume detected before price moves): lower threshold
     elif interval == "1m_sg":
         move_min = min(move_min, 0.15)
+    # Mid scan (5m klines): 0.3%/5min = ~3.6%/hr uptrend — catches gradual pumpers
+    # (EDEN/KAIA/OPEN type: +17-38% over 8-12h with no single explosive candle)
+    elif interval == "5m":
+        move_min = min(move_min, 0.3)
 
     # Sector momentum: confirm spike >= 1.5x after klines are available
     _sector_mom = _sector_mom_pre and spike >= 1.5
-    if move < move_min and not _sector_mom: _rej("low_move"); return
+    if move < move_min and not _sector_mom: _rej(f"low_move({move:.1f}%)"); return
 
     # ── Volume-adjusted ratio: ILV pattern — big spike + lower ratio at breakout start ──
     # High spike (≥5x) = institutional volume → accept lower ratio (early accumulation)
