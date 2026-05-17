@@ -2759,6 +2759,18 @@ def _check(sym, ticker, interval, sector_boost=False):
                 and _cq_result["H"] < 0.50 and score < 7.0):
             _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
+    # Moonshot FCF Gate: extreme fractal risk blocks even parabolic setups
+    # FCF ≤ 0.50 = 1.618 Fib Exhaust active — classic false breakout trap
+    # (NAORIS: FCF 0.40 + H=0.453 anti-persistent + score 1.7 = guaranteed SL)
+    if _fva_result and is_moonshot:
+        _fcf_val = _fva_result["fcf"]
+        if _fcf_val <= 0.50:
+            _rej(f"moonshot_fib_exhaust({_fcf_val:.2f})"); return
+        # Anti-persistent market + weak FCF + low score = reversal trap
+        if (_cq_result and _fcf_val <= 0.65
+                and _cq_result["H"] < 0.48 and score < 5.0):
+            _rej(f"moonshot_fractal_trap(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
+
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
