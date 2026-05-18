@@ -98,8 +98,8 @@ STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB"
 SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","IBVOL"}
 # Coins to skip permanently: delisted, suspended, or confirmed manipulation-prone
 BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
-                  "XAUT", "PAXG", "XAGX",   # Gold/silver commodity tokens
-                  "LSM"}                      # Confirmed wash-trading manipulation (97% fake bids)
+                  "XAU", "XAUT", "PAXG", "XAGX",   # Gold/silver commodity tokens
+                  "LSM"}                              # Confirmed wash-trading manipulation (97% fake bids)
 
 # ── Coin Categories — used in daily report Top 10 ──────────────
 COIN_CATEGORIES = {
