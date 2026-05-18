@@ -2774,9 +2774,10 @@ def _check(sym, ticker, interval, sector_boost=False):
         _fcf_val = _fva_result["fcf"]
         if _fcf_val <= 0.60:
             _rej(f"moonshot_fib_exhaust({_fcf_val:.2f})"); return
-        # Anti-persistent market + weak FCF + low score = reversal trap
+        # Random/anti-persistent market + weak FCF + low score = reversal trap
+        # H < 0.55 = random or anti-persistent (no edge) — AIOT H=0.54 SL confirmed
         if (_cq_result and _fcf_val <= 0.65
-                and _cq_result["H"] < 0.48 and score < 5.0):
+                and _cq_result["H"] < 0.55 and score < 5.0):
             _rej(f"moonshot_fractal_trap(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
 
