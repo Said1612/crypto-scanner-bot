@@ -2759,6 +2759,14 @@ def _check(sym, ticker, interval, sector_boost=False):
                 and _cq_result["H"] < 0.50 and score < 7.0):
             _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
+    # Anti-Persistent Gate: H < 0.48 = market reliably reverses every spike
+    # Data: PROM H=0.473 hit SL in 6 minutes, NAORIS H=0.453 in 76 minutes
+    # Signal itself flags "HIGH FAKE OUT RISK" — we must honour it
+    # Score ≥ 7.0 exception: very strong setup (high OB + ratio) can overcome anti-persistence
+    if (_cq_result and not is_moonshot
+            and _cq_result["H"] < 0.48 and score < 7.0):
+        _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
+
     # Moonshot FCF Gate: extreme fractal risk blocks even parabolic setups
     # Data: WCT(0.57 SL), HUMA(0.50 SL), NAORIS(0.40 SL) — FCF ≤ 0.60 = always lose
     # FCF ≤ 0.60 means ≥2 negative fractal conditions (1.618 exhaust + 3-wave or noise)
