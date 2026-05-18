@@ -2760,11 +2760,11 @@ def _check(sym, ticker, interval, sector_boost=False):
             _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
     # Moonshot FCF Gate: extreme fractal risk blocks even parabolic setups
-    # FCF ≤ 0.50 = 1.618 Fib Exhaust active — classic false breakout trap
-    # (NAORIS: FCF 0.40 + H=0.453 anti-persistent + score 1.7 = guaranteed SL)
+    # Data: WCT(0.57 SL), HUMA(0.50 SL), NAORIS(0.40 SL) — FCF ≤ 0.60 = always lose
+    # FCF ≤ 0.60 means ≥2 negative fractal conditions (1.618 exhaust + 3-wave or noise)
     if _fva_result and is_moonshot:
         _fcf_val = _fva_result["fcf"]
-        if _fcf_val <= 0.50:
+        if _fcf_val <= 0.60:
             _rej(f"moonshot_fib_exhaust({_fcf_val:.2f})"); return
         # Anti-persistent market + weak FCF + low score = reversal trap
         if (_cq_result and _fcf_val <= 0.65
