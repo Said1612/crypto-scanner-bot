@@ -289,11 +289,11 @@ def _cb_record_outcome(is_sl: bool, sym: str = ""):
             log.warning("CB: TRIGGERED — signals blocked for %dh (resumes %s)", CB_PAUSE_HOURS, resume_str)
             try:
                 send(
-                    f"⛔ *Circuit Breaker مفعّل*\n"
-                    f"السبب: `{CB_MAX_CONSECUTIVE_SL}` إشارات SL متتالية\n"
-                    f"آخر خسارة: `{sym}`\n"
-                    f"الإجراء: لا إشارات لمدة `{CB_PAUSE_HOURS}` ساعات\n"
-                    f"يعود في: `{resume_str}`"
+                    f"⛔ *Circuit Breaker Active*\n"
+                    f"Reason: `{CB_MAX_CONSECUTIVE_SL}` consecutive SL signals\n"
+                    f"Last loss: `{sym}`\n"
+                    f"Action: no signals for `{CB_PAUSE_HOURS}` hours\n"
+                    f"Resumes at: `{resume_str}`"
                 )
             except Exception:
                 pass
@@ -3140,9 +3140,9 @@ def check_btc_health(all_t: dict):
             f"{'━' * 20}\n"
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"🚨 *BTC DANGER DROP*\n"
-            f"Bitcoin هبط `{delta:.2f}%` في 5 دقائق\n"
-            f"💰 السعر الآن: `${_fp(btc_price)}`\n"
-            f"⛔ تم إيقاف الإشارات مؤقتاً لـ 10 دقائق\n"
+            f"Bitcoin dropped `{delta:.2f}%` in 5 minutes\n"
+            f"💰 Price now: `${_fp(btc_price)}`\n"
+            f"⛔ Signals paused for 10 minutes\n"
             f"🕐 {_ts()} UTC\n"
             f"{'━' * 20}"
         )
@@ -3155,9 +3155,9 @@ def check_btc_health(all_t: dict):
             f"{'━' * 20}\n"
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"⚠️ *BTC Health Warning*\n"
-            f"Bitcoin هبط `{delta:.2f}%` في 5 دقائق\n"
-            f"💰 السعر الآن: `${_fp(btc_price)}`\n"
-            f"📉 توقع ضغط على العملات البديلة\n"
+            f"Bitcoin dropped `{delta:.2f}%` in 5 minutes\n"
+            f"💰 Price now: `${_fp(btc_price)}`\n"
+            f"📉 Expect pressure on altcoins\n"
             f"🕐 {_ts()} UTC\n"
             f"{'━' * 20}"
         )
@@ -3169,9 +3169,9 @@ def check_btc_health(all_t: dict):
             f"{'━' * 20}\n"
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"🚀 *BTC Bull Move*\n"
-            f"Bitcoin ارتفع `+{delta:.2f}%` في 5 دقائق\n"
-            f"💰 السعر الآن: `${_fp(btc_price)}`\n"
-            f"📈 توقع ارتداد قوي في العملات البديلة\n"
+            f"Bitcoin surged `+{delta:.2f}%` in 5 minutes\n"
+            f"💰 Price now: `${_fp(btc_price)}`\n"
+            f"📈 Expect strong altcoin bounce\n"
             f"🕐 {_ts()} UTC\n"
             f"{'━' * 20}"
         )
@@ -3220,9 +3220,9 @@ def check_dump_cascade(all_t: dict):
             f"{'━' * 20}\n"
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"🚨 *DUMP CASCADE DETECTED*\n"
-            f"`{dumping}` عملة من أصل `{total}` هبطت في 5 دقائق (`{pct:.0f}%`)\n\n"
-            f"📉 الأسوأ: {worst_lines}\n\n"
-            f"⛔ تم إيقاف الإشارات لـ 15 دقيقة\n"
+            f"`{dumping}` of `{total}` coins dropped in 5 minutes (`{pct:.0f}%`)\n\n"
+            f"📉 Worst: {worst_lines}\n\n"
+            f"⛔ Signals paused for 15 minutes\n"
             f"🕐 {_ts()} UTC\n"
             f"{'━' * 20}"
         )
@@ -3235,8 +3235,8 @@ def check_dump_cascade(all_t: dict):
             f"{'━' * 20}\n"
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"⚠️ *Market Dump Warning*\n"
-            f"`{dumping}` عملة من أصل `{total}` هبطت في 5 دقائق (`{pct:.0f}%`)\n"
-            f"🔴 تجنّب الدخول حتى يستقر السوق\n"
+            f"`{dumping}` of `{total}` coins dropped in 5 minutes (`{pct:.0f}%`)\n"
+            f"🔴 Avoid new entries until market stabilises\n"
             f"🕐 {_ts()} UTC\n"
             f"{'━' * 20}"
         )
