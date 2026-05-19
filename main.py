@@ -1847,8 +1847,8 @@ def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
         if os.path.exists(bg_path):
             bg = Image.open(bg_path).convert("RGB")
             bg = bg.resize((W, H), Image.LANCZOS)
-            # Darken slightly so text remains readable
-            bg = ImageEnhance.Brightness(bg).enhance(0.55)
+            # Keep colours vivid — only slight dim so text stays readable
+            bg = ImageEnhance.Brightness(bg).enhance(0.82)
             img = bg
         else:
             # Fallback: dark gradient
@@ -1861,15 +1861,12 @@ def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
                 b = int(20 + 30 * (1 - t))
                 draw.line([(0, y), (W, y)], fill=(r, g, b))
 
-        # ── Dark semi-transparent overlay for text panels ──
+        # ── Semi-transparent overlay for text panels ──
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         od = ImageDraw.Draw(overlay)
-        # Top bar
-        od.rectangle([(0, 0), (W, 74)], fill=(0, 0, 0, 155))
-        # Bottom info panel
-        od.rectangle([(0, 500), (W, H)], fill=(0, 0, 0, 170))
-        # Center text shadow behind gain
-        od.ellipse([(W//2 - 240, 270), (W//2 + 240, 470)], fill=(0, 0, 0, 100))
+        od.rectangle([(0, 0), (W, 74)],   fill=(0, 0, 0, 140))   # top bar
+        od.rectangle([(0, 490), (W, H)],  fill=(0, 0, 0, 195))   # bottom panel (darker for big text)
+        od.ellipse([(W//2 - 240, 270), (W//2 + 240, 470)], fill=(0, 0, 0, 90))
         img = img.convert("RGBA")
         img = Image.alpha_composite(img, overlay)
         img = img.convert("RGB")
@@ -1878,13 +1875,13 @@ def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
         # ── Fonts ──
         FONT = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
         try:
-            f_brand = ImageFont.truetype(FONT, 22)
-            f_coin  = ImageFont.truetype(FONT, 82)
-            f_gain  = ImageFont.truetype(FONT, 138)
-            f_label = ImageFont.truetype(FONT, 20)
-            f_price = ImageFont.truetype(FONT, 38)
+            f_brand    = ImageFont.truetype(FONT, 22)
+            f_coin     = ImageFont.truetype(FONT, 82)
+            f_gain     = ImageFont.truetype(FONT, 138)
+            f_coinname = ImageFont.truetype(FONT, 58)   # large coin name in footer
+            f_price    = ImageFont.truetype(FONT, 42)   # large entry/current price
         except Exception:
-            f_brand = f_coin = f_gain = f_label = f_price = ImageFont.load_default()
+            f_brand = f_coin = f_gain = f_coinname = f_price = ImageFont.load_default()
 
         # ── Top branding ──
         draw.text((26, 26), "MAFIO SNIPER", fill=(200, 190, 230), anchor="lt", font=f_brand)
@@ -1893,9 +1890,9 @@ def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
         draw.text((W - 26, 26), ex_label, fill=ex_color, anchor="rt", font=f_brand)
         draw.line([(26, 60), (W - 26, 60)], fill=(50, 25, 85), width=1)
 
-        # ── Coin name (shadow + text for readability over busy backgrounds) ──
-        draw.text((W // 2 + 3, 203), f"{base}", fill=(10, 0, 20),        anchor="mm", font=f_coin)
-        draw.text((W // 2,     200), f"{base}", fill=(255, 255, 255),    anchor="mm", font=f_coin)
+        # ── Coin name (shadow + text) ──
+        draw.text((W // 2 + 3, 203), f"{base}", fill=(10, 0, 20),     anchor="mm", font=f_coin)
+        draw.text((W // 2,     200), f"{base}", fill=(255, 255, 255), anchor="mm", font=f_coin)
 
         # ── Gain % with glow ──
         gain_color = (160, 80, 255) if gain >= 0 else (255, 60, 60)
@@ -1911,18 +1908,15 @@ def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
         draw.text((W // 2, 370), gain_str, fill=gain_color, anchor="mm", font=f_gain)
 
         # ── Divider ──
-        draw.line([(40, 510), (W - 40, 510)], fill=(60, 30, 100), width=2)
+        draw.line([(40, 500), (W - 40, 500)], fill=(80, 50, 130), width=2)
 
-        # ── Footer: ENTRY | TAKE PROFIT ──
-        lx, rx    = W // 4, 3 * W // 4
-        label_col = (130, 105, 175)
-        tp_price  = tp1 if tp1 > 0 else now_price
-        tp_label  = "TAKE PROFIT" if tp1 > 0 else "CURRENT PRICE"
-
-        draw.text((lx, 548), "ENTRY POSITION", fill=label_col, anchor="mm", font=f_label)
-        draw.text((lx, 592), f"${_fp(entry)}",  fill=(210, 200, 235), anchor="mm", font=f_price)
-        draw.text((rx, 548), tp_label,           fill=label_col,       anchor="mm", font=f_label)
-        draw.text((rx, 592), f"${_fp(tp_price)}", fill=gain_color,     anchor="mm", font=f_price)
+        # ── Footer: big coin name + entry → current price ──
+        # Row 1: #COINNAME centred (gold, large)
+        draw.text((W // 2, 540), f"#{base}", fill=(255, 215, 0), anchor="mm", font=f_coinname)
+        # Row 2: left = "Entry $X" / right = "Now $X" (white/green, large)
+        tp_price = tp1 if tp1 > 0 else now_price
+        draw.text((W // 4,     618), f"Entry: ${_fp(entry)}",    fill=(210, 200, 235), anchor="mm", font=f_price)
+        draw.text((3 * W // 4, 618), f"Now: ${_fp(tp_price)}",   fill=gain_color,      anchor="mm", font=f_price)
 
         buf = io.BytesIO()
         img.save(buf, "PNG")
