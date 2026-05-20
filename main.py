@@ -1957,8 +1957,9 @@ def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
     max_loss_line = f"📉 Max loss:  `{max_loss:.2f}%`\n" if max_loss < -0.1 else ""
 
     sig_msg_id = tracking.get(sym, {}).get("sig_msg_id", 0)
-    keyboard   = _trade_keyboard(sym, exchange, sig_msg_id)
     _reply_to  = sig_msg_id if sig_msg_id and not _sig_link(sig_msg_id) else None
+    link = _sig_link(sig_msg_id)
+    keyboard = {"inline_keyboard": [[{"text": "📌 View Signal", "url": link}]]} if link else None
     send_ex(
         f"{'━' * 20}\n"
         f"💀 *MAFIO SNIPER* 📡\n"
