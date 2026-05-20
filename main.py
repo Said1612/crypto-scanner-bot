@@ -1954,12 +1954,6 @@ def _fire_ms(sym, ms, gain, now_price, entry, elapsed, exchange):
     elif ms >= 10: icon, title = "🔥", f"*{base}USDT*  +{ms}% milestone reached"
     else:          icon, title = "📈", f"*{base}USDT*  +{ms}% milestone reached"
 
-    # Send image for big milestones (>=20%)
-    if ms >= 20:
-        image_bytes = _make_milestone_image(base, gain, entry, now_price, exchange, tp1)
-        if image_bytes:
-            _send_photo(image_bytes)
-
     max_loss_line = f"📉 Max loss:  `{max_loss:.2f}%`\n" if max_loss < -0.1 else ""
 
     sig_msg_id = tracking.get(sym, {}).get("sig_msg_id", 0)
