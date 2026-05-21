@@ -984,6 +984,36 @@ def _calc_score(pos24, net, net_min, ob_spot, spike):
     spike_pts = min(2.0, spike / 10.0 * 2.0)                             # 0-2
     return round(min(10.0, pos_pts + net_pts + bids_pts + spike_pts), 1)
 
+def _calc_fractal_score(fra, fva_result, cq_result):
+    """
+    Fractal quality score 0-10 — display only, does not affect filters.
+    FCF(0-4) + H(0-3) + MTF(0-2) + bearish_end bonus(0-1)
+    """
+    pts = 0.0
+    # FCF: fractal confluence quality
+    if fva_result:
+        fcf = fva_result.get("fcf", 1.0)
+        if   fcf >= 1.10: pts += 4.0
+        elif fcf >= 0.90: pts += 3.0
+        elif fcf >= 0.75: pts += 2.0
+        elif fcf >= 0.60: pts += 1.0
+    # H: Hurst regime from Chaos-Quant
+    if cq_result:
+        h = cq_result.get("H", 0.5)
+        if   h >= 0.60: pts += 3.0
+        elif h >= 0.55: pts += 2.0
+        elif h >= 0.48: pts += 1.0
+    # MTF alignment from fractal validator
+    if fva_result:
+        macro = fva_result.get("macro_trend", "neutral")
+        agree = fva_result.get("mtf_agree", False)
+        if agree and macro == "bullish": pts += 2.0
+        elif macro == "neutral":         pts += 1.0
+    # Bearish fractal end = transition to bullish (+1 bonus)
+    if fra and fra.get("bearish_end", False):
+        pts += 1.0
+    return round(min(10.0, pts), 1)
+
 def _calc_tp_sl(price, high24, low24, spike, score, exchange, is_moonshot=False, vol_explosion=False, is_flash=False):
     """Calculate TP1/TP2/TP3 and SL based on each coin's volatility and signal strength."""
     rng = high24 - low24
@@ -1031,7 +1061,8 @@ def build_signal(sym, price, change, buy_v, sell_v,
                  high24=0.0, low24=0.0, badge="🔔1",
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50,
                  score=0.0, moonshot=False, momentum=False, vol_explosion=False,
-                 interval="1h", is_flash=False, signal_type=None, is_alpha=False):
+                 interval="1h", is_flash=False, signal_type=None, is_alpha=False,
+                 fractal_score=None):
     global signal_count
     signal_count += 1
 
@@ -1084,6 +1115,11 @@ def build_signal(sym, price, change, buy_v, sell_v,
         score_label = f"🟡 Scalp · Score: `{score}/10`"
     else:
         score_label = f"🔵 Score: `{score}/10`"
+
+    # Fractal score suffix
+    if fractal_score is not None:
+        _fs_icon = "🟢" if fractal_score >= 7.0 else ("🟡" if fractal_score >= 5.0 else "🔴")
+        score_label += f"\n🔬 Fractal Score: `{fractal_score}/10` {_fs_icon}"
 
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
@@ -2782,6 +2818,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej(f"bearish_no_transition(jy={_fra['jy']:.3f})"); return
 
 
+    _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
@@ -2792,7 +2829,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                        vol_explosion=volume_explosion,
                        interval=interval,
                        is_flash=is_flash,
-                       is_alpha=(ticker.get("futures_only", False) or ticker.get("binance_alpha", False)))
+                       is_alpha=(ticker.get("futures_only", False) or ticker.get("binance_alpha", False)),
+                       fractal_score=_fractal_score)
     ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "main",
                                     score, ob_spot, ratio, pos24, spike, net, move, funding_label)
     if ai_blocked:
