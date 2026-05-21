@@ -2769,6 +2769,18 @@ def _check(sym, ticker, interval, sector_boost=False):
                 and _cq_result["H"] < 0.55 and score < 5.0):
             _rej(f"moonshot_fractal_trap(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
+    # Bearish Fractal Transition Gate
+    # MTF bearish + Jy < -0.10 + no "Bearish Fractal End" = dead-cat bounce, not real breakout.
+    # Data: GWEI(Jy=-0.128, SL) — MU(Jy=-0.140, WIN) / RKLB(Jy=-0.189, WIN) / LITE(WIN)
+    # Difference: MU/RKLB/LITE had bearish_end=True (fractal transitioning bullish), GWEI did not.
+    # Exception: score ≥ 8.5 keeps the signal alive (extraordinary setup can overcome structure).
+    if (_fra and _fva_result
+            and _fva_result.get("mtf_agree") and _fva_result.get("macro_trend") == "bearish"
+            and _fra.get("jy", 0.0) < -0.10
+            and not _fra.get("bearish_end", False)
+            and score < 8.5):
+        _rej(f"bearish_no_transition(jy={_fra['jy']:.3f})"); return
+
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
