@@ -1215,13 +1215,18 @@ def check_milestones(all_t):
         if pending:
             for ms in pending:
                 info["hit"].add(ms)
-            save_state()
             top_ms = pending[-1]
             _ms_key = f"{sym}_{top_ms}"
-            if now - _ms_dedup.get(_ms_key, 0) > 1800:   # 30 min dedup guard
+            # Dedup: check both in-memory AND persisted timestamp to survive restarts
+            _last_fired = max(_ms_dedup.get(_ms_key, 0), info.get(f"_ms_ts_{top_ms}", 0))
+            if now - _last_fired > 1800:
                 _ms_dedup[_ms_key] = now
+                info[f"_ms_ts_{top_ms}"] = now   # persist so restart won't re-fire
+                save_state()
                 _fire_ms(sym, top_ms, gain, t["price"], info["entry"],
                          int(elapsed), info["exchange"])
+            else:
+                save_state()   # still save the updated hit set
 
         # ── Peak Reversal Alert ───────────────────────────────────────────
         peak          = info.get("max", 0.0)
