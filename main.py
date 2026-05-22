@@ -2848,6 +2848,14 @@ def _check(sym, ticker, interval, sector_boost=False):
             and net < 200_000):
         _rej(f"bearish_no_transition(jy={_fra['jy']:.3f},net={_fv(net)})"); return
 
+    # Fractal Resistance Gate
+    # Price AT or VERY NEAR fractal resistance = high rejection probability.
+    # Data: STABLE (resistance +0.4% → SL ❌), AIO (resistance +0.0%, 3rd send → SL ❌)
+    # Exception: score ≥ 8.5 — exceptional setup (breakout momentum) can punch through.
+    if (_fra and _fra.get("resistance") and _fra["resistance"] > price):
+        _res_dist_pct = (_fra["resistance"] - price) / price * 100
+        if _res_dist_pct < 1.0 and score < 8.5:
+            _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
