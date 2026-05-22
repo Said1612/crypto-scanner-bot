@@ -2584,6 +2584,14 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Threshold 35%: blocks BANANAS31 (30%) while allowing AI (37%)
     if is_moonshot and ob_spot < 0.35 and not funding_bullish:
         _rej(f"moonshot_ob_floor({ob_spot:.0%})"); return
+
+    # Moonshot Bearish OB + Weak Flow Gate
+    # Sellers dominate OB + weak ratio + small net = no real buying conviction.
+    # IOTX: ob=36%, ratio=1.6x, net=$22.9K — all three weak simultaneously.
+    # Exceptions: strong net (≥$150K proves real conviction) OR ratio ≥ 2.0 OR funding_bullish.
+    if (is_moonshot and ob_spot < 0.42 and ratio < 2.0
+            and net < 150_000 and not funding_bullish):
+        _rej(f"moonshot_bearish_ob_weak_flow(ob={ob_spot:.0%},ratio={ratio:.1f}x,net={_fv(net)})"); return
     if exchange == "Binance":
         if ticker.get("futures_only"):
             ob_fut = ob_spot  # base_url already points to FAPI — no double call
