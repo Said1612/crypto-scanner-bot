@@ -2155,6 +2155,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     if change > _max_pump or range_pump > 200.0:
         _rej("max_pump"); return
     if now - alerted.get(sym, 0) < COOLDOWN: _rej("cooldown"); return
+    # Skip coins already in active tracking — avoid re-entry on a coin already being followed
+    if sym in tracking: _rej("already_tracking"); return
 
     # ── Sector Momentum detection (pre-klines) ────────────────────────────
     # AXS/APE/ALICE gaming rotation: coins pump gradually over 6h+ as a sector.
