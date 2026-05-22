@@ -940,6 +940,21 @@ def _ai_assess(sym, exchange, tier, scanner, score,
     except Exception:
         return "", False
 
+def _notify_once(key: str, ttl: int = 300) -> bool:
+    """Cross-process dedup via /tmp lock file. Returns True = allowed to send.
+    Works even when two bot processes overlap during systemctl restart.
+    """
+    path = f"/tmp/mafio_{key.replace('/', '_').replace(':', '_')}.lock"
+    now = time.time()
+    try:
+        if os.path.exists(path) and now - os.path.getmtime(path) < ttl:
+            return False
+        with open(path, "w") as f:
+            f.write(str(now))
+        return True
+    except Exception:
+        return True   # on filesystem error, allow rather than silence
+
 def _sig_link(msg_id):
     """
     Build t.me deep link for a message in the configured group/channel.
@@ -1204,7 +1219,7 @@ def check_milestones(all_t):
 
         # 2. Stop-loss hit → alert AND close tracking
         if gain <= SIGNAL_SL_PCT:
-            if not info.get("sl_alerted") and now - _sl_dedup.get(sym, 0) > 300:
+            if not info.get("sl_alerted") and now - _sl_dedup.get(sym, 0) > 300 and _notify_once(f"sl_{sym}"):
                 info["sl_alerted"] = True
                 _sl_dedup[sym] = now
                 save_state()
@@ -1222,14 +1237,14 @@ def check_milestones(all_t):
             _ms_key = f"{sym}_{top_ms}"
             # Dedup: check both in-memory AND persisted timestamp to survive restarts
             _last_fired = max(_ms_dedup.get(_ms_key, 0), info.get(f"_ms_ts_{top_ms}", 0))
-            if now - _last_fired > 1800:
+            if now - _last_fired > 1800 and _notify_once(f"ms_{sym}_{top_ms}", ttl=1800):
                 _ms_dedup[_ms_key] = now
-                info[f"_ms_ts_{top_ms}"] = now   # persist so restart won't re-fire
+                info[f"_ms_ts_{top_ms}"] = now
                 save_state()
                 _fire_ms(sym, top_ms, gain, t["price"], info["entry"],
                          int(elapsed), info["exchange"])
             else:
-                save_state()   # still save the updated hit set
+                save_state()
 
         # ── Peak Reversal Alert ───────────────────────────────────────────
         peak          = info.get("max", 0.0)
@@ -1238,7 +1253,7 @@ def check_milestones(all_t):
         if peak >= _rev_min_peak and not info.get("rev_alerted"):
             peak_price   = info["entry"] * (1 + peak / 100)
             drop_from_pk = (peak_price - t["price"]) / peak_price * 100
-            if drop_from_pk >= _rev_drop and now - _rev_dedup.get(sym, 0) > 300:
+            if drop_from_pk >= _rev_drop and now - _rev_dedup.get(sym, 0) > 300 and _notify_once(f"rev_{sym}"):
                 info["rev_alerted"] = True
                 _rev_dedup[sym] = now
                 save_state()
