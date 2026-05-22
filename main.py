@@ -2833,6 +2833,15 @@ def _check(sym, ticker, interval, sector_boost=False):
 
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
+
+    # Fractal Quality Gate
+    # Fractal Score < 5.0 means H + MTF + bearish_end are simultaneously poor.
+    # Data: MLN (FS=4.0, Score=7.9) hit SL in 57 min — H=0.451 anti-persistent + MTF bearish.
+    # Anti-persistent gate missed it because Score=7.9 ≥ 7.0 (gate threshold).
+    # Exception: Score ≥ 8.0 (extraordinary flow signal can overcome weak fractal structure).
+    if _fractal_score < 5.0 and score < 8.0:
+        _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
+
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
