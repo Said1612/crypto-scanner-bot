@@ -2036,8 +2036,9 @@ def _fire_reversal(sym, gain, peak, now_price, entry, elapsed, exchange, is_flas
     ex_icon = "🟡" if exchange == "Binance" else "🟠"
     tag     = "⚡ Flash pump" if is_flash else "Reversal"
     sig_msg_id = tracking.get(sym, {}).get("sig_msg_id", 0)
-    keyboard   = _trade_keyboard(sym, exchange, sig_msg_id)
     _reply_to  = sig_msg_id if sig_msg_id and not _sig_link(sig_msg_id) else None
+    link = _sig_link(sig_msg_id)
+    keyboard = {"inline_keyboard": [[{"text": "📌 View Signal", "url": link}]]} if link else None
     send_ex(
         f"{'━' * 20}\n"
         f"💀 *MAFIO SNIPER* 📡\n"
@@ -2064,8 +2065,9 @@ def _fire_stoploss(sym, gain, now_price, entry, elapsed, exchange):
     base    = sym[:-4]
     ex_icon = "🟡" if exchange == "Binance" else "🟠"
     sig_msg_id = tracking.get(sym, {}).get("sig_msg_id", 0)
-    keyboard   = _trade_keyboard(sym, exchange, sig_msg_id)
     _reply_to  = sig_msg_id if sig_msg_id and not _sig_link(sig_msg_id) else None
+    link = _sig_link(sig_msg_id)
+    keyboard = {"inline_keyboard": [[{"text": "📌 View Signal", "url": link}]]} if link else None
     send_ex(
         f"{'━' * 20}\n"
         f"💀 *MAFIO SNIPER* 📡\n"
