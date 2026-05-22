@@ -247,6 +247,7 @@ _signal_dedup        : Dict[str, float] = {}  # {sym: ts} — 60s dedup window (
 _alerted_price       : Dict[str, float] = {}  # {sym: price} — frozen data guard (MFT type)
 _ms_dedup            : Dict[str, float] = {}  # {sym_ms: ts} — prevents duplicate milestone sends (multiple instances guard)
 _sl_dedup            : Dict[str, float] = {}  # {sym: ts} — prevents duplicate SL sends across restarts
+_rev_dedup           : Dict[str, float] = {}  # {sym: ts} — prevents duplicate reversal sends across restarts
 _sector_heat_prev    : Dict[str, float] = {}  # previous heat per sector
 _sector_alerted      : Dict[str, float] = {}  # {sector: last_hot_scan_ts}
 _sector_warm_alerted : Dict[str, float] = {}  # {sector: last_warm_scan_ts}
@@ -1237,8 +1238,10 @@ def check_milestones(all_t):
         if peak >= _rev_min_peak and not info.get("rev_alerted"):
             peak_price   = info["entry"] * (1 + peak / 100)
             drop_from_pk = (peak_price - t["price"]) / peak_price * 100
-            if drop_from_pk >= _rev_drop:
+            if drop_from_pk >= _rev_drop and now - _rev_dedup.get(sym, 0) > 300:
                 info["rev_alerted"] = True
+                _rev_dedup[sym] = now
+                save_state()
                 _fire_reversal(sym, gain, peak, t["price"], info["entry"],
                                int(elapsed), info["exchange"],
                                is_flash=info.get("is_flash", False))
