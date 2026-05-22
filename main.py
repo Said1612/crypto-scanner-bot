@@ -2812,15 +2812,17 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Bearish Fractal Transition Gate
     # MTF bearish + Jy < -0.10 + no "Bearish Fractal End" = dead-cat bounce, not real breakout.
-    # Data: GWEI(Jy=-0.128, SL) — MU(Jy=-0.140, WIN) / RKLB(Jy=-0.189, WIN) / LITE(WIN)
-    # Difference: MU/RKLB/LITE had bearish_end=True (fractal transitioning bullish), GWEI did not.
-    # Exception: score ≥ 8.5 keeps the signal alive (extraordinary setup can overcome structure).
+    # Data: GWEI($41K net, SL) — MU/RKLB/LITE (bearish_end=True, all WIN)
+    # Exception 1: score ≥ 8.5 — extraordinary setup can overcome structure.
+    # Exception 2: net ≥ $200K — RIVER($306K, no bearish_end) won +13% proving real money
+    #              flow can overcome bearish fractal (GWEI only had $41K and hit SL).
     if (_fra and _fva_result
             and _fva_result.get("mtf_agree") and _fva_result.get("macro_trend") == "bearish"
             and _fra.get("jy", 0.0) < -0.10
             and not _fra.get("bearish_end", False)
-            and score < 8.5):
-        _rej(f"bearish_no_transition(jy={_fra['jy']:.3f})"); return
+            and score < 8.5
+            and net < 200_000):
+        _rej(f"bearish_no_transition(jy={_fra['jy']:.3f},net={_fv(net)})"); return
 
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
