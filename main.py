@@ -246,6 +246,7 @@ FUNDING_TTL          = 300   # refresh funding rate every 5 min
 _signal_dedup        : Dict[str, float] = {}  # {sym: ts} — 60s dedup window (FAST_SCAN_S retrigger guard)
 _alerted_price       : Dict[str, float] = {}  # {sym: price} — frozen data guard (MFT type)
 _ms_dedup            : Dict[str, float] = {}  # {sym_ms: ts} — prevents duplicate milestone sends (multiple instances guard)
+_sl_dedup            : Dict[str, float] = {}  # {sym: ts} — prevents duplicate SL sends across restarts
 _sector_heat_prev    : Dict[str, float] = {}  # previous heat per sector
 _sector_alerted      : Dict[str, float] = {}  # {sector: last_hot_scan_ts}
 _sector_warm_alerted : Dict[str, float] = {}  # {sector: last_warm_scan_ts}
@@ -1202,8 +1203,9 @@ def check_milestones(all_t):
 
         # 2. Stop-loss hit → alert AND close tracking
         if gain <= SIGNAL_SL_PCT:
-            if not info.get("sl_alerted"):
+            if not info.get("sl_alerted") and now - _sl_dedup.get(sym, 0) > 300:
                 info["sl_alerted"] = True
+                _sl_dedup[sym] = now
                 save_state()
                 _fire_stoploss(sym, gain, t["price"], info["entry"],
                                int(elapsed), info["exchange"])
