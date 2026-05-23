@@ -2829,6 +2829,16 @@ def _check(sym, ticker, interval, sector_boost=False):
             and _cq_result["H"] < 0.48 and score < 7.0):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
+    # Moonshot Anti-Persistent Gate
+    # The gate above skips moonshots — but H < 0.45 is extreme anti-persistence that blocks all.
+    # COOKIE: H=0.425, Score=6.5, FCF=1.15 — FCF bypassed moonshot_fractal_trap but
+    # H=0.425 means the market structurally reverses every spike regardless of FCF quality.
+    # Bot itself flags "HIGH FAKE OUT RISK" at H < 0.45 — we must honour it.
+    # Exception: score ≥ 8.0 only — truly exceptional flow can dominate extreme anti-persistence.
+    if (_cq_result and is_moonshot
+            and _cq_result["H"] < 0.45 and score < 8.0):
+        _rej(f"moonshot_anti_persistent(H={_cq_result['H']:.3f})"); return
+
     # Moonshot FCF Gate: extreme fractal risk blocks even parabolic setups
     # Data: WCT(0.57 SL), HUMA(0.50 SL), NAORIS(0.40 SL) — FCF ≤ 0.60 = always lose
     # FCF ≤ 0.60 means ≥2 negative fractal conditions (1.618 exhaust + 3-wave or noise)
