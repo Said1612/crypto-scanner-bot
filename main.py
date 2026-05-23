@@ -942,16 +942,23 @@ def _ai_assess(sym, exchange, tier, scanner, score,
 
 def _notify_once(key: str, ttl: int = 300) -> bool:
     """Cross-process dedup via /tmp lock file. Returns True = allowed to send.
-    Works even when two bot processes overlap during systemctl restart.
+    Uses O_CREAT|O_EXCL for atomic creation — eliminates TOCTOU race condition
+    when two bot processes overlap during systemctl restart.
     """
     path = f"/tmp/mafio_{key.replace('/', '_').replace(':', '_')}.lock"
     now = time.time()
     try:
+        # If lock exists and is still fresh → already sent by another process
         if os.path.exists(path) and now - os.path.getmtime(path) < ttl:
             return False
-        with open(path, "w") as f:
-            f.write(str(now))
+        # Atomic create: O_EXCL ensures only ONE process succeeds even in a race
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(now).encode())
+        os.close(fd)
         return True
+    except FileExistsError:
+        # Another process won the race between our check and create
+        return False
     except Exception:
         return True   # on filesystem error, allow rather than silence
 
