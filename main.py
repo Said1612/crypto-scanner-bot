@@ -1226,7 +1226,7 @@ def check_milestones(all_t):
 
         # 2. Stop-loss hit → alert AND close tracking
         if gain <= SIGNAL_SL_PCT:
-            if not info.get("sl_alerted") and now - _sl_dedup.get(sym, 0) > 300 and _notify_once(f"sl_{sym}"):
+            if not info.get("sl_alerted") and now - _sl_dedup.get(sym, 0) > 300 and _notify_once(f"sl_{sym}", ttl=86400):
                 info["sl_alerted"] = True
                 _sl_dedup[sym] = now
                 save_state()
@@ -1260,7 +1260,7 @@ def check_milestones(all_t):
         if peak >= _rev_min_peak and not info.get("rev_alerted"):
             peak_price   = info["entry"] * (1 + peak / 100)
             drop_from_pk = (peak_price - t["price"]) / peak_price * 100
-            if drop_from_pk >= _rev_drop and now - _rev_dedup.get(sym, 0) > 300 and _notify_once(f"rev_{sym}"):
+            if drop_from_pk >= _rev_drop and now - _rev_dedup.get(sym, 0) > 300 and _notify_once(f"rev_{sym}", ttl=3600):
                 info["rev_alerted"] = True
                 _rev_dedup[sym] = now
                 save_state()
