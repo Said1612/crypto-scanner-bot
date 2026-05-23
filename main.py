@@ -2816,17 +2816,17 @@ def _check(sym, ticker, interval, sector_boost=False):
         _fcf_val = _fva_result["fcf"]
         if _fcf_val <= 0.75 and score < 7.5:
             _rej(f"fcf_structure({_fcf_val:.2f})"); return
-        # Double-weak: both FCF and Hurst agree the market is unfavorable
-        if (_cq_result and _fcf_val < 0.85
-                and _cq_result["H"] < 0.50 and score < 7.0):
+        # Double-weak: FCF mediocre + H random/anti-persistent = no structural edge
+        # Raised thresholds: FCF < 0.90 (was 0.85), H < 0.52 (was 0.50), score < 7.5 (was 7.0)
+        if (_cq_result and _fcf_val < 0.90
+                and _cq_result["H"] < 0.52 and score < 7.5):
             _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
-    # Anti-Persistent Gate: H < 0.48 = market reliably reverses every spike
+    # Anti-Persistent Gate: H < 0.50 = random/anti-persistent market, no trending edge
     # Data: PROM H=0.473 hit SL in 6 minutes, NAORIS H=0.453 in 76 minutes
-    # Signal itself flags "HIGH FAKE OUT RISK" — we must honour it
-    # Score ≥ 7.0 exception: very strong setup (high OB + ratio) can overcome anti-persistence
+    # Raised: H < 0.50 (was 0.48) — covers full random zone, score < 7.5 (was 7.0)
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.48 and score < 7.0):
+            and _cq_result["H"] < 0.50 and score < 7.5):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
     # Moonshot Anti-Persistent Gate
@@ -2846,10 +2846,11 @@ def _check(sym, ticker, interval, sector_boost=False):
         _fcf_val = _fva_result["fcf"]
         if _fcf_val <= 0.60:
             _rej(f"moonshot_fib_exhaust({_fcf_val:.2f})"); return
-        # Random/anti-persistent market + weak FCF + low score = reversal trap
+        # Random/anti-persistent market + weak FCF = reversal trap even for moonshots
         # H < 0.55 = random or anti-persistent (no edge) — AIOT H=0.54 SL confirmed
+        # Raised score threshold: < 7.0 (was 5.0) — weak FCF + H requires exceptional flow
         if (_cq_result and _fcf_val <= 0.65
-                and _cq_result["H"] < 0.55 and score < 5.0):
+                and _cq_result["H"] < 0.55 and score < 7.0):
             _rej(f"moonshot_fractal_trap(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
     # Bearish Fractal Transition Gate
@@ -2878,11 +2879,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
     # Fractal Quality Gate
-    # Fractal Score < 5.0 means H + MTF + bearish_end are simultaneously poor.
-    # Data: MLN (FS=4.0, Score=7.9) hit SL in 57 min — H=0.451 anti-persistent + MTF bearish.
-    # Anti-persistent gate missed it because Score=7.9 ≥ 7.0 (gate threshold).
-    # Exception: Score ≥ 8.0 (extraordinary flow signal can overcome weak fractal structure).
-    if _fractal_score < 5.0 and score < 8.0:
+    # Fractal Score < 6.0 = at least two fractal dimensions are weak simultaneously.
+    # Data: MLN (FS=4.0, Score=7.9) SL in 57 min. Raised FS threshold 5.0→6.0 to push
+    # toward green indicators across H + FCF + MTF + bearish_end.
+    # Exception: Score ≥ 8.0 (extraordinary flow can compensate for moderate fractal structure).
+    if _fractal_score < 6.0 and score < 8.0:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
