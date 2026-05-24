@@ -1241,13 +1241,15 @@ def check_milestones(all_t):
         gain = (t["price"] - info["entry"]) / info["entry"] * 100.0
         if gain > info.get("max", 0.0):
             info["max"] = gain
-        if gain < info.get("min", 0.0):
-            info["min"] = gain
-            # Keep signal_history.json in sync so reports always show real gains
+            # Keep signal_history.json in sync — update peak gain as it happens
+            # (was incorrectly placed in the "min" block, causing negative max_gain_pct)
             for _rec in reversed(_signal_db):
                 if _rec["sym"] == sym and _rec["outcome"] == "active":
-                    _rec["max_gain_pct"] = round(gain, 2)
+                    if gain > (_rec.get("max_gain_pct") or 0.0):
+                        _rec["max_gain_pct"] = round(gain, 2)
                     break
+        if gain < info.get("min", 0.0):
+            info["min"] = gain
 
         # 2. Stop-loss hit → alert AND close tracking
         if gain <= SIGNAL_SL_PCT:
@@ -1698,11 +1700,21 @@ def _period_report(period_label: str, days: int):
         sector    = SECTOR_REGISTRY.get(base, "Other")
         cat       = _SECTOR_DISPLAY.get(sector, f"📊 {sector}")
         rank_icon = _RANK_ICON.get(rank, f"{rank}.")
-        gain_icon = "💎" if g >= 20 else "🔥" if g >= 15 else "🚀" if g >= 0 else "📉"
+        out = e.get("outcome", "active")
+        if out in WIN_OUT:
+            outcome_icon = "✅"
+            gain_label   = f"WIN `{g:+.2f}%`"
+        elif out in LOSS_OUT:
+            outcome_icon = "❌"
+            gain_label   = f"Peak `{g:+.2f}%` → SL"
+        else:
+            outcome_icon = "⏳"
+            gain_label   = f"`{g:+.2f}%`"
+        peak_icon = "💎" if g >= 20 else "🔥" if g >= 15 else "🚀" if g >= 5 else ""
         return (
             f"{rank_icon}  *{sym}*\n"
             f"   🏷 Category:  {cat}\n"
-            f"   {gain_icon} Gain:  `{g:+.2f}%`"
+            f"   {outcome_icon}{peak_icon} {gain_label}"
         )
 
     parts = []
