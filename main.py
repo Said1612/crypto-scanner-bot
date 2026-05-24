@@ -251,6 +251,28 @@ _rev_dedup           : Dict[str, float] = {}  # {sym: ts} — prevents duplicate
 _sector_heat_prev    : Dict[str, float] = {}  # previous heat per sector
 _sector_alerted      : Dict[str, float] = {}  # {sector: last_hot_scan_ts}
 _sector_warm_alerted : Dict[str, float] = {}  # {sector: last_warm_scan_ts}
+
+_MY_PID   = os.getpid()
+_PID_FILE = "/tmp/mafio_scanner.pid"
+
+def _register_primary():
+    """Write our PID to the lock file — marks us as the active process."""
+    try:
+        with open(_PID_FILE, "w") as f:
+            f.write(str(_MY_PID))
+    except Exception:
+        pass
+
+def _is_primary_process() -> bool:
+    """Return True only if this process is still the active (newest) bot instance.
+    When a new process starts it overwrites _PID_FILE — old process detects mismatch
+    and stops sending signals, eliminating stale-process signal leakage on VPS updates.
+    """
+    try:
+        with open(_PID_FILE, "r") as f:
+            return int(f.read().strip()) == _MY_PID
+    except Exception:
+        return True  # if file missing, assume primary
 _trend_dedup         : Dict[str, float] = {}  # {sym: last_trend_signal_ts} 12h cooldown
 _dominance_hist      : List[Tuple[float, dict]] = []  # [(ts, {btcd, usdtd, usdcd, others})]
 
@@ -840,6 +862,9 @@ def send_ex(text, reply_markup=None, reply_to_msg_id=None):
     On Markdown 400 error: auto-retries as plain text (no parse_mode).
     On network timeout: retries up to 3 times with 4s delay (OSHI pattern — signal lost due to timeout).
     """
+    if not _is_primary_process():
+        log.info("STALE PROCESS — send() suppressed (newer bot instance is active)")
+        return False, 0
     if not TELEGRAM_TOKEN:
         print(text); return True, 0
     ok = False
@@ -4555,7 +4580,8 @@ def _mark_report_sent(key: str, report_type: str):
 
 def main():
     global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_report, last_report_date, last_weekly_date, last_monthly_date
-    log.info("🎯 MAFIO SNIPER — starting")
+    _register_primary()   # claim PID lock — old process will detect mismatch and stop sending
+    log.info("🎯 MAFIO SNIPER — starting (PID %d)", _MY_PID)
     clear_bot_commands()
     register_commands()
     load_state()
