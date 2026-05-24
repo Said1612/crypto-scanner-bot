@@ -439,11 +439,16 @@ def load_signal_db():
         _signal_db = []
 
 def _save_signal_db():
+    """Atomic write: write to temp file then rename — prevents DB corruption on kill/restart."""
+    tmp = SIGNAL_DB + ".tmp"
     try:
-        with open(SIGNAL_DB, "w") as f:
+        with open(tmp, "w") as f:
             json.dump(_signal_db, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, SIGNAL_DB)   # atomic on Linux — no partial writes
     except Exception as e:
         log.debug("signal_db save: %s", e)
+        try: os.unlink(tmp)
+        except Exception: pass
 
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding):
