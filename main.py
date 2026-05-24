@@ -2815,6 +2815,17 @@ def _check(sym, ticker, interval, sector_boost=False):
     # even when raw flow metrics (volume spike, ratio) are impressive.
     #
     # FCF ≤ 0.75 means at least one of: approaching 1.618 exhaustion,
+
+    # High Position + Bearish MTF Gate
+    # Coin at > 60% of daily range + macro trend bearish = exhausted against the trend.
+    # Data: DYM pos=64%, MTF bearish, Score=9.0 → SL in 37 minutes (no room + bearish structure).
+    # Exception: net ≥ $500K (institutional flow can shift exhausted market structure).
+    # Exception: moonshot (parabolic momentum operates differently).
+    if (_fva_result and pos24 > 0.60
+            and _fva_result.get("macro_trend") == "bearish"
+            and net < 500_000
+            and not is_moonshot):
+        _rej(f"high_pos_bearish_mtf(pos={int(pos24*100)}%)"); return
     # 3-wave correction (corrective bounce ≠ impulse), or MTF bearish.
     # Combined with a post-adjustment score < 7.5, the risk/reward is poor.
     #
