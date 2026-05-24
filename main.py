@@ -2865,11 +2865,12 @@ def _check(sym, ticker, interval, sector_boost=False):
                 and _cq_result["H"] < 0.52 and score < 7.5):
             _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
-    # Anti-Persistent Gate: H < 0.50 = random/anti-persistent market, no trending edge
+    # Anti-Persistent Gate: H < 0.53 = random/anti-persistent market, no trending edge
     # Data: PROM H=0.473 hit SL in 6 minutes, NAORIS H=0.453 in 76 minutes
-    # Raised: H < 0.50 (was 0.48) — covers full random zone, score < 7.5 (was 7.0)
+    # Raised: H < 0.53 (was 0.50) — blocks full random zone (0.48-0.53), score < 8.0 (was 7.5)
+    # Only truly strong setups (score ≥ 8.0) can pass in random market conditions.
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.50 and score < 7.5):
+            and _cq_result["H"] < 0.53 and score < 8.0):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
     # Moonshot Anti-Persistent Gate
@@ -2922,11 +2923,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
     # Fractal Quality Gate
-    # Fractal Score < 6.0 = at least two fractal dimensions are weak simultaneously.
-    # Data: MLN (FS=4.0, Score=7.9) SL in 57 min. Raised FS threshold 5.0→6.0 to push
-    # toward green indicators across H + FCF + MTF + bearish_end.
-    # Exception: Score ≥ 8.0 (extraordinary flow can compensate for moderate fractal structure).
-    if _fractal_score < 6.0 and score < 8.0:
+    # FS < 7.0 = at least one fractal dimension is weak (H, FCF, or MTF not fully green).
+    # Raised 6.0→7.0: pushing toward signals where most fractal indicators are green.
+    # Exception: Score ≥ 8.5 (exceptional flow like MYX pos=9%/score=9.0 can compensate).
+    if _fractal_score < 7.0 and score < 8.5:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
