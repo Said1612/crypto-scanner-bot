@@ -243,6 +243,8 @@ _multi_confirm       : Dict[str, dict] = {}   # {sym: {"count": N, "scanners": [
 MULTI_CONFIRM_WINDOW = 1800  # 30 min window for multi-scanner confirmation
 _funding_cache       : Dict[str, dict] = {}   # {sym: {"rate": float, "label": str, "ts": float}}
 FUNDING_TTL          = 300   # refresh funding rate every 5 min
+_oi_cache            : Dict[str, dict] = {}   # {sym: {oi data} + "ts": float}
+OI_TTL               = 180   # refresh OI every 3 min (Binance updates every 15m)
 _signal_dedup        : Dict[str, float] = {}  # {sym: ts} — 60s dedup window (FAST_SCAN_S retrigger guard)
 _alerted_price       : Dict[str, float] = {}  # {sym: price} — frozen data guard (MFT type)
 _ms_dedup            : Dict[str, float] = {}  # {sym_ms: ts} — prevents duplicate milestone sends (multiple instances guard)
@@ -683,6 +685,83 @@ def fetch_binance_funding_rate(sym):
         _funding_cache[cache_key] = {"rate": None, "label": "Spot", "ts": now}
         return None, "Spot"
 
+def fetch_oi_ls(sym: str) -> dict:
+    """
+    Open Interest + Long/Short Ratio for Binance Futures.
+
+    OI expanding  = new money entering = real breakout confirmation.
+    OI contracting = short covering or profit-taking = corrective move risk.
+    L/S < 0.85    = short-heavy market = squeeze fuel (bullish).
+    L/S > 1.8     = crowd too long = liquidation cascade risk (bearish).
+
+    Returns dict with keys:
+      oi_delta_1h   : % change in OI over last 1h (positive = expanding)
+      expanding     : True if OI grew > +2% in 1h
+      contracting   : True if OI fell > -4% in 1h
+      ls_ratio      : long/short account ratio (>1 = more longs)
+      short_squeeze : True if OI expanding AND ls_ratio < 0.85 (shorts trapped)
+      long_crowded  : True if ls_ratio > 1.8 (top risk)
+      label         : display string for signal message
+    """
+    now = time.time()
+    cached = _oi_cache.get(sym)
+    if cached and (now - cached["ts"]) < OI_TTL:
+        return cached
+
+    default = {"oi_delta_1h": 0.0, "expanding": False, "contracting": False,
+               "ls_ratio": 1.0, "short_squeeze": False, "long_crowded": False,
+               "label": "", "ts": now}
+    try:
+        # ── OI history (30m intervals, last 3 → ~1h change) ──────────────
+        hist = _get(f"{BINANCE_FUTURES}/futures/data/openInterestHist",
+                    {"symbol": sym, "period": "30m", "limit": 3}, timeout=5)
+        if not hist or not isinstance(hist, list) or len(hist) < 2:
+            _oi_cache[sym] = default; return default
+
+        oi_old = float(hist[0]["sumOpenInterest"])
+        oi_new = float(hist[-1]["sumOpenInterest"])
+        delta  = (oi_new - oi_old) / oi_old * 100 if oi_old > 0 else 0.0
+
+        # ── Long/Short ratio (top traders account ratio, 1h) ─────────────
+        ls_data = _get(f"{BINANCE_FUTURES}/futures/data/topLongShortAccountRatio",
+                       {"symbol": sym, "period": "1h", "limit": 1}, timeout=5)
+        ls_ratio = 1.0
+        if ls_data and isinstance(ls_data, list) and ls_data:
+            try:
+                ls_ratio = float(ls_data[0].get("longShortRatio", 1.0))
+            except (ValueError, KeyError):
+                pass
+
+        expanding     = delta > 2.0
+        contracting   = delta < -4.0
+        short_squeeze = expanding and ls_ratio < 0.85
+        long_crowded  = ls_ratio > 1.8
+
+        # ── Display label ─────────────────────────────────────────────────
+        sign   = "+" if delta >= 0 else ""
+        if short_squeeze:
+            label = f"🌊 OI `{sign}{delta:.1f}%` · L/S `{ls_ratio:.2f}` 🩳 *Squeeze Setup*"
+        elif expanding:
+            label = f"📈 OI `{sign}{delta:.1f}%` expanding · L/S `{ls_ratio:.2f}`"
+        elif contracting:
+            label = f"⚠️ OI `{sign}{delta:.1f}%` contracting · L/S `{ls_ratio:.2f}`"
+        elif long_crowded:
+            label = f"⚠️ OI `{sign}{delta:.1f}%` · L/S `{ls_ratio:.2f}` 🐂 *Crowded Longs*"
+        else:
+            label = f"➡️ OI `{sign}{delta:.1f}%` · L/S `{ls_ratio:.2f}`"
+
+        result = {"oi_delta_1h": round(delta, 2), "expanding": expanding,
+                  "contracting": contracting, "ls_ratio": ls_ratio,
+                  "short_squeeze": short_squeeze, "long_crowded": long_crowded,
+                  "label": label, "ts": now}
+        _oi_cache[sym] = result
+        return result
+
+    except Exception:
+        _oi_cache[sym] = default
+        return default
+
+
 def _fut_sym(sym):
     """BTCUSDT → BTC_USDT  (MEXC Futures symbol format)"""
     return sym[:-4] + "_USDT"
@@ -1116,7 +1195,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50,
                  score=0.0, moonshot=False, momentum=False, vol_explosion=False,
                  interval="1h", is_flash=False, signal_type=None, is_alpha=False,
-                 fractal_score=None):
+                 fractal_score=None, oi_label=""):
     global signal_count
     signal_count += 1
 
@@ -1212,7 +1291,8 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"  ▲ Net: `+{_fv(net)}` ✅\n"
         f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
         f"📌 Funding: {funding_label}\n"
-        f"🎯 {score_label}\n"
+        + (f"📊 Derivatives: {oi_label}\n" if oi_label else "")
+        + f"🎯 {score_label}\n"
         f"{_tp_sl_block}"
         f"{ex_icon} Exchange: `{exchange}`\n"
         f"🕐 {_ts()} UTC\n"
@@ -2370,8 +2450,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     # ── Funding Rate (API call — only for candidates that pass klines) ───
     if exchange == "Binance":
         funding_rate, funding_label = fetch_binance_funding_rate(sym)
+        _oi = fetch_oi_ls(sym)
     else:
         funding_rate, funding_label = fetch_mexc_funding_rate(sym)
+        _oi = None
     funding_bullish = funding_rate is not None and funding_rate > 0.03
 
     if funding_bullish:
@@ -2963,6 +3045,27 @@ def _check(sym, ticker, interval, sector_boost=False):
     if _fractal_score < 7.0 and score < 9.0:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
+    # ── Open Interest Gate ────────────────────────────────────────────────
+    # OI contracting during a price move = short covering, not real breakout.
+    # Real breakouts attract NEW money (OI expands). Corrective bounces just
+    # close existing shorts (OI flat/contracts). Only moonshots/vol_exp bypass.
+    if (_oi and _oi["contracting"] and not is_moonshot and not volume_explosion
+            and score < 9.0):
+        _rej(f"oi_contracting({_oi['oi_delta_1h']:.1f}%)"); return
+
+    # L/S crowded longs = too many retail longs piled in = liquidation cascade risk.
+    # Data: L/S > 1.8 historically precedes sudden -8 to -15% reversals on Binance.
+    if (_oi and _oi["long_crowded"] and not is_moonshot and score < 9.0):
+        _rej(f"ls_crowded_longs({_oi['ls_ratio']:.2f})"); return
+
+    # OI score boost: expanding OI = institutional confirmation of the move.
+    # Short squeeze setup = strongest configuration → extra boost.
+    if _oi:
+        if _oi["short_squeeze"]:
+            score = min(10.0, round(score + 0.7, 1))
+        elif _oi["expanding"]:
+            score = min(10.0, round(score + 0.3, 1))
+
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
@@ -2974,7 +3077,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                        interval=interval,
                        is_flash=is_flash,
                        is_alpha=(ticker.get("futures_only", False) or ticker.get("binance_alpha", False)),
-                       fractal_score=_fractal_score)
+                       fractal_score=_fractal_score,
+                       oi_label=(_oi["label"] if _oi and _oi.get("label") else ""))
     ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "main",
                                     score, ob_spot, ratio, pos24, spike, net, move, funding_label)
     if ai_blocked:
