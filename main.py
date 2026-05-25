@@ -2944,21 +2944,23 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
-    # Volume Explosion Hard Fractal Floor
-    # volume_explosion bypasses quality_fail — but FS < 5.0 is a hard stop with NO score exception.
-    # FS < 5.0 means H + FCF + MTF all failed simultaneously = no structural basis for a move.
-    # Data: POLYX (FS=3.0, vol_exp, score=5.5) — all fractal dims red despite volume spike.
-    # Unlike the general gate below, score ≥ 8.5 does NOT save a vol_exp signal with FS < 5.0.
+    # Volume Explosion Hard Fractal Floor — kept for explicit label
     if volume_explosion and not is_moonshot and _fractal_score < 5.0:
         _rej(f"vol_exp_weak_fractal(fs={_fractal_score})"); return
 
-    # Fractal Quality Gate — Hard Floor, No Score Exception
-    # FS ≥ 7.0 requires: H ≥ 0.55 (persistent market) + FCF ≥ 0.75 (sound structure)
-    # + MTF at least neutral. These ARE the "شروط الصعود" — without them, no signal.
-    # Removed: score ≥ 8.5 exception. High volume/flow cannot compensate for broken
-    # fractal structure. Every documented failure (B2, POLYX, DYM) had FS < 7.0 +
-    # high apparent score — proving flow alone is insufficient.
-    if _fractal_score < 7.0:
+    # Fractal Quality Gate — Two-Tier
+    #
+    # Tier 1 — Hard Floor (FS < 5.0): ALL dimensions red simultaneously.
+    # No exception, no score override. Data: B2 (FS=3.0, SL), POLYX (FS=3.0, SL).
+    # FS=3.0 = FCF weak + H random + MTF neutral — zero structural basis.
+    if _fractal_score < 5.0:
+        _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
+
+    # Tier 2 — Moderate Gate (FS 5.0-6.9): decent structure but not fully green.
+    # Requires score ≥ 9.0 to pass — only exceptional flow (whale-grade) compensates.
+    # FS 5.0-6.9 = H ≥ 0.55 (trending) + FCF ≥ 0.75 (some structure) — real pumps exist here.
+    # Raising from 8.5 to 9.0: prevents DIS-like setups (score=8.5-8.9 + moderate FS).
+    if _fractal_score < 7.0 and score < 9.0:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
