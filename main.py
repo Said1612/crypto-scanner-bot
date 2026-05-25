@@ -2939,6 +2939,14 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
+    # Volume Explosion Hard Fractal Floor
+    # volume_explosion bypasses quality_fail — but FS < 5.0 is a hard stop with NO score exception.
+    # FS < 5.0 means H + FCF + MTF all failed simultaneously = no structural basis for a move.
+    # Data: POLYX (FS=3.0, vol_exp, score=5.5) — all fractal dims red despite volume spike.
+    # Unlike the general gate below, score ≥ 8.5 does NOT save a vol_exp signal with FS < 5.0.
+    if volume_explosion and not is_moonshot and _fractal_score < 5.0:
+        _rej(f"vol_exp_weak_fractal(fs={_fractal_score})"); return
+
     # Fractal Quality Gate
     # FS < 7.0 = at least one fractal dimension is weak (H, FCF, or MTF not fully green).
     # Raised 6.0→7.0: pushing toward signals where most fractal indicators are green.
