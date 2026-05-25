@@ -2884,10 +2884,11 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Anti-Persistent Gate: H < 0.53 = random/anti-persistent market, no trending edge
     # Data: PROM H=0.473 hit SL in 6 minutes, NAORIS H=0.453 in 76 minutes
-    # Raised: H < 0.53 (was 0.50) — blocks full random zone (0.48-0.53), score < 8.0 (was 7.5)
-    # Only truly strong setups (score ≥ 8.0) can pass in random market conditions.
+    # Raised: score exception 8.0→9.0 — H < 0.53 is structural randomness; only score=9.0+
+    # (near-impossible in practice) can override. Closes loophole where score=8.5 bypassed
+    # structural market randomness.
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.53 and score < 8.0):
+            and _cq_result["H"] < 0.53 and score < 9.0):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
     # Moonshot Anti-Persistent Gate
@@ -2947,11 +2948,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     if volume_explosion and not is_moonshot and _fractal_score < 5.0:
         _rej(f"vol_exp_weak_fractal(fs={_fractal_score})"); return
 
-    # Fractal Quality Gate
-    # FS < 7.0 = at least one fractal dimension is weak (H, FCF, or MTF not fully green).
-    # Raised 6.0→7.0: pushing toward signals where most fractal indicators are green.
-    # Exception: Score ≥ 8.5 (exceptional flow like MYX pos=9%/score=9.0 can compensate).
-    if _fractal_score < 7.0 and score < 8.5:
+    # Fractal Quality Gate — Hard Floor, No Score Exception
+    # FS ≥ 7.0 requires: H ≥ 0.55 (persistent market) + FCF ≥ 0.75 (sound structure)
+    # + MTF at least neutral. These ARE the "شروط الصعود" — without them, no signal.
+    # Removed: score ≥ 8.5 exception. High volume/flow cannot compensate for broken
+    # fractal structure. Every documented failure (B2, POLYX, DYM) had FS < 7.0 +
+    # high apparent score — proving flow alone is insufficient.
+    if _fractal_score < 7.0:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
