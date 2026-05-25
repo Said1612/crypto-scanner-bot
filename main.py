@@ -2884,11 +2884,11 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Anti-Persistent Gate: H < 0.53 = random/anti-persistent market, no trending edge
     # Data: PROM H=0.473 hit SL in 6 minutes, NAORIS H=0.453 in 76 minutes
-    # Raised: score exception 8.0→9.0 — H < 0.53 is structural randomness; only score=9.0+
-    # (near-impossible in practice) can override. Closes loophole where score=8.5 bypassed
-    # structural market randomness.
+    # Raised: score exception 8.0→9.5 — H < 0.53 is structural randomness; score=9.0 is still
+    # not enough (DIS: H=0.513 + score=9.0 → resistance at +0.2% + Noah Effect = risky).
+    # score < 9.0 (was 8.0) did not close the gap — score=9.0 is "not < 9.0" so gate skipped.
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.53 and score < 9.0):
+            and _cq_result["H"] < 0.53 and score < 9.5):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
     # Moonshot Anti-Persistent Gate
@@ -2931,11 +2931,15 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Fractal Resistance Gate
     # Price AT or VERY NEAR fractal resistance = high rejection probability.
-    # Data: STABLE (resistance +0.4% → SL ❌), AIO (resistance +0.0%, 3rd send → SL ❌)
-    # Exception: score ≥ 8.5 — exceptional setup (breakout momentum) can punch through.
+    # Data: STABLE (+0.4%→SL ❌), AIO (+0.0%→SL ❌), DIS (+0.2%, score=9.0, Noah 60% wicks ❌)
+    # < 0.5%: hard block — price is essentially AT resistance, no score exception.
+    #          score=9.0 + 8x volume (DIS) still failed → close resistance always loses.
+    # 0.5-1.0%: only score ≥ 9.5 can override (genuine breakout momentum from extreme flow).
     if (_fra and _fra.get("resistance") and _fra["resistance"] > price):
         _res_dist_pct = (_fra["resistance"] - price) / price * 100
-        if _res_dist_pct < 1.0 and score < 8.5:
+        if _res_dist_pct < 0.5:
+            _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
+        if _res_dist_pct < 1.0 and score < 9.5:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
