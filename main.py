@@ -6,7 +6,7 @@ Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
 
-import os, time, json, logging, base64
+import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Optional
 import requests
@@ -264,6 +264,25 @@ def _register_primary():
             f.write(str(_MY_PID))
     except Exception:
         pass
+
+def _invalidate_primary():
+    """Write 0 to PID file — immediately stops all in-flight sends from this process.
+    Called on SIGTERM so that scans in progress cannot leak signals during shutdown.
+    """
+    try:
+        with open(_PID_FILE, "w") as f:
+            f.write("0")
+    except Exception:
+        pass
+
+def _handle_sigterm(sig, frame):
+    """SIGTERM handler: invalidate PID immediately, then exit cleanly.
+    Closes the window where a scan in progress could send a signal AFTER
+    systemctl restart downloads new code but BEFORE the new process writes its PID.
+    """
+    log.info("SIGTERM received — invalidating PID, shutting down cleanly")
+    _invalidate_primary()
+    sys.exit(0)
 
 def _is_primary_process() -> bool:
     """Return True only if this process is still the active (newest) bot instance.
@@ -4719,6 +4738,7 @@ def _mark_report_sent(key: str, report_type: str):
 
 def main():
     global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_report, last_report_date, last_weekly_date, last_monthly_date
+    _signal.signal(_signal.SIGTERM, _handle_sigterm)  # invalidate PID on shutdown
     _register_primary()   # claim PID lock — old process will detect mismatch and stop sending
     log.info("🎯 MAFIO SNIPER — starting (PID %d)", _MY_PID)
     clear_bot_commands()
