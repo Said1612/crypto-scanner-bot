@@ -3039,10 +3039,11 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     # Tier 2 — Moderate Gate (FS 5.0-6.9): decent structure but not fully green.
-    # Requires score ≥ 9.0 to pass — only exceptional flow (whale-grade) compensates.
+    # Requires score ≥ 9.5 to pass — only exceptional flow (whale-grade) compensates.
     # FS 5.0-6.9 = H ≥ 0.55 (trending) + FCF ≥ 0.75 (some structure) — real pumps exist here.
-    # Raising from 8.5 to 9.0: prevents DIS-like setups (score=8.5-8.9 + moderate FS).
-    if _fractal_score < 7.0 and score < 9.0:
+    # Raised 9.0→9.5: score=9.0 boundary bug (9.0 < 9.0 = False) allowed RVN through.
+    # Data: RVN (FS=6.0, score=9.0, H=0.50, pos=70%, late entry → risky).
+    if _fractal_score < 7.0 and score < 9.5:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     # ── Open Interest Gate ────────────────────────────────────────────────
