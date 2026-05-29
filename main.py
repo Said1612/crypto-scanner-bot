@@ -49,7 +49,7 @@ except Exception as _cq_err:
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7696119722:AAHtxydYz5qg4SmyF38M0X6agntIYSuOjXY")
 CHAT_ID        = os.getenv("CHAT_ID") or ""
-GROUP_ID       = os.getenv("GROUP_ID") or "-1003951885039"
+GROUP_ID       = os.getenv("GROUP_ID") or "-1003992515031"
 REDIS_URL      = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
 REDIS_TOKEN    = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY      = "mafio_v31"
