@@ -3102,7 +3102,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     # not enough (DIS: H=0.513 + score=9.0 → resistance at +0.2% + Noah Effect = risky).
     # score < 9.0 (was 8.0) did not close the gap — score=9.0 is "not < 9.0" so gate skipped.
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.53 and score < 9.5):
+            and _cq_result["H"] < 0.53 and score < 9.5
+            and not _is_explosive):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
     # Moonshot Anti-Persistent Gate
@@ -3151,9 +3152,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     # 0.5-1.0%: only score ≥ 9.5 can override (genuine breakout momentum from extreme flow).
     if (_fra and _fra.get("resistance") and _fra["resistance"] > price):
         _res_dist_pct = (_fra["resistance"] - price) / price * 100
-        if _res_dist_pct < 0.5:
+        if _res_dist_pct < 0.5 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
-        if _res_dist_pct < 1.0 and score < 9.5:
+        if _res_dist_pct < 1.0 and score < 9.5 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
@@ -3162,20 +3163,20 @@ def _check(sym, ticker, interval, sector_boost=False):
     if volume_explosion and not is_moonshot and _fractal_score < 5.0:
         _rej(f"vol_exp_weak_fractal(fs={_fractal_score})"); return
 
+    # Explosive spike bypass — 30x+ vol = real institutional move regardless of fractal
+    # Data: ALLO +178%, HEI +132%, ID +55% all had massive vol at entry.
+    # Hard floor (FS<5.0) is NEVER bypassed — it protects against corrupted/manipulated data.
+    _is_explosive = (spike >= 30.0)
+
     # Fractal Quality Gate — Two-Tier
     #
-    # Tier 1 — Hard Floor (FS < 5.0): ALL dimensions red simultaneously.
-    # No exception, no score override. Data: B2 (FS=3.0, SL), POLYX (FS=3.0, SL).
-    # FS=3.0 = FCF weak + H random + MTF neutral — zero structural basis.
+    # Tier 1 — Hard Floor (FS < 5.0): always blocks. No bypass.
     if _fractal_score < 5.0:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
-    # Tier 2 — Moderate Gate (FS 5.0-6.9): decent structure but not fully green.
-    # Requires score ≥ 9.5 to pass — only exceptional flow (whale-grade) compensates.
-    # FS 5.0-6.9 = H ≥ 0.55 (trending) + FCF ≥ 0.75 (some structure) — real pumps exist here.
-    # Raised 9.0→9.5: score=9.0 boundary bug (9.0 < 9.0 = False) allowed RVN through.
-    # Data: RVN (FS=6.0, score=9.0, H=0.50, pos=70%, late entry → risky).
-    if _fractal_score < 7.0 and score < 9.5:
+    # Tier 2 — Moderate Gate (FS 5.0-6.9): requires score ≥ 9.0 OR explosive spike.
+    # 30x+ vol bypasses: a coin with 30x spike and FS=6 is a real move.
+    if _fractal_score < 7.0 and score < 9.0 and not _is_explosive:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     # ── Open Interest Gate ────────────────────────────────────────────────
@@ -4196,7 +4197,7 @@ def scan_sleeping_giant(all_t):
     now = time.time()
     candidates = [
         (sym, t) for sym, t in all_t.items()
-        if -5.0 <= t["change"] <= 8.0          # flat to slightly bullish — not already pumping
+        if -5.0 <= t["change"] <= 15.0         # extended to +15%: catches early-stage explosions
         and t["vol"] >= 100_000                 # minimum real liquidity ($100K/day)
         and sym not in tracking
         and now - _signal_dedup.get(sym, 0) >= 7200
@@ -4225,8 +4226,8 @@ def scan_sleeping_giant(all_t):
             # Primary spike threshold — lower for Binance Large/Mid (vol >= $10M)
             # Large caps accumulate with 10-15x spike (DOGS: $61M/day, 10x = $610K extra)
             # Small/Micro caps need 20x to filter noise (tiny baseline makes 5x meaningless)
-            _sg_spike_min = 10.0 if ticker.get("exchange") == "Binance" and ticker["vol"] >= 10_000_000 else 20.0
-            if last_ratio < _sg_spike_min or prev_ratio < 1.5:
+            _sg_spike_min = 10.0 if ticker.get("exchange") == "Binance" and ticker["vol"] >= 10_000_000 else 12.0
+            if last_ratio < _sg_spike_min or prev_ratio < 1.2:
                 continue
 
             # Price move in last candle: started (≥ 0.05%) but not done (≤ 6%)
