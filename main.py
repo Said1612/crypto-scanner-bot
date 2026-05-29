@@ -472,7 +472,8 @@ def _save_signal_db():
         except Exception: pass
 
 def _db_add(sym, price, exchange, tier_name, scanner,
-            ratio, ob_spot, score, pos24, spike, net, move, funding):
+            ratio, ob_spot, score, pos24, spike, net, move, funding,
+            fractal_score=None, h_value=None, oi_delta=None):
     """Record a new signal with all parameters for future ML training."""
     _signal_db.append({
         "id":           f"{sym}_{int(time.time())}",
@@ -494,6 +495,10 @@ def _db_add(sym, price, exchange, tier_name, scanner,
         "net_usd":      round(net, 0),
         "move_pct":     round(move, 2),
         "funding":      funding,
+        # Fractal + OI features for k-NN pattern matching (v3 AI)
+        "fractal_score": fractal_score,
+        "h_value":       round(h_value, 4) if h_value is not None else None,
+        "oi_delta":      round(oi_delta, 2) if oi_delta is not None else None,
         # Outcome (filled when signal closes)
         "outcome":      "active",       # active → success / stoploss / timeout / expired
         "max_gain_pct": 0.0,
@@ -1017,7 +1022,8 @@ def send(text, reply_markup=None):
     return ok
 
 def _ai_assess(sym, exchange, tier, scanner, score,
-               ob_spot, ratio, pos24, spike, net_usd, move_pct, funding) -> tuple:
+               ob_spot, ratio, pos24, spike, net_usd, move_pct, funding,
+               fractal_score=None, h_value=None, oi_delta=None) -> tuple:
     """Return (ai_text, blocked). blocked=True only when AI<40% + sellers dominate OB."""
     if _ai_agent is None:
         return "", False
@@ -1028,16 +1034,26 @@ def _ai_assess(sym, exchange, tier, scanner, score,
             "ratio": ratio, "pos24": pos24, "spike": spike,
             "net_usd": net_usd, "move_pct": move_pct, "funding": funding,
         }
+        if fractal_score is not None:
+            sig["fractal_score"] = fractal_score
+        if h_value is not None:
+            sig["h_value"] = h_value
+        if oi_delta is not None:
+            sig["oi_delta"] = oi_delta
         r = _ai_agent.predict(sig)
-        prob    = r.get("prob", 0)
-        verdict = r.get("verdict", "")
-        emoji   = r.get("emoji", "⚪")
-        warns   = r.get("warnings", [])
-        model   = r.get("model", exchange)
+        prob        = r.get("prob", 0)
+        verdict     = r.get("verdict", "")
+        emoji       = r.get("emoji", "⚪")
+        warns       = r.get("warnings", [])
+        model       = r.get("model", exchange)
+        brain_str   = r.get("brain_str", "")
+        similar_str = r.get("similar_str", "")
         warn_str    = f"\n   ⚠️ _{warns[0]}_" if warns else ""
         reasoning   = _build_reasoning(ratio, ob_spot, pos24, spike, net_usd, move_pct, funding, prob, score)
         reason_str  = f"\n   {reasoning}" if reasoning else ""
-        text = f"\n🤖 *AI [{model}]:* {emoji} `{prob}%` · {verdict}{warn_str}{reason_str}\n{'━'*20}"
+        brain_line  = f"\n   💡 _{brain_str}_" if brain_str else ""
+        similar_line = f"\n   🔍 Similar: _{similar_str}_" if similar_str else ""
+        text = f"\n🤖 *AI [{model}]:* {emoji} `{prob}%` · {verdict}{warn_str}{brain_line}{similar_line}{reason_str}\n{'━'*20}"
         # Block condition 1: AI below 35% is a clear avoid regardless of OB
         extreme_avoid = prob < 35
         # Block condition 2: moderate AI + sellers dominate OB (dump pattern)
@@ -3100,7 +3116,10 @@ def _check(sym, ticker, interval, sector_boost=False):
                        fractal_score=_fractal_score,
                        oi_label=(_oi["label"] if _oi and _oi.get("label") else ""))
     ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "main",
-                                    score, ob_spot, ratio, pos24, spike, net, move, funding_label)
+                                    score, ob_spot, ratio, pos24, spike, net, move, funding_label,
+                                    fractal_score=_fractal_score,
+                                    h_value=(_cq_result["H"] if _cq_result else None),
+                                    oi_delta=(_oi["oi_delta_1h"] if _oi else None))
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
@@ -3163,7 +3182,10 @@ def _check(sym, ticker, interval, sector_boost=False):
                      else "momentum" if momentum_bypass
                      else "main")
     _db_add(sym, price, exchange, tier["name"], _scanner_type,
-            ratio, ob_spot, score, pos24, spike, net, move, funding_label)
+            ratio, ob_spot, score, pos24, spike, net, move, funding_label,
+            fractal_score=_fractal_score,
+            h_value=(_cq_result["H"] if _cq_result else None),
+            oi_delta=(_oi["oi_delta_1h"] if _oi else None))
     # Record fractal snapshot for self-learning
     if _fractal_agent is not None and _fra and _fra.get("_features"):
         _fractal_agent.record_signal(sym, _fra["_features"])
