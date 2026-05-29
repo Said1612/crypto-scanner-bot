@@ -31,6 +31,14 @@ except Exception as _fra_err:
 try:
     import anthropic as _anthropic_sdk
     _ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    # Fallback: read from .anthropic_key file next to main.py
+    if not _ANTHROPIC_KEY:
+        _key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".anthropic_key")
+        try:
+            with open(_key_file) as _kf:
+                _ANTHROPIC_KEY = _kf.read().strip()
+        except FileNotFoundError:
+            pass
     _claude_client = _anthropic_sdk.Anthropic(api_key=_ANTHROPIC_KEY) if _ANTHROPIC_KEY else None
     if _claude_client:
         logging.getLogger(__name__).info("Claude API reviewer loaded ✅")
