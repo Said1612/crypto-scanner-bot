@@ -334,6 +334,14 @@ logging.basicConfig(level=logging.INFO,
                     stream=__import__("sys").stdout)
 log = logging.getLogger("mafio")
 
+# Log deferred startup statuses (modules loaded before logging was configured)
+if _claude_client:
+    log.info("Claude API reviewer loaded ✅")
+elif _ANTHROPIC_KEY == "":
+    log.warning("ANTHROPIC_API_KEY not set — Claude reviewer disabled")
+else:
+    log.warning("Claude client failed to initialize — check API key")
+
 # ══════════════════════════════════════════════════════
 #  CIRCUIT BREAKER
 # ══════════════════════════════════════════════════════
