@@ -27,6 +27,19 @@ except Exception as _fra_err:
     _fractal_agent = None
     logging.getLogger(__name__).warning("Fractal agent not loaded: %s", _fra_err)
 
+# Claude API reviewer — optional, reviews each signal before sending
+try:
+    import anthropic as _anthropic_sdk
+    _ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    _claude_client = _anthropic_sdk.Anthropic(api_key=_ANTHROPIC_KEY) if _ANTHROPIC_KEY else None
+    if _claude_client:
+        logging.getLogger(__name__).info("Claude API reviewer loaded ✅")
+    else:
+        logging.getLogger(__name__).warning("ANTHROPIC_API_KEY not set — Claude reviewer disabled")
+except Exception as _cl_err:
+    _claude_client = None
+    logging.getLogger(__name__).warning("Claude client not loaded: %s", _cl_err)
+
 # Fractal Validation Agent — multi-source confluence engine (Almazov 5-book synthesis)
 try:
     from fractal_validator import FractalValidationAgent as _FVACls
@@ -1083,6 +1096,74 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         return text, blocked
     except Exception:
         return "", False
+
+def claude_review(sym, score, spike, ratio, ob_spot, pos24, net_usd,
+                  fractal_score, h_value, oi_label, scanner, tier) -> dict:
+    """
+    Ask Claude API to review the signal before sending.
+    Returns {"verdict": "buy"|"avoid"|"neutral", "confidence": 0-100,
+             "reason": str, "text": formatted string, "block": bool}
+    Blocks only if verdict=avoid AND confidence >= 88.
+    """
+    if _claude_client is None:
+        return {"verdict": "neutral", "confidence": 0, "reason": "", "text": "", "block": False}
+    try:
+        fs_str  = f"{fractal_score}/10" if fractal_score is not None else "N/A"
+        h_str   = f"{h_value:.3f}" if h_value is not None else "N/A"
+        oi_str  = oi_label if oi_label else "N/A"
+        prompt  = (
+            f"You are an expert crypto futures signal reviewer.\n"
+            f"Analyze this Binance signal and respond with JSON only — no extra text.\n\n"
+            f"Signal: {sym.replace('USDT','')} | Scanner: {scanner} | Tier: {tier}\n"
+            f"Score: {score}/10 | Spike: {spike:.1f}x | Buy/Sell ratio: {ratio:.1f}x\n"
+            f"Order book bids: {int(ob_spot*100)}% | Position in 24h range: {int(pos24*100)}%\n"
+            f"Net buy flow: ${net_usd:,.0f} | Fractal quality: {fs_str} | Hurst H={h_str}\n"
+            f"OI/Derivatives: {oi_str}\n\n"
+            f"Rules:\n"
+            f"- Score >= 9.0 + spike >= 5x + ob >= 65% = strong buy\n"
+            f"- pos24 > 70% = late entry risk (exhaustion)\n"
+            f"- H < 0.53 = random market (no trend)\n"
+            f"- Fractal < 6 = weak structure\n\n"
+            f'Respond ONLY with this JSON: {{"verdict":"buy"|"avoid"|"neutral",'
+            f'"confidence":0-100,"reason":"max 12 words"}}'
+        )
+        resp = _claude_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=60,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        # Parse JSON safely
+        import re as _re
+        m = _re.search(r'\{[^}]+\}', raw)
+        data = json.loads(m.group()) if m else {}
+        verdict    = data.get("verdict", "neutral")
+        confidence = int(data.get("confidence", 50))
+        reason     = data.get("reason", "")
+
+        if verdict == "buy":
+            v_emoji = "🟢"
+        elif verdict == "avoid":
+            v_emoji = "🔴"
+        else:
+            v_emoji = "🟡"
+
+        text = (f"\n🧠 *Claude AI:* {v_emoji} `{confidence}%` · {verdict.upper()}"
+                + (f"\n   _{reason}_" if reason else "")
+                + f"\n{'━'*20}")
+
+        # Block only on high-confidence avoid
+        block = (verdict == "avoid" and confidence >= 88)
+        if block:
+            log.info("CLAUDE_BLOCK %s verdict=%s conf=%d reason=%s", sym, verdict, confidence, reason)
+
+        return {"verdict": verdict, "confidence": confidence,
+                "reason": reason, "text": text, "block": block}
+
+    except Exception as e:
+        log.debug("claude_review error %s: %s", sym, e)
+        return {"verdict": "neutral", "confidence": 0, "reason": "", "text": "", "block": False}
+
 
 def _notify_once(key: str, ttl: int = 300) -> bool:
     """Cross-process dedup via /tmp lock file. Returns True = allowed to send.
@@ -3123,6 +3204,19 @@ def _check(sym, ticker, interval, sector_boost=False):
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
+
+    # ── Claude API Review ─────────────────────────────────────────────────
+    _cl = claude_review(
+        sym, score, spike, ratio, ob_spot, pos24, net,
+        fractal_score=_fractal_score,
+        h_value=(_cq_result["H"] if _cq_result else None),
+        oi_label=(_oi["label"] if _oi and _oi.get("label") else ""),
+        scanner=("moonshot" if is_moonshot else "volume_explosion" if volume_explosion else "momentum" if momentum_bypass else "main"),
+        tier=tier["name"],
+    )
+    if _cl["block"]:
+        _rej(f"claude_avoid({_cl['confidence']}%)"); return
+    msg += _cl["text"]
 
     # Append fractal lines to signal — each tag on its own indented line
     if _fra and _fra["detail"]:
