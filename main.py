@@ -2646,10 +2646,12 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("low_spike"); return
 
     # Spike candle must close in upper half — rejects pump-dump wicks
+    # Sleeping giant: use candles[-2] (the actual spike candle, already completed)
+    # because by the time _check() runs, [-1] is the next candle (just started = misleading)
+    _wick_candle = candles[-2] if (interval == "1m_sg" and len(candles) >= 2) else candles[-1]
     try:
-        sc = candles[-1]
-        sc_rng = float(sc[2]) - float(sc[3])
-        sc_close_pct = (float(sc[4]) - float(sc[3])) / sc_rng if sc_rng > 0 else 0.5
+        sc_rng = float(_wick_candle[2]) - float(_wick_candle[3])
+        sc_close_pct = (float(_wick_candle[4]) - float(_wick_candle[3])) / sc_rng if sc_rng > 0 else 0.5
     except Exception:
         sc_close_pct = 0.5
     if sc_close_pct < 0.50:
@@ -2675,9 +2677,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     pos24 = (price - ticker["low24"]) / rng24 if rng24 > 0 else 0.5
     ob_quick = fetch_ob_imbalance(sym, base_url, levels=5)
     # Only block when: extreme spike + price already near top of range + sellers dominating
-    # pos24>0.55 (not 0.35) — real explosions often start at 30-50% of range
+    # Sleeping giant: require stronger seller dominance (ob<0.40) — temporary post-spike
+    # selling is normal and shouldn't block a 50x+ move
+    _pd_ob_thr = 0.40 if interval == "1m_sg" else 0.50
     is_pump_dump = (
-        spike > 20.0 and pos24 > 0.55 and ob_quick < 0.50
+        spike > 20.0 and pos24 > 0.55 and ob_quick < _pd_ob_thr
     )
     if is_pump_dump:
         _rej("pump_dump"); return
