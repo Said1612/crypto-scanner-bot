@@ -79,7 +79,7 @@ PROXY_URL      = os.getenv("PROXY_URL", "")   # e.g. http://user:pass@host:port
 FAST_SCAN_S      = 5     # every 5s — confirmed working: catches REPAI/NEOS/BLINKY type explosions
 SLOW_SCAN_S      = 300   # every 5min (1h klines)
 SUPER_SCAN_S     = 900   # every 15min — SUPERTREND(10,3) flip scanner (BIO/ORDI/币安人生 type)
-SLEEP_GIANT_S    = 60    # every 60s — sleeping giant: flat coin sudden 1m volume explosion
+SLEEP_GIANT_S    = 30    # every 30s — sleeping giant: flat coin sudden 1m volume explosion
 COOLDOWN         = 7200  # 2h per coin
 FAST_TICKER_MOVE = 0.3   # 5s price delta trigger — lowered 0.5→0.3 to catch gradual pumps (TRU/CTSI/DUSK)
 
@@ -91,9 +91,9 @@ FAST_TICKER_MOVE = 0.3   # 5s price delta trigger — lowered 0.5→0.3 to catch
 # Large cap  > $80M : hardest to move
 TIERS = [
     # Micro: tiny liquidity — high ratio required (VINE 2.2x failed; 3.0 base → ~2.64 neutral)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 3.5, "ratio": 3.0, "net": 5_000},
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 2.5, "net": 5_000},
     # Small: medium liquidity
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.8, "ratio": 2.5, "net": 15_000},
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.2, "ratio": 2.0, "net": 15_000},
     # Mid: good liquidity
     {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.5, "ratio": 2.5, "net": 60_000},
     # Large: deep liquidity
@@ -4233,7 +4233,7 @@ def scan_sleeping_giant(all_t):
             # Primary spike threshold — lower for Binance Large/Mid (vol >= $10M)
             # Large caps accumulate with 10-15x spike (DOGS: $61M/day, 10x = $610K extra)
             # Small/Micro caps need 20x to filter noise (tiny baseline makes 5x meaningless)
-            _sg_spike_min = 10.0 if ticker.get("exchange") == "Binance" and ticker["vol"] >= 10_000_000 else 12.0
+            _sg_spike_min = 8.0 if ticker.get("exchange") == "Binance" and ticker["vol"] >= 10_000_000 else 10.0
             if last_ratio < _sg_spike_min or prev_ratio < 1.2:
                 continue
 
