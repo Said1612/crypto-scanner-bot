@@ -1086,19 +1086,13 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         brain_line  = f"\n   💡 _{brain_str}_" if brain_str else ""
         similar_line = f"\n   🔍 Similar: _{similar_str}_" if similar_str else ""
         text = f"\n🤖 *AI [{model}]:* {emoji} `{prob}%` · {verdict}{warn_str}{brain_line}{similar_line}{reason_str}\n{'━'*20}"
-        # Block condition 1: AI below 35% is a clear avoid regardless of OB
+        # Block condition 1: AI clearly says avoid (< 35%) — extreme case only
         extreme_avoid = prob < 35
-        # Block condition 2: moderate AI + sellers dominate OB (dump pattern)
-        dump_pattern  = (prob < 50 and ob_spot < 0.45)
-        # Block condition 3: cautious AI + weak score + truly weak spike = high SL risk (SWARMS-type)
-        weak_combined = (prob < 75 and score < 7.5 and spike < 3.0)
-        # Block condition 4: AI cautious + low score regardless of volume (JTO-type)
-        # Exception: explosive spike (≥5x) = institutional momentum overrides AI caution
-        ai_caution = (prob < 65 and score < 7.0 and spike < 5.0)
-        # Block condition 5: AI "Avoid" (< 60%) regardless of score (DIA-type)
-        # Exception: explosive spike (≥5x) = real breakout — AI model can't anticipate these
-        ai_avoid = (prob < 60 and spike < 5.0)
-        blocked = extreme_avoid or dump_pattern or weak_combined or ai_caution or ai_avoid
+        # Block condition 2: clear dump pattern — sellers dominate + AI bearish
+        dump_pattern  = (prob < 45 and ob_spot < 0.40)
+        # Block condition 3: weak on ALL dimensions simultaneously (very rare)
+        weak_combined = (prob < 50 and score < 6.0 and spike < 2.0)
+        blocked = extreme_avoid or dump_pattern or weak_combined
         if blocked:
             if extreme_avoid:
                 reason = "AI<35%% avoid"
@@ -1172,7 +1166,7 @@ def claude_review(sym, score, spike, ratio, ob_spot, pos24, net_usd,
                 + f"\n{'━'*20}")
 
         # Block only on high-confidence avoid
-        block = (verdict == "avoid" and confidence >= 88)
+        block = (verdict == "avoid" and confidence >= 93)
         if block:
             log.info("CLAUDE_BLOCK %s verdict=%s conf=%d reason=%s", sym, verdict, confidence, reason)
 
@@ -3109,7 +3103,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # not enough (DIS: H=0.513 + score=9.0 → resistance at +0.2% + Noah Effect = risky).
     # score < 9.0 (was 8.0) did not close the gap — score=9.0 is "not < 9.0" so gate skipped.
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.53 and score < 9.5
+            and _cq_result["H"] < 0.49 and score < 8.5
             and not _is_explosive):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
@@ -3159,9 +3153,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     # 0.5-1.0%: only score ≥ 9.5 can override (genuine breakout momentum from extreme flow).
     if (_fra and _fra.get("resistance") and _fra["resistance"] > price):
         _res_dist_pct = (_fra["resistance"] - price) / price * 100
-        if _res_dist_pct < 0.5 and not _is_explosive:
+        if _res_dist_pct < 0.3 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
-        if _res_dist_pct < 1.0 and score < 9.5 and not _is_explosive:
+        if _res_dist_pct < 0.5 and score < 8.0 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
@@ -3181,9 +3175,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     if _fractal_score < 5.0:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
-    # Tier 2 — Moderate Gate (FS 5.0-6.9): requires score ≥ 9.0 OR explosive spike.
+    # Tier 2 — Moderate Gate (FS 5.0-6.9): requires score ≥ 7.5 OR explosive spike.
     # 30x+ vol bypasses: a coin with 30x spike and FS=6 is a real move.
-    if _fractal_score < 7.0 and score < 9.0 and not _is_explosive:
+    if _fractal_score < 7.0 and score < 7.5 and not _is_explosive:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     # ── Open Interest Gate ────────────────────────────────────────────────
