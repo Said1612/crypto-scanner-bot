@@ -2647,7 +2647,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                                             minutes=60 if interval in ("60m", "1h") else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
     super_ratio = _pre_ratio >= 20.0
-    effective_spike_min = 1.5 if super_ratio else spike_min
+    # momentum_bypass (trend_follow): accept 1.3x spike — sustained trend, not explosive
+    effective_spike_min = 1.3 if momentum_bypass else (1.5 if super_ratio else spike_min)
     if spike < effective_spike_min:
         _rej("low_spike"); return
 
@@ -2770,7 +2771,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Momentum Bypass: DISABLED — data shows 8% win rate (1 win / 8 SL across 23 signals)
     # ratio alone is insufficient confirmation; high ratio in downtrend = distribution trap
     _ratio_bypass   = 5.0 if exchange == "MEXC" else 8.0
-    momentum_bypass = False
+    # momentum_signal: set by scan_trend_follow — gradual uptrend, relaxed spike/ratio/net
+    momentum_bypass = ticker.get("momentum_signal", False)
 
     # Volume Explosion: 10x+ spike + REAL net (> abs_floor already passed) = extraordinary event
     # net > 0 replaced by net > _abs_net_floor (already enforced above — but redundant safety)
@@ -4769,22 +4771,30 @@ def _ema(values: list, period: int) -> float:
 
 def scan_trend_follow(all_t):
     """
-    Catches coins in sustained multi-day uptrends (ZEC-type slow grind).
-    Criteria: price > EMA10d + 7d gain 15-50% + volume increasing in USD.
-    Runs every 30 min. 12h cooldown per coin. Max 3 signals per run.
+    Catches coins in sustained multi-day uptrends (STG/ZEC-type slow grind).
+    Uses momentum_signal flag to relax spike/ratio/net in _check() — gradual
+    movers don't have explosive volume but have consistent positive flow.
+
+    Conditions:
+      - Binance, vol >= $1M, daily change 0.5-40%
+      - price > EMA10 * 1.01 (trending up)
+      - 7d gain 8-60% (was 15-50% — catches early trend like STG)
+      - volume not fading (3d avg >= 85% of 7d avg)
+      - pos24 < 82% (not extremely extended intraday)
+      - Top 5 by quality per run, 12h cooldown
     """
     now = time.time()
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t["exchange"] == "Binance"
-        and t["vol"] >= 3_000_000
-        and 1.5 <= t["change"] <= 35.0      # moving today but not overextended
+        and t["vol"] >= 1_000_000
+        and 0.5 <= t["change"] <= 40.0
         and now - _trend_dedup.get(sym, 0) >= 43200
         and now - alerted.get(sym, 0) >= COOLDOWN
         and sym not in tracking
+        and sym not in BLACKLIST
     ]
 
-    # Pre-score candidates to pick the best 3 per run
     scored = []
     for sym, t in candidates:
         try:
@@ -4792,65 +4802,53 @@ def scan_trend_follow(all_t):
             if len(klines) < 10:
                 continue
 
-            closes  = [c for c, v in klines]
-            price   = closes[-1]
-
-            # Volume in USD = coins × close price (klines return base asset vol)
+            closes   = [c for c, v in klines]
+            price    = closes[-1]
             vols_usd = [v * c for c, v in klines]
+            ema10    = _ema(closes[:-1], 10)
 
-            ema10   = _ema(closes[:-1], 10)
-
-            # EMA filter: price must be 3%+ above EMA (tighter than before)
-            if price <= ema10 * 1.03:
+            if price <= ema10 * 1.01:
                 continue
 
-            # 7d gain: 15-50% (more = already extended, less = not trending)
             gain_7d = (price - closes[-8]) / closes[-8] * 100 if closes[-8] > 0 else 0
-            if not (15.0 <= gain_7d <= 50.0):
+            if not (8.0 <= gain_7d <= 60.0):
                 continue
 
-            # Volume trend (USD): 3d avg must be >= 7d avg (not fading)
             vol_3d_usd = sum(vols_usd[-4:-1]) / 3 if len(vols_usd) >= 4 else 0
             vol_7d_usd = sum(vols_usd[-8:-1]) / 7 if len(vols_usd) >= 8 else 0
-            if vol_3d_usd < vol_7d_usd * 0.90:
+            if vol_3d_usd < vol_7d_usd * 0.85:
                 continue
 
-            # Position check: not at extreme of 24h range
-            rng  = t["high24"] - t["low24"]
+            rng   = t["high24"] - t["low24"]
             pos24 = (price - t["low24"]) / rng * 100 if rng > 0 else 50
-            if pos24 > 78:   # too extended intraday
+            if pos24 > 82:
                 continue
 
-            # Quality score: higher 7d gain + volume growth = better
             vol_growth = vol_3d_usd / max(vol_7d_usd, 1)
-            quality = gain_7d * vol_growth
-            scored.append((sym, t, closes, vols_usd, ema10, gain_7d,
-                           vol_3d_usd, vol_7d_usd, pos24, quality))
+            quality    = gain_7d * vol_growth
+            scored.append((sym, t, ema10, gain_7d, vol_3d_usd, pos24, quality))
 
         except Exception as e:
             log.debug("trend_follow_score %s: %s", sym, e)
 
-    # Take top 3 by quality score — pass each through standard _check() pipeline
     scored.sort(key=lambda x: -x[-1])
-    top3 = scored[:3]
 
     fired = 0
-    for sym, t, closes, vols_usd, ema10, gain_7d, vol_3d_usd, vol_7d_usd, pos24, _ in top3:
+    for sym, t, ema10, gain_7d, vol_3d_usd, pos24, _ in scored[:5]:
         try:
-            # Mark as checked so we don't re-query klines for 12h regardless of _check() result
             _trend_dedup[sym] = now
-            log.info("TREND_FOLLOW candidate %s gain7d=+%.1f%% ema10=%s vol3d_usd=%s → sending to _check",
-                     sym, gain_7d, _fp(ema10), _fv(vol_3d_usd))
-            # Route through standard pipeline — same format + full quality gate
-            _check(sym, t, "4h")
+            log.info("TREND_FOLLOW %s gain7d=+%.1f%% ema10=%s vol3d=%s pos=%.0f%%",
+                     sym, gain_7d, _fp(ema10), _fv(vol_3d_usd), pos24)
+            # Pass momentum_signal=True → relaxes spike/ratio/net in _check()
+            t_copy = dict(t)
+            t_copy["momentum_signal"] = True
+            _check(sym, t_copy, "1h")
             fired += 1
             time.sleep(0.5)
-
         except Exception as e:
             log.debug("trend_follow_send %s: %s", sym, e)
 
-    if fired:
-        log.info("scan_trend_follow: checked=%d/%d candidates", fired, len(scored))
+    log.info("scan_trend_follow: scored=%d fired=%d", len(scored), fired)
 
 
 # ══════════════════════════════════════════════════════
@@ -5050,11 +5048,10 @@ def main():
                 last_sector = now
                 scan_sector_liquidity(all_t)
 
-            # DATA: scan_trend_follow (momentum) avg=3.1% (2/10 wins) — disabled
-            # global last_trend
-            # if now - last_trend >= TREND_FOLLOW_S:
-            #     last_trend = now
-            #     scan_trend_follow(all_t)
+            # Trend follow: catches gradual uptrends (STG/ZEC type) — re-enabled with momentum_bypass
+            if now - last_trend >= TREND_FOLLOW_S:
+                last_trend = now
+                scan_trend_follow(all_t)
 
         except KeyboardInterrupt:
             log.info("Stopped."); break
