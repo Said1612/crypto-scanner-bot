@@ -2459,7 +2459,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     _rise_from_low = (price - l24) / l24 * 100 if l24 > 0 else 0
     _sector_mom_pre = (
         change >= 15.0 and          # strong 24h trend
-        _rise_from_low < 40.0 and   # not overextended (40% above daily low)
+        _rise_from_low < 55.0 and   # not overextended — raised from 40% to 55% to catch PORTAL/STG type
         vol_24h >= 1_000_000        # meaningful liquidity — no micro-cap wash trading
     )
 
@@ -2509,7 +2509,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     else:
         _late_pct = 0.97   # Binance: only block absolute top 3% of 24h range
     rng = ticker["high24"] - ticker["low24"]
-    if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre:
+    if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre and not momentum_bypass:
         _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
@@ -2709,9 +2709,12 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Position guard — uses ctx.pos_limit (adaptive)
     # Sector momentum: use rise_from_low instead of pos24 (pos24=1.0 when at new highs)
+    # Momentum bypass: scan_trend_follow confirmed 7d uptrend — pos24 inherently high
     if _sector_mom:
-        if _rise_from_low > 50.0:   # sector rotation: allow up to 50% above daily low
+        if _rise_from_low > 55.0:   # aligned with _sector_mom_pre threshold (was 50%)
             _rej("high_pos"); return
+    elif momentum_bypass:
+        pass   # trend-follow: pos24 misleadingly high for 7d trends; OB + spike filters protect
     elif pos24 > ctx["pos_limit"]:
         # BLINKY pattern: very high ratio (≥20x) overrides position limit
         # Sleeping Giant: flat coin with tiny daily range — high pos24 is misleading
@@ -2721,14 +2724,16 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # High position + weak volume = false signal (我踏马来了 pattern)
     # Coin already moved up in range but without real volume explosion = chasing
-    if pos24 > 0.65 and spike < 3.0 and not interval.endswith("_sg"):
+    # Exempt: momentum_bypass (7d trend) + _sector_mom (spike-confirmed rotation)
+    if pos24 > 0.65 and spike < 3.0 and not interval.endswith("_sg") and not momentum_bypass and not _sector_mom:
         _rej("high_pos_low_vol"); return
 
     # Weak top filter: very high in range + flat move = exhaustion, not breakout
     # Raised from 0.62→0.75 to avoid blocking mid-range breakouts
     # Sleeping giant bypass: flat coins always show high pos24 due to tiny daily range
+    # Exempt: momentum_bypass (gradual trend: 1h move naturally small) + _sector_mom
     _weak_move_thr = 0.8 if exchange == "Binance" else 1.0
-    if pos24 > 0.75 and ratio_min > 0 and move < _weak_move_thr and not (interval == "1m_sg" and spike >= 20.0):
+    if pos24 > 0.75 and ratio_min > 0 and move < _weak_move_thr and not (interval == "1m_sg" and spike >= 20.0) and not momentum_bypass and not _sector_mom:
         _rej("weak_top"); return
 
     # ── Step 2: Real buy/sell from aggTrades (reuse pre-fetched data) ───
@@ -2822,7 +2827,8 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Position scaling: high-pos entries need strong ratio (BLINKY: pos=86%, ratio=28.7x ✅)
     # Low ratio at high pos = exhaustion/distribution, not a real breakout
-    if pos24 > 0.70 and not is_moonshot:
+    # Exempt: momentum_bypass (trend-follow: 7d trend confirmed) + _sector_mom (spike-confirmed rotation)
+    if pos24 > 0.70 and not is_moonshot and not momentum_bypass and not _sector_mom:
         ratio_min = max(ratio_min, 20.0)
 
     if is_moonshot:
@@ -3129,7 +3135,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     if (_cq_result and _cq_result.get("noah_effect")
             and _cq_result["H"] < 0.47
             and pos24 > 0.65
-            and not is_moonshot and not _is_explosive):
+            and not is_moonshot and not _is_explosive and not momentum_bypass):
         _rej(f"noah_anti_persistent_highpos(H={_cq_result['H']:.3f},pos={int(pos24*100)}%)"); return
 
     # Moonshot Anti-Persistent Gate
@@ -3264,9 +3270,9 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # ── Late Entry Hard Block ─────────────────────────────────────────────
     # Position > 80% from daily low = chasing — high exhaustion risk.
-    # Exceptions: moonshots (already confirmed huge move) and
-    # volume_explosion with BOTH high score AND Claude not avoiding.
-    if pos24 > 0.80 and not is_moonshot:
+    # Exceptions: moonshots, momentum_bypass (7d trend), _sector_mom (spike-confirmed rotation),
+    # and volume_explosion with BOTH high score AND Claude not avoiding.
+    if pos24 > 0.80 and not is_moonshot and not momentum_bypass and not _sector_mom:
         _claude_ok = (_cl.get("verdict") != "avoid")
         if volume_explosion and score >= 8.5 and _claude_ok:
             pass   # allow: explosive + high quality + Claude agrees
@@ -3275,14 +3281,15 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Claude AVOID (≥70%) + high position = double warning → block
     # Even without hitting the 93% hard block, Claude+pos combo is too risky
-    if (not is_moonshot and not volume_explosion
+    # Exempt momentum_bypass / sector_mom: these have confirmed multi-day buying pressure
+    if (not is_moonshot and not volume_explosion and not momentum_bypass and not _sector_mom
             and _cl.get("verdict") == "avoid"
             and _cl.get("confidence", 0) >= 70
             and pos24 > 0.70):
         _rej(f"claude_avoid_highpos(conf={_cl['confidence']}%,pos={int(pos24*100)}%)"); return
 
     # Weak order book + high position = no buyer support to sustain the move
-    if ob_spot < 0.52 and pos24 > 0.70 and not is_moonshot and not volume_explosion:
+    if ob_spot < 0.52 and pos24 > 0.70 and not is_moonshot and not volume_explosion and not momentum_bypass and not _sector_mom:
         _rej(f"weak_ob_highpos(ob={ob_spot:.0%},pos={int(pos24*100)}%)"); return
 
     # Append fractal lines to signal — each tag on its own indented line
@@ -3871,19 +3878,24 @@ def mid_scan(all_t):
     """
     # Top 80 movers by 24h change — these are building momentum
     # vol >= 150K: include smaller MEXC coins (TREE/KAT/DU type with tiny volumes)
-    # change <= 70%: match slow_scan MEXC limit (DENT at 50% was previously excluded by 55% cap)
+    # change <= 70%: match slow_scan MEXC limit
+    # Alpha/futures-only coins: allow up to 400% (listing-day pumps reach 200-400%)
     by_chg = sorted(
         [(s, t) for s, t in all_t.items()
-         if t["vol"] >= 150_000 and 2.0 <= t["change"] <= 70.0],
+         if t["vol"] >= 150_000 and (
+             2.0 <= t["change"] <= 70.0
+             or ((t.get("binance_alpha") or t.get("futures_only")) and 70.0 < t["change"] <= 400.0)
+         )],
         key=lambda x: -x[1]["change"]
     )[:100]
 
     # DOGS fix: top 30 Binance Mid/Large by volume (vol >= $10M, change >= 0%)
     # A large-cap coin at +0% change falls outside the top-80 by change but its
     # volume already signals real interest — scan it regardless of change rank
+    # change <= 80%: matches max_pump limit for Binance spot (was 70%, PORTAL/STG window is 15-80%)
     by_vol_bn = sorted(
         [(s, t) for s, t in all_t.items()
-         if t["exchange"] == "Binance" and t["vol"] >= 10_000_000 and 0.0 <= t["change"] <= 70.0],
+         if t["exchange"] == "Binance" and t["vol"] >= 10_000_000 and 0.0 <= t["change"] <= 80.0],
         key=lambda x: -x[1]["vol"]
     )[:30]
 
