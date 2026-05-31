@@ -669,14 +669,22 @@ def fetch_binance_futures_only(spot_syms):
 
 def fetch_binance_alpha():
     """
-    Binance Alpha Web3 tokens (BSC) — shown in Binance Alpha section.
+    Binance Alpha tokens — listed in Binance Alpha program (CEX listing candidates).
     Klines and OB are fetched from Binance Spot via base_url=BINANCE_BASE.
     """
     if not USE_BINANCE:
         return {}
-    data = _get(BINANCE_ALPHA_TOKEN_URL)
+    # Binance /bapi/ internal endpoints require browser-like headers
+    try:
+        r = S.get(BINANCE_ALPHA_TOKEN_URL, timeout=10,
+                  headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                           "clienttype": "web", "lang": "en"})
+        data = r.json() if r.ok else None
+    except Exception as _ae:
+        log.warning("Binance Alpha fetch error: %s", _ae)
+        return {}
     if not isinstance(data, dict) or not data.get("success"):
-        log.warning("Binance Alpha Web3 token list failed")
+        log.warning("Binance Alpha token list failed (resp: %s)", str(data)[:120] if data else "None")
         return {}
     tokens = data.get("data") or []
     out = {}
@@ -2427,12 +2435,14 @@ def _check(sym, ticker, interval, sector_boost=False):
             _rej(f"downtrend_repeat({_drop_from_prev:.0f}%)"); return
 
 
-    # Skip already pumped — MEXC micro-caps: allow up to 70% (REDO +56% still valid)
-    # Binance: allow up to 80% — matches slow_scan pool limit; liquid coins (FF/ILV/LPT) sustain bigger moves
-    _max_pump = 70.0 if exchange == "MEXC" else 80.0
+    # Skip already pumped — Alpha/pre-listing: allow 400% (listing-day pumps reach 200-300%)
+    # MEXC micro-caps: allow up to 70% | Binance: allow up to 80%
+    _is_alpha_coin = ticker.get("binance_alpha") or ticker.get("futures_only")
+    _max_pump = 400.0 if _is_alpha_coin else (70.0 if exchange == "MEXC" else 80.0)
     h24, l24 = ticker["high24"], ticker["low24"]
     range_pump = (h24 - l24) / l24 * 100 if l24 > 0 else 0
-    if change > _max_pump or range_pump > 200.0:
+    _max_range = 600.0 if _is_alpha_coin else 200.0
+    if change > _max_pump or range_pump > _max_range:
         _rej("max_pump"); return
     if now - alerted.get(sym, 0) < COOLDOWN: _rej("cooldown"); return
     # Skip coins already in active tracking — avoid re-entry on a coin already being followed
@@ -3860,7 +3870,11 @@ def slow_scan(all_t):
 
     def _pool(coins, pump_limit):
         elig = [(s, t) for s, t in coins.items()
-                if t["vol"] >= 10_000 and t["change"] <= pump_limit]
+                if t["vol"] >= 10_000 and (
+                    t["change"] <= pump_limit
+                    or t.get("binance_alpha")   # Alpha tokens bypass pump_limit — listing-day pumps reach 200-400%
+                    or t.get("futures_only")    # Pre-listing futures-only also bypass
+                )]
         by_vol = sorted(elig, key=lambda x: -x[1]["vol"])[:200]
         by_chg = sorted(elig, key=lambda x: -x[1]["change"])[:200]
         seen, out = set(), []
@@ -4932,8 +4946,9 @@ def main():
                         _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
                         if _base not in SECTOR_REGISTRY:
                             SECTOR_REGISTRY[_base] = "BNB Alpha"
-                log.info("Tickers: MEXC=%d Binance=%d Fut-only=%d Alpha-Web3=%d Total=%d Tracking=%d",
-                         len(_mx), len(_bn), len(_bn_fut), _bn_alpha_new, len(all_t), len(tracking))
+                _alpha_total = sum(1 for t in all_t.values() if t.get("binance_alpha") or t.get("futures_only"))
+                log.info("Tickers: MEXC=%d Binance=%d Fut-only=%d Alpha-new=%d Alpha-total=%d Total=%d Tracking=%d",
+                         len(_mx), len(_bn), len(_bn_fut), _bn_alpha_new, _alpha_total, len(all_t), len(tracking))
             else:
                 log.info("Tickers: MEXC=%d Tracking=%d", len(all_t), len(tracking))
 
