@@ -2577,6 +2577,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     _ema20            = _calc_ema(_closes_ema, 20)
     price_above_ema20 = price >= _ema20
 
+    # Explosive spike: 30x+ vol = institutional move, bypasses fractal/resistance gates
+    # Assigned here (after spike is final) so all downstream checks use correct value
+    _is_explosive = (spike >= 30.0)
+
     # Early move filter: only block clear downtrends (< -1%)
     # Real move_min (1.5%) is applied AFTER funding_rate check below
     if move < -1.0: _rej(f"low_move({move:.1f}%)"); return
@@ -3179,7 +3183,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Explosive spike bypass — 30x+ vol = real institutional move regardless of fractal
     # Data: ALLO +178%, HEI +132%, ID +55% all had massive vol at entry.
     # Hard floor (FS<5.0) is NEVER bypassed — it protects against corrupted/manipulated data.
-    _is_explosive = (spike >= 30.0)
+    # (_is_explosive already set after spike computation above)
 
     # Fractal Quality Gate — Two-Tier
     #
