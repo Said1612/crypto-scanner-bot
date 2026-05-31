@@ -4884,6 +4884,9 @@ def _mark_report_sent(key: str, report_type: str):
 
 def main():
     global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_report, last_report_date, last_weekly_date, last_monthly_date
+    # Error tracking — alert Telegram on repeated loop errors
+    _loop_err_count = [0]    # [count] — mutable so inner scope can modify
+    _loop_last_err  = [""]   # [last_error_str]
     _signal.signal(_signal.SIGTERM, _handle_sigterm)  # invalidate PID on shutdown
     _register_primary()   # claim PID lock — old process will detect mismatch and stop sending
     log.info("🎯 MAFIO SNIPER — starting (PID %d)", _MY_PID)
@@ -5058,6 +5061,30 @@ def main():
             log.info("Stopped."); break
         except Exception as e:
             log.error("Loop: %s", e, exc_info=True)
+            # ── Error Alert: notify Telegram if same error repeats ──────────
+            _err_str = str(e)[:120]
+            if _err_str == _loop_last_err[0]:
+                _loop_err_count[0] += 1
+            else:
+                _loop_last_err[0]  = _err_str
+                _loop_err_count[0] = 1
+            if _loop_err_count[0] == 5:
+                try:
+                    send_ex(
+                        f"⚠️ *MAFIO — Loop Error*\n"
+                        f"```\n{_err_str}\n```\n"
+                        f"_Repeated 5 times — check the bot_"
+                    )
+                except Exception:
+                    pass
+            elif _loop_err_count[0] % 50 == 0:
+                try:
+                    send_ex(
+                        f"🚨 *MAFIO — Loop Error x{_loop_err_count[0]}*\n"
+                        f"```\n{_err_str}\n```"
+                    )
+                except Exception:
+                    pass
             time.sleep(5)
 
 if __name__ == "__main__":
