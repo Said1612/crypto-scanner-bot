@@ -2386,6 +2386,8 @@ def _calc_ema(closes, period):
 
 def _check(sym, ticker, interval, sector_boost=False):
     now      = time.time()
+    # momentum_signal: set by scan_trend_follow — must be assigned early (used before line 2775)
+    momentum_bypass = ticker.get("momentum_signal", False)
 
     # ── Circuit Breaker — blocks signals after 3 consecutive SL hits ──────
     if _cb_is_active():
@@ -2771,8 +2773,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Momentum Bypass: DISABLED — data shows 8% win rate (1 win / 8 SL across 23 signals)
     # ratio alone is insufficient confirmation; high ratio in downtrend = distribution trap
     _ratio_bypass   = 5.0 if exchange == "MEXC" else 8.0
-    # momentum_signal: set by scan_trend_follow — gradual uptrend, relaxed spike/ratio/net
-    momentum_bypass = ticker.get("momentum_signal", False)
+    # momentum_bypass already set at function start from ticker.get("momentum_signal")
 
     # Volume Explosion: 10x+ spike + REAL net (> abs_floor already passed) = extraordinary event
     # net > 0 replaced by net > _abs_net_floor (already enforced above — but redundant safety)
