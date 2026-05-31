@@ -94,8 +94,8 @@ TIERS = [
     {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 2.5, "net": 5_000},
     # Small: medium liquidity
     {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.2, "ratio": 2.0, "net": 15_000},
-    # Mid: good liquidity
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.5, "ratio": 2.5, "net": 60_000},
+    # Mid: good liquidity — aligned with Small/Large spike requirement
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.2, "ratio": 2.2, "net": 60_000},
     # Large: deep liquidity
     {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.2, "ratio": 1.8, "net": 250_000},
 ]
@@ -2598,11 +2598,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     if exchange == "MEXC" and tier["name"] in ("Micro", "Small"):
         move_min = min(move_min, 0.3)
 
-    # Binance: cap move_min at 1.0% even in bear market
-    # Bear ctx move_min = 2.0% blocks LPT/WAL/NOM type gradual Binance breakouts
-    # Wolf Flow catches 26 Binance wins in bear market → 1% is enough for Binance
+    # Binance: cap move_min at 0.5% — flat/consolidating markets show 0.5-1% hourly moves
+    # that precede larger explosions. 1.0% was blocking gradual Binance breakouts.
     if exchange == "Binance":
-        move_min = min(move_min, 1.0)
+        move_min = min(move_min, 0.5)
 
     # Fast scan (1m klines): a 0.5% move in 1 minute = explosive beginning
     if interval == "1m":
