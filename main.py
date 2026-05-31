@@ -3124,6 +3124,14 @@ def _check(sym, ticker, interval, sector_boost=False):
             and not _is_explosive):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
+    # Noah Effect + Anti-Persistent + High Position = triple fakeout risk
+    # REN pattern: H=0.454 + Noah(73% wicks) + pos=83% → all three together = near-certain SL
+    if (_cq_result and _cq_result.get("noah_effect")
+            and _cq_result["H"] < 0.47
+            and pos24 > 0.65
+            and not is_moonshot and not _is_explosive):
+        _rej(f"noah_anti_persistent_highpos(H={_cq_result['H']:.3f},pos={int(pos24*100)}%)"); return
+
     # Moonshot Anti-Persistent Gate
     # The gate above skips moonshots — but H < 0.45 is extreme anti-persistence that blocks all.
     # COOKIE: H=0.425, Score=6.5, FCF=1.15 — FCF bypassed moonshot_fractal_trap but
@@ -3263,6 +3271,18 @@ def _check(sym, ticker, interval, sector_boost=False):
             pass   # allow: explosive + high quality + Claude agrees
         else:
             _rej(f"late_entry_hard({pos24*100:.0f}%)"); return
+
+    # Claude AVOID (≥70%) + high position = double warning → block
+    # Even without hitting the 93% hard block, Claude+pos combo is too risky
+    if (not is_moonshot and not volume_explosion
+            and _cl.get("verdict") == "avoid"
+            and _cl.get("confidence", 0) >= 70
+            and pos24 > 0.70):
+        _rej(f"claude_avoid_highpos(conf={_cl['confidence']}%,pos={int(pos24*100)}%)"); return
+
+    # Weak order book + high position = no buyer support to sustain the move
+    if ob_spot < 0.52 and pos24 > 0.70 and not is_moonshot and not volume_explosion:
+        _rej(f"weak_ob_highpos(ob={ob_spot:.0%},pos={int(pos24*100)}%)"); return
 
     # Append fractal lines to signal — each tag on its own indented line
     if _fra and _fra["detail"]:
