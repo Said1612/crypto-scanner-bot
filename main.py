@@ -3253,6 +3253,17 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej(f"claude_avoid({_cl['confidence']}%)"); return
     msg += _cl["text"]
 
+    # ── Late Entry Hard Block ─────────────────────────────────────────────
+    # Position > 80% from daily low = chasing — high exhaustion risk.
+    # Exceptions: moonshots (already confirmed huge move) and
+    # volume_explosion with BOTH high score AND Claude not avoiding.
+    if pos24 > 0.80 and not is_moonshot:
+        _claude_ok = (_cl.get("verdict") != "avoid")
+        if volume_explosion and score >= 8.5 and _claude_ok:
+            pass   # allow: explosive + high quality + Claude agrees
+        else:
+            _rej(f"late_entry_hard({pos24*100:.0f}%)"); return
+
     # Append fractal lines to signal — each tag on its own indented line
     if _fra and _fra["detail"]:
         _fra_line = f"\n📐 *Fractal*: {_fra['verdict']}"
