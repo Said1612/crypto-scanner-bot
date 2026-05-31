@@ -3185,8 +3185,9 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
-    # Volume Explosion Hard Fractal Floor — kept for explicit label
-    if volume_explosion and not is_moonshot and _fractal_score < 5.0:
+    # Volume Explosion Fractal Floor — raised to 5.5 (REN had FS=5.0 + 148x = still weak structure)
+    # FS < 5.5 means fractal quality is too poor even for explosive moves.
+    if volume_explosion and not is_moonshot and _fractal_score < 5.5:
         _rej(f"vol_exp_weak_fractal(fs={_fractal_score})"); return
 
     # Explosive spike bypass — 30x+ vol = real institutional move regardless of fractal
