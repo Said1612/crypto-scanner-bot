@@ -3095,6 +3095,22 @@ def _check(sym, ticker, interval, sector_boost=False):
         except Exception as _cqe:
             log.debug("chaos_quant error: %s", _cqe)
 
+    # ── Late Position Penalty on Score ───────────────────────────────────
+    # EPIC pattern: pos24=98% + FCF=1.32 → score 10/10 "Whale Action"
+    # Score measures MOMENTUM QUALITY, not ENTRY TIMING.
+    # When pos24 > 80%, the signal is technically strong but timing is dangerous.
+    # Apply multiplier so score reflects reality:
+    #   pos24=0.85 → ×0.80 → 10 becomes 8.0  ("Scalp")
+    #   pos24=0.90 → ×0.60 → 10 becomes 6.0
+    #   pos24=0.95 → ×0.40 → 10 becomes 4.0
+    #   pos24=0.98 → ×0.28 → 10 becomes 2.8  (no label = "Score: 2.8/10")
+    # Exception: moonshot + volume_explosion legitimately fire at high pos
+    if pos24 > 0.80 and not is_moonshot and not volume_explosion:
+        _pos_penalty = max(0.2, 1.0 - (pos24 - 0.80) * 4.0)
+        score = round(score * _pos_penalty, 1)
+        log.debug("POS_PENALTY %s pos=%.0f%% ×%.2f score→%.1f",
+                  sym, pos24 * 100, _pos_penalty, score)
+
     # ── Fractal Structure Gate ────────────────────────────────────────────
     # Blocks signals where the fractal layer signals strong structural risk,
     # even when raw flow metrics (volume spike, ratio) are impressive.
