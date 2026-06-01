@@ -798,7 +798,7 @@ def fetch_oi_ls(sym: str) -> dict:
                 pass
 
         expanding     = delta > 2.0
-        contracting   = delta < -4.0
+        contracting   = delta < -2.0
         short_squeeze = expanding and ls_ratio < 0.85
         long_crowded  = ls_ratio > 1.8
 
@@ -3242,9 +3242,19 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej(f"oi_contracting({_oi['oi_delta_1h']:.1f}%)"); return
 
     # L/S crowded longs = too many retail longs piled in = liquidation cascade risk.
-    # Data: L/S > 1.8 historically precedes sudden -8 to -15% reversals on Binance.
-    if (_oi and _oi["long_crowded"] and not is_moonshot and score < 9.0):
-        _rej(f"ls_crowded_longs({_oi['ls_ratio']:.2f})"); return
+    # At high pos24: no score bypass — crowded longs at top cannot be saved by score.
+    _ls_block = score < 9.0 or pos24 > 0.80
+    if (_oi and _oi["long_crowded"] and not is_moonshot and _ls_block):
+        _rej(f"ls_crowded_longs({_oi['ls_ratio']:.2f},pos={pos24*100:.0f}%)"); return
+
+    # SL-hunt setup: crowded longs (L/S>2.0) + OI exiting + price at top = EPIC pattern.
+    # EPIC: L/S 2.24 + OI -2% + pos24 98% → SL hit in 7min then +16% recovery.
+    # No score bypass — stop-loss hunt mechanics override any technical score.
+    if (_oi and not is_moonshot and not momentum_bypass
+            and pos24 > 0.75
+            and _oi["ls_ratio"] > 2.0
+            and _oi["oi_delta_1h"] < 0.0):
+        _rej(f"sl_hunt_risk(L/S={_oi['ls_ratio']:.2f},OI={_oi['oi_delta_1h']:.1f}%,pos={pos24*100:.0f}%)"); return
 
     # OI score boost: expanding OI = institutional confirmation of the move.
     # Short squeeze setup = strongest configuration → extra boost.
