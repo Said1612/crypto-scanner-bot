@@ -4355,14 +4355,14 @@ def scan_quiet_accum(all_t):
     Catches coins being accumulated quietly near their 24h low
     BEFORE price breaks out — the pattern Wolf Flow used to catch AI +50%.
 
-    Stricter v2 conditions (re-enabled after AIUSDT analysis):
-      pos24 < 0.30  — price in bottom 30% of 24h range (tighter than before)
-      change: -25% to +10%
-      vol >= 500K   — real liquidity (raised from 200K)
-      ratio >= 3.5x — strong buyer dominance (raised from 2.5x)
-      spike >= 2.5x — clear volume surge (raised from 1.5x)
-      ob >= 0.60    — order book clearly favours buyers
-      score >= 8.0  — high quality only (raised from 7.0)
+    v2 conditions (base):
+      pos24 < 0.30  — price in bottom 30% of 24h range
+      change: -25% to +10%  (+20% if pos24<0.25 — daily open may be near the low itself)
+      vol >= 500K   — real liquidity
+      ratio >= 3.5x — strong buyer dominance  (2.5x if pos24<0.20 — quiet accumulation)
+      spike >= 2.5x — clear volume surge       (2.0x if pos24<0.20)
+      ob >= 0.60    — order book clearly favours buyers (0.65 if pos24<0.20)
+      score >= 8.0                              (8.5 if pos24<0.20)
     """
     if _cb_is_active():
         return
@@ -4381,7 +4381,10 @@ def scan_quiet_accum(all_t):
         if vol_24h < 500_000:
             continue
         chg = t["change"]
-        if chg > 10.0 or chg < -25.0:
+        # Coins near range bottom (pos24<0.25) may have risen >10% from daily open
+        # because the daily open itself was near the low — allow up to 20% for true bottom
+        _chg_max = 20.0 if pos24 < 0.25 else 10.0
+        if chg > _chg_max or chg < -25.0:
             continue
         # Post-pump trap: coin pumped big intraday then crashed to "bottom" — P&D setup
         # GT pattern: pumped to $0.179 → fell to $0.128 (pos≈3%) → fake ratio 34.9x → dump
@@ -4420,9 +4423,15 @@ def scan_quiet_accum(all_t):
 
         ratio = buy_v / sell_v
         # Ratio floors: winners show ≥2.5x minimum (PGVERSE=3.5x, SXT=9.3x, GT=34.9x)
-        # SKL(1.9x) and TREE(2.0x) were weak signals — raise floor to match Micro tier
         # Ultra-low price (DENT type): accept 2.0x — USD flows are small at $0.000061
-        _ratio_min = 2.5 if price < 0.001 else 3.5
+        # True bottom (pos24<0.20): relaxed to 2.5x — smart money accumulates quietly;
+        # compensated by stricter ob (0.65+) applied further below
+        if price < 0.001:
+            _ratio_min = 2.0
+        elif pos24 < 0.20:
+            _ratio_min = 2.5
+        else:
+            _ratio_min = 3.5
         if ratio < _ratio_min:
             continue
 
@@ -4433,7 +4442,9 @@ def scan_quiet_accum(all_t):
         # Volume spike: 1h traded volume vs expected hourly (vol_24h / 24)
         avg_1h = vol_24h / 24.0
         spike  = (buy_v + sell_v) / avg_1h if avg_1h > 0 else 0.0
-        if spike < 2.5:
+        # True bottom (pos24<0.20): accept 2.0x spike — accumulation is gradual by nature
+        _spike_min = 2.0 if pos24 < 0.20 else 2.5
+        if spike < _spike_min:
             continue
 
         # Adaptive net floor by price level — DENT $0.000061 type needs lower floor
@@ -4455,7 +4466,9 @@ def scan_quiet_accum(all_t):
                 continue
 
         ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
-        if ob_spot < 0.60:
+        # True bottom with relaxed ratio/spike: compensate with stricter order book (65%+)
+        _ob_min = 0.65 if pos24 < 0.20 else 0.60
+        if ob_spot < _ob_min:
             continue
         # Fake wall guard: ≥95% bids = artificial buy wall (LSM/ZEUS pattern: pump+dump)
         # ZEUS (ob=0.95, MEXC) confirmed P&D: +9.4% spike then -5.4% crash below entry
@@ -4471,8 +4484,9 @@ def scan_quiet_accum(all_t):
 
         tier  = get_tier(vol_24h)
         score = _calc_score(pos24, net, _net_floor, ob_spot, spike)
-        # Strict v2: require high score for all exchanges
-        if score < 8.0:
+        # True bottom (pos24<0.20): relaxed ratio/spike compensated by stricter score
+        _score_min = 8.5 if pos24 < 0.20 else 8.0
+        if score < _score_min:
             continue
 
         _, badge = _register_confirm(sym, "accum")
