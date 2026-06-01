@@ -2509,7 +2509,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     else:
         _late_pct = 0.97   # Binance: only block absolute top 3% of 24h range
     rng = ticker["high24"] - ticker["low24"]
-    if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre and not momentum_bypass:
+    if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre and not momentum_bypass and interval != "1m_sg":
         _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
@@ -2718,7 +2718,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     elif pos24 > ctx["pos_limit"]:
         # BLINKY pattern: very high ratio (≥20x) overrides position limit
         # Sleeping Giant: flat coin with tiny daily range — high pos24 is misleading
-        _sg_bypass = (interval == "1m_sg" and spike >= 20.0)
+        # Lowered from 20x to 10x: volume_explosion requires spike ≥ 10x, bypass should match
+        _sg_bypass = (interval == "1m_sg" and spike >= 10.0)
         if _pre_ratio < 20.0 and not _sg_bypass:
             _rej("high_pos"); return
 
@@ -2733,7 +2734,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Sleeping giant bypass: flat coins always show high pos24 due to tiny daily range
     # Exempt: momentum_bypass (gradual trend: 1h move naturally small) + _sector_mom
     _weak_move_thr = 0.8 if exchange == "Binance" else 1.0
-    if pos24 > 0.75 and ratio_min > 0 and move < _weak_move_thr and not (interval == "1m_sg" and spike >= 20.0) and not momentum_bypass and not _sector_mom:
+    if pos24 > 0.75 and ratio_min > 0 and move < _weak_move_thr and not (interval == "1m_sg" and spike >= 10.0) and not momentum_bypass and not _sector_mom:
         _rej("weak_top"); return
 
     # ── Step 2: Real buy/sell from aggTrades (reuse pre-fetched data) ───
