@@ -1475,7 +1475,9 @@ def check_milestones(all_t):
             info["min"] = gain
 
         # 2. Stop-loss hit → alert AND close tracking
-        if gain <= SIGNAL_SL_PCT:
+        # Use per-signal SL from _calc_tp_sl (stored at signal time), fallback to global -5%
+        _sl_threshold = info.get("sl_pct", SIGNAL_SL_PCT)
+        if gain <= _sl_threshold:
             if not info.get("sl_alerted") and now - _sl_dedup.get(sym, 0) > 300 and _notify_once(f"sl_{sym}", ttl=86400):
                 info["sl_alerted"] = True
                 _sl_dedup[sym] = now
@@ -2075,9 +2077,10 @@ def poll_telegram():
                         rows.sort(key=lambda x: x[0])
                         for pct, sym, entry, cur, mx, elapsed, exch in rows:
                             base = sym[:-4] if sym.endswith("USDT") else sym
+                            _sig_sl = tracking.get(sym, {}).get("sl_pct", SIGNAL_SL_PCT)
                             if pct >= 5.0:
                                 icon = "✅"
-                            elif pct <= SIGNAL_SL_PCT:
+                            elif pct <= _sig_sl:
                                 icon = "🔴"
                             elif pct < -2.0:
                                 icon = "⚠️"
@@ -2086,7 +2089,7 @@ def poll_telegram():
                             else:
                                 icon = "⏳"
                             cur_str = f"${cur:.6g}" if cur > 0 else "N/A"
-                            dist_sl = pct - SIGNAL_SL_PCT   # how far above SL
+                            dist_sl = pct - _sig_sl   # how far above SL
                             lines.append(
                                 f"{icon} *{base}*  `{pct:+.1f}%`\n"
                                 f"   Entry `${entry:.6g}` → Now `{cur_str}`\n"
@@ -2347,6 +2350,7 @@ def _fire_stoploss(sym, gain, now_price, entry, elapsed, exchange):
     base    = sym[:-4]
     ex_icon = "🟡" if exchange == "Binance" else "🟠"
     sig_msg_id = tracking.get(sym, {}).get("sig_msg_id", 0)
+    _sl_used   = tracking.get(sym, {}).get("sl_pct", SIGNAL_SL_PCT)
     _reply_to  = sig_msg_id if sig_msg_id and not _sig_link(sig_msg_id) else None
     link = _sig_link(sig_msg_id)
     keyboard = {"inline_keyboard": [[{"text": "📌 View Signal", "url": link}]]} if link else None
@@ -2360,7 +2364,7 @@ def _fire_stoploss(sym, gain, now_price, entry, elapsed, exchange):
         f"💰 Price now:   ${_fp(now_price)}\n"
         f"🏁 Entry:       ${_fp(entry)}\n"
         f"⏱ Time in:      {_tstr(elapsed)}\n"
-        f"💡 Signal closed — price fell {SIGNAL_SL_PCT:.0f}%+ from entry\n"
+        f"💡 Signal closed — price fell {abs(_sl_used):.0f}%+ from entry\n"
         f"{ex_icon} {exchange}\n"
         f"{'━' * 20}",
         keyboard,
@@ -3337,6 +3341,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     _signal_dedup[sym]  = now
     _alerted_price[sym] = price
     alerted[sym] = now
+    # Compute SL from _calc_tp_sl so tracking uses the same SL shown in the signal
+    _, _, _, _sl_price_tr, _sl_pct_tr, _ = _calc_tp_sl(
+        price, ticker["high24"], ticker["low24"], spike, score, exchange,
+        is_moonshot=is_moonshot, vol_explosion=volume_explosion, is_flash=is_flash
+    )
     tracking[sym] = {
         "entry":      price,
         "t0":         now,
@@ -3346,6 +3355,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         "exchange":   exchange,
         "is_flash":   is_flash,
         "sig_msg_id": sig_msg_id,
+        "sl_pct":     -_sl_pct_tr * 100,   # e.g. -8.0 for 8% SL — matches signal display
     }
     _scanner_type = ("moonshot" if is_moonshot
                      else "volume_explosion" if volume_explosion
@@ -4215,6 +4225,9 @@ def scan_supertrend(all_t):
             _signal_dedup[sym]   = now_ts
             _alerted_price[sym]  = price
             alerted[sym]         = now_ts
+            _, _, _, _, _sl_pct_st, _ = _calc_tp_sl(
+                price, ticker["high24"], ticker["low24"], vol_ratio, score, exchange
+            )
             tracking[sym] = {
                 "entry":      price,
                 "t0":         now_ts,
@@ -4224,6 +4237,7 @@ def scan_supertrend(all_t):
                 "exchange":   exchange,
                 "is_flash":   False,
                 "sig_msg_id": sig_msg_id,
+                "sl_pct":     -_sl_pct_st * 100,
             }
             _db_add(sym, price, exchange, tier["name"], "supertrend",
                     ratio_st, ob_spot, score, pos24, vol_ratio, net, _move_1h,
@@ -4495,6 +4509,9 @@ def scan_quiet_accum(all_t):
         ok, sig_msg_id = send_ex(msg, reply_markup=kb)
         if ok:
             _alerted_price[sym]   = price
+            _, _, _, _, _sl_pct_ac, _ = _calc_tp_sl(
+                price, t["high24"], t["low24"], spike, score, exchange
+            )
             tracking[sym] = {
                 "entry":      price,
                 "t0":         now,        # fixed: was "ts" — check_milestones needs "t0"
@@ -4504,6 +4521,7 @@ def scan_quiet_accum(all_t):
                 "exchange":   exchange,
                 "is_flash":   False,
                 "sig_msg_id": sig_msg_id,
+                "sl_pct":     -_sl_pct_ac * 100,
             }
             _db_add(sym, price, exchange, tier["name"], "accum",
                     ratio, ob_spot, score, pos24, spike, net, t["change"], "—")
