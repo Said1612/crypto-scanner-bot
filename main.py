@@ -215,6 +215,7 @@ COIN_CATEGORIES = {
 BINANCE_BASE          = "https://api.binance.com/api/v3"
 BINANCE_FUTURES       = "https://fapi.binance.com"
 BINANCE_ALPHA_TOKEN_URL = "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/alpha/all/token/list"
+USE_BINANCE  = os.getenv("USE_BINANCE", "true").lower() == "true"
 
 # ══════════════════════════════════════════════════════
 #  STATE
