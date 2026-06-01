@@ -5051,12 +5051,16 @@ def main():
                 _bn_alpha = fetch_binance_alpha()
                 _bn_alpha_new = 0
                 for _sym, _td in _bn_alpha.items():
-                    if _sym not in all_t:   # don't override Spot/FAPI data
+                    _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
+                    if _sym not in all_t:
                         all_t[_sym] = _td
                         _bn_alpha_new += 1
-                        _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
-                        if _base not in SECTOR_REGISTRY:
-                            SECTOR_REGISTRY[_base] = "BNB Alpha"
+                    else:
+                        # Coin already fetched (MEXC/Spot) — propagate Alpha flag so
+                        # slow_scan pump bypass and _check() _max_pump=400% both apply
+                        all_t[_sym]["binance_alpha"] = True
+                    if _base not in SECTOR_REGISTRY:
+                        SECTOR_REGISTRY[_base] = "BNB Alpha"
                 _alpha_total = sum(1 for t in all_t.values() if t.get("binance_alpha") or t.get("futures_only"))
                 log.info("Tickers: MEXC=%d Binance=%d Fut-only=%d Alpha-new=%d Alpha-total=%d Total=%d Tracking=%d",
                          len(_mx), len(_bn), len(_bn_fut), _bn_alpha_new, _alpha_total, len(all_t), len(tracking))
