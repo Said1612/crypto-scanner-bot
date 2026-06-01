@@ -3271,9 +3271,10 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # ── Late Entry Hard Block ─────────────────────────────────────────────
     # Position > 80% from daily low = chasing — high exhaustion risk.
-    # Exceptions: moonshots, momentum_bypass (7d trend), _sector_mom (spike-confirmed rotation),
-    # and volume_explosion with BOTH high score AND Claude not avoiding.
-    if pos24 > 0.80 and not is_moonshot and not momentum_bypass and not _sector_mom:
+    # Exceptions: moonshots, momentum_bypass (7d confirmed trend).
+    # _sector_mom NOT exempt: it only bypasses ratio/pos_limit — not the final quality gate.
+    # volume_explosion (spike ≥ 10x) + high score + Claude agrees = also allowed.
+    if pos24 > 0.80 and not is_moonshot and not momentum_bypass:
         _claude_ok = (_cl.get("verdict") != "avoid")
         if volume_explosion and score >= 8.5 and _claude_ok:
             pass   # allow: explosive + high quality + Claude agrees
@@ -3282,8 +3283,8 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Claude AVOID (≥70%) + high position = double warning → block
     # Even without hitting the 93% hard block, Claude+pos combo is too risky
-    # Exempt momentum_bypass / sector_mom: these have confirmed multi-day buying pressure
-    if (not is_moonshot and not volume_explosion and not momentum_bypass and not _sector_mom
+    # momentum_bypass exempt (7d confirmed trend) — _sector_mom NOT exempt (Claude stands firm)
+    if (not is_moonshot and not volume_explosion and not momentum_bypass
             and _cl.get("verdict") == "avoid"
             and _cl.get("confidence", 0) >= 70
             and pos24 > 0.70):
