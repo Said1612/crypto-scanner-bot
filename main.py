@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 🎯 MAFIO SNIPER
-MEXC only — works on Railway without IP restrictions
+Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
@@ -212,14 +212,9 @@ COIN_CATEGORIES = {
     "MINA":("🔐","ZK"),"DUSK":("🔐","ZK"),"ZCASH":("🔐","ZK"),
 }
 
-MEXC_BASE    = "https://api.mexc.com/api/v3"
-MEXC_FUTURES = "https://contract.mexc.com/api/v1"
-
 BINANCE_BASE          = "https://api.binance.com/api/v3"
 BINANCE_FUTURES       = "https://fapi.binance.com"
 BINANCE_ALPHA_TOKEN_URL = "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/alpha/all/token/list"
-USE_BINANCE  = os.getenv("USE_BINANCE", "true").lower() == "true"  # disable on Railway
-USE_MEXC     = os.getenv("USE_MEXC",    "false").lower() == "true" # disabled — low signal quality
 
 # ══════════════════════════════════════════════════════
 #  STATE
@@ -618,18 +613,6 @@ def _parse(data, exchange, base_url):
             continue
     return out
 
-def fetch_mexc():
-    """MEXC tickers — works on Railway and VPS (no IP restrictions)"""
-    if not USE_MEXC:
-        return {}
-    data = _get(f"{MEXC_BASE}/ticker/24hr")
-    if isinstance(data, list) and len(data) > 100:
-        out = _parse(data, "MEXC", MEXC_BASE)
-        log.info("MEXC: %d", len(out))
-        return out
-    log.warning("MEXC failed")
-    return {}
-
 def fetch_binance():
     """Binance spot tickers — requires VPS (Binance blocks Railway/cloud IPs)."""
     if not USE_BINANCE:
@@ -724,7 +707,7 @@ def fetch_binance_alpha():
 def fetch_binance_funding_rate(sym):
     """
     Binance Futures funding rate — endpoint: /fapi/v1/premiumIndex
-    Returns (rate_pct, label) same format as fetch_mexc_funding_rate().
+    Returns (rate_pct, label).
     """
     now   = time.time()
     cache_key = "BN_" + sym
@@ -826,61 +809,6 @@ def fetch_oi_ls(sym: str) -> dict:
         _oi_cache[sym] = default
         return default
 
-
-def _fut_sym(sym):
-    """BTCUSDT → BTC_USDT  (MEXC Futures symbol format)"""
-    return sym[:-4] + "_USDT"
-
-def fetch_mexc_funding_rate(sym):
-    """
-    MEXC Futures funding rate — works on Railway (no IP restrictions).
-    Positive = longs pay shorts = bullish (smart money buying longs).
-    Negative = shorts pay longs = bearish or short squeeze setup.
-    """
-    now   = time.time()
-    cache = _funding_cache.get(sym)
-    if cache and (now - cache["ts"]) < FUNDING_TTL:
-        return cache["rate"], cache["label"]
-    data = _get(f"{MEXC_FUTURES}/contract/funding_rate/{_fut_sym(sym)}", timeout=5)
-    if not data or not data.get("success") or not data.get("data"):
-        _funding_cache[sym] = {"rate": None, "label": "Spot", "ts": now}
-        return None, "Spot"
-    try:
-        rate = float(data["data"]["fundingRate"]) * 100   # → %
-        if rate > 0.02:
-            label = "🟢 Bullish / Longs"
-        elif rate < -0.02:
-            label = "🔴 Bearish / Shorts"
-        else:
-            label = "🟡 Neutral / Covering"
-        _funding_cache[sym] = {"rate": rate, "label": label, "ts": now}
-        return rate, label
-    except Exception:
-        _funding_cache[sym] = {"rate": None, "label": "Spot", "ts": now}
-        return None, "Spot"
-
-def fetch_mexc_fut_ob(sym, levels=20):
-    """MEXC Futures order book imbalance (bid dominance 0.0–1.0)."""
-    data = _get(f"{MEXC_FUTURES}/contract/depth/{_fut_sym(sym)}",
-                {"limit": levels}, timeout=5)
-    if not data or not data.get("success") or not data.get("data"):
-        return 0.5
-    try:
-        depth = data["data"]
-        def _side_vol(entries):
-            total = 0.0
-            for e in entries[:levels]:
-                if isinstance(e, (list, tuple)):
-                    total += float(e[0]) * float(e[1])
-                elif isinstance(e, dict):
-                    total += float(e.get("price", 0)) * float(e.get("vol", 0))
-            return total
-        bid_vol = _side_vol(depth.get("bids", []))
-        ask_vol = _side_vol(depth.get("asks", []))
-        total   = bid_vol + ask_vol
-        return bid_vol / total if total > 0 else 0.5
-    except Exception:
-        return 0.5
 
 def fetch_klines(sym, base_url, interval="5m", limit=25):
     data = _get(f"{base_url}/klines",
@@ -1304,10 +1232,6 @@ def _calc_tp_sl(price, high24, low24, spike, score, exchange, is_moonshot=False,
     else:
         sl_pct = 0.05
 
-    # MEXC micro-caps pump-dump faster — slightly wider SL
-    if exchange == "MEXC" and not is_flash:
-        sl_pct = min(sl_pct + 0.02, 0.12)
-
     sl = price * (1 - sl_pct)
 
     # TP based on signal strength and spike size
@@ -1340,11 +1264,9 @@ def build_signal(sym, price, change, buy_v, sell_v,
     base     = sym[:-4]
     net      = buy_v - sell_v
     ratio    = buy_v / sell_v if sell_v > 0 else 99.0
-    ex_icon  = "🟡" if exchange == "Binance" else "🟠"
+    ex_icon  = "🟡"
     # Market type label shown next to coin name
-    if exchange == "MEXC":
-        _mkt_label = "MEXC"
-    elif is_alpha:
+    if is_alpha:
         _mkt_label = "Alpha"
     else:
         _mkt_label = "Spot"
@@ -1537,7 +1459,7 @@ def check_milestones(all_t):
                 "elapsed":  int(now - _t0),
                 "success":  _max >= 5.0,
                 "reason":   reason,
-                "exchange": info.get("exchange", "MEXC"),
+                "exchange": info.get("exchange", "Binance"),
                 "ts":       int(now),
             })
             # SL hit → extend cooldown to 24h to prevent re-entry on downtrending coins
@@ -1590,7 +1512,7 @@ def send_daily_report(reset=True):
             "max":      info.get("max", 0.0),
             "elapsed":  int(time.time() - info["t0"]),
             "success":  info.get("max", 0.0) >= 5.0,
-            "exchange": info.get("exchange", "MEXC"),
+            "exchange": info.get("exchange", "Binance"),
             "active":   True,
         })
     for r in daily_results:
@@ -2059,11 +1981,11 @@ def poll_telegram():
                         for sym, info in tracking.items():
                             try:
                                 entry    = info["entry"]
-                                exch     = info.get("exchange", "MEXC")
+                                exch     = info.get("exchange", "Binance")
                                 t0       = info.get("t0", now_ts)
                                 max_gain = info.get("max", 0.0)
                                 elapsed  = int(now_ts - t0)
-                                base_url = BINANCE_BASE if exch == "Binance" else MEXC_BASE
+                                base_url = BINANCE_BASE
                                 pd = _get(f"{base_url}/ticker/price",
                                           params={"symbol": sym})
                                 cur = float(pd.get("price", 0)) if isinstance(pd, dict) else 0.0
@@ -2216,8 +2138,8 @@ def _make_milestone_image(base, gain, entry, now_price, exchange, tp1=0.0):
 
         # ── Top branding ──
         draw.text((26, 26), "MAFIO SNIPER", fill=(200, 190, 230), anchor="lt", font=f_brand)
-        ex_color = (0, 195, 255) if exchange == "Binance" else (255, 165, 40)
-        ex_label = "MAFIO BINANCE" if exchange == "Binance" else "MAFIO MEXC"
+        ex_color = (0, 195, 255)
+        ex_label = "MAFIO BINANCE"
         draw.text((W - 26, 26), ex_label, fill=ex_color, anchor="rt", font=f_brand)
         draw.line([(26, 60), (W - 26, 60)], fill=(50, 25, 85), width=1)
 
@@ -2420,10 +2342,6 @@ def _check(sym, ticker, interval, sector_boost=False):
         _diag[reason] = _diag.get(reason, 0) + 1
         log.info("REJ %s [%s] %s", sym, interval, reason)
 
-    # Filter MEXC tokenized stocks: base ends with "ON" + price > $20 (TSLAON, APPLON, NVDAON)
-    if sym[:-4].endswith("ON") and price > 20:
-        _rej("tokenized_stock"); return
-
     # Frozen ticker guard — 24h change exactly 0.0% = API cache / delisted coin (MFT pattern)
     if change == 0.0 and vol_24h < 1_000_000:
         _rej("frozen_ticker"); return
@@ -2445,7 +2363,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Skip already pumped — Alpha/pre-listing: allow 400% (listing-day pumps reach 200-300%)
     # MEXC micro-caps: allow up to 70% | Binance: allow up to 80%
     _is_alpha_coin = ticker.get("binance_alpha") or ticker.get("futures_only")
-    _max_pump = 400.0 if _is_alpha_coin else (70.0 if exchange == "MEXC" else 80.0)
+    _max_pump = 400.0 if _is_alpha_coin else 80.0
     h24, l24 = ticker["high24"], ticker["low24"]
     range_pump = (h24 - l24) / l24 * 100 if l24 > 0 else 0
     _max_range = 600.0 if _is_alpha_coin else 200.0
@@ -2486,32 +2404,20 @@ def _check(sym, ticker, interval, sector_boost=False):
         ratio_min *= 0.70   # 30% easier ratio — sector confirms buyer interest
         net_min   *= 0.60   # 40% easier net flow — early = less flow yet
 
-    # ── Exchange-specific sensitivity (fully isolated thresholds) ───────────
-    if exchange == "Binance":
-        # Binance large-caps: high baseline volume, efficient 2-sided market
-        # → spike fires less dramatically, net scales with coin size
-        spike_min *= 0.70                              # 30% easier — BTC-type spikes are subtle
-        # Ratio discount: only for Mid/Large cap (deep liquidity = naturally lower ratio)
-        # Micro/Small cap Binance: full ratio required — VINE(2.2x) failed in 10m at pos69%
-        if tier["name"] in ("Mid", "Large"):
-            ratio_min *= 0.85                          # 15% easier for large liquid coins only
-        # Proportional net: 0.25% of daily volume, capped at $80K, floor $5K
-        net_min = min(max(vol_24h * 0.0025, 5_000), 80_000)
-    else:
-        # MEXC: small-cap incubator — raised from $1K to $2K after MFT ghost signals
-        # $2K still catches NOM/MDT type micro-caps while blocking micro-manipulation
-        net_min    = max(net_min * 0.20, 2_000)   # Radar: floor $2K
-        spike_min *= 0.90                          # Slightly easier spike (smaller MEXC baseline)
+    # Binance large-caps: high baseline volume, efficient 2-sided market
+    # → spike fires less dramatically, net scales with coin size
+    spike_min *= 0.70                              # 30% easier — BTC-type spikes are subtle
+    # Ratio discount: only for Mid/Large cap (deep liquidity = naturally lower ratio)
+    # Micro/Small cap Binance: full ratio required — VINE(2.2x) failed in 10m at pos69%
+    if tier["name"] in ("Mid", "Large"):
+        ratio_min *= 0.85                          # 15% easier for large liquid coins only
+    # Proportional net: 0.25% of daily volume, capped at $80K, floor $5K
+    net_min = min(max(vol_24h * 0.0025, 5_000), 80_000)
 
     # ── Late entry filter ────────────────────────────────────────────────────
-    # MEXC: 0.95 (micro-caps pump-dump fast — top 5% = too late)
-    # Binance: 0.97 fixed — continuous breakouts (TRU/CTSI/DUSK) run past 93% of range
-    #   ctx["late_pct"] was 0.88-0.95 for Binance → missed all gradual Binance pumps
-    #   Wick/OB filters handle true pump-dumps, so 0.97 is safe
-    if exchange == "MEXC":
-        _late_pct = 0.95
-    else:
-        _late_pct = 0.97   # Binance: only block absolute top 3% of 24h range
+    # 0.97: only block absolute top 3% of 24h range
+    # Wick/OB filters handle true pump-dumps
+    _late_pct = 0.97
     rng = ticker["high24"] - ticker["low24"]
     if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre and not momentum_bypass and interval != "1m_sg":
         _rej("late_entry"); return
@@ -2519,11 +2425,6 @@ def _check(sym, ticker, interval, sector_boost=False):
     # ── Quick vol floor (no API call) ─────────────────────────────────────
     if vol_24h < tier["vol_min"]:
         _rej("low_vol"); return
-
-    # MEXC: require minimum $500K volume — micro-cap MEXC coins are unreliable
-    # (low liquidity → easy pump/dump, poor order book depth)
-    if exchange == "MEXC" and vol_24h < 500_000:
-        _rej("mexc_low_vol"); return
 
     # Market bias gate — Binance: allow Mid+Large in bear (FF/ILV/LPT proof)
     if not should_signal(tier["name"], market_bias, exchange):
@@ -2595,15 +2496,11 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("thin_pump"); return
 
     # Reject dead coins (zero base volume)
-    if avg_vol < (50 if exchange == "MEXC" else 200): _rej("dead_coin"); return
+    if avg_vol < 200: _rej("dead_coin"); return
 
-    # ── Funding Rate (API call — only for candidates that pass klines) ───
-    if exchange == "Binance":
-        funding_rate, funding_label = fetch_binance_funding_rate(sym)
-        _oi = fetch_oi_ls(sym)
-    else:
-        funding_rate, funding_label = fetch_mexc_funding_rate(sym)
-        _oi = None
+    # ── Funding Rate + OI (API call — only for candidates that pass klines) ───
+    funding_rate, funding_label = fetch_binance_funding_rate(sym)
+    _oi = fetch_oi_ls(sym)
     funding_bullish = funding_rate is not None and funding_rate > 0.03
 
     if funding_bullish:
@@ -2614,15 +2511,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     else:
         move_min  = ctx["move_min"]   # adaptive: 0.5% bull → 2.5% bear
 
-    # MEXC Micro/Small: relax move floor — tiny initial move can precede +50% explosion
-    # (NOM/MDT pattern: starts at 0.3% move → fires to +45%)
-    if exchange == "MEXC" and tier["name"] in ("Micro", "Small"):
-        move_min = min(move_min, 0.3)
-
-    # Binance: cap move_min at 0.5% — flat/consolidating markets show 0.5-1% hourly moves
+    # Cap move_min at 0.5% — flat/consolidating markets show 0.5-1% hourly moves
     # that precede larger explosions. 1.0% was blocking gradual Binance breakouts.
-    if exchange == "Binance":
-        move_min = min(move_min, 0.5)
+    move_min = min(move_min, 0.5)
 
     # Fast scan (1m klines): a 0.5% move in 1 minute = explosive beginning
     if interval == "1m":
@@ -2760,20 +2651,6 @@ def _check(sym, ticker, interval, sector_boost=False):
         log.info("COIN_FATIGUE %s — 2+ signals in 7d best_gain<5%% net=%.0f$", sym, net)
         _rej("coin_fatigue"); return
 
-    # ── Wash Trading guard (MEXC only) ────────────────────────────────────
-    # OSHI pattern: 60min flow=$665K / vol_24h=$676K = 98% → entire day in one hour
-    # Fix: threshold must match the data window:
-    #   1h data  → 60% (original OSHI guard — 1h real buying = max 30% of daily)
-    #   10m data → 90% (REPAI/BLINKY type: genuine explosion = all vol in 10min is ok)
-    # Without this fix, fast_scan BLOCKS real flash pumps (REPAI/BLINKY/NEOS type)
-    if exchange == "MEXC" and vol_24h > 0:
-        _flow_ratio = (buy_v + sell_v) / vol_24h
-        _wash_thr = 0.60 if interval in ("60m", "1h") else 0.90
-        if _flow_ratio > _wash_thr:
-            log.debug("WASH_TRADE skip %s flow_ratio=%.0f%% thr=%.0f%%",
-                      sym, _flow_ratio * 100, _wash_thr * 100)
-            _rej("wash_trading"); return
-
     # MOONSHOT override: whale accumulation bypasses soft filters
     _low_price_moon = (
         price < 0.25 and spike >= 10.0 and
@@ -2787,7 +2664,7 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Momentum Bypass: DISABLED — data shows 8% win rate (1 win / 8 SL across 23 signals)
     # ratio alone is insufficient confirmation; high ratio in downtrend = distribution trap
-    _ratio_bypass   = 5.0 if exchange == "MEXC" else 8.0
+    _ratio_bypass   = 8.0
     # momentum_bypass already set at function start from ticker.get("momentum_signal")
 
     # Volume Explosion: 10x+ spike + REAL net (> abs_floor already passed) = extraordinary event
@@ -2856,11 +2733,6 @@ def _check(sym, ticker, interval, sector_boost=False):
     if momentum_bypass and ob_spot < 0.45:
         momentum_bypass = False
         log.debug("MOMENTUM_BYPASS cancelled %s ob=%.0f%% (seller-dominated OB)", sym, ob_spot * 100)
-    # QUBIC pattern: MEXC momentum bypass requires real buyer dominance (≥62% bids)
-    # ratio can be high on illiquid MEXC coins without real OB support
-    if momentum_bypass and exchange == "MEXC" and ob_spot < 0.62:
-        momentum_bypass = False
-        log.debug("MOMENTUM_BYPASS cancelled %s MEXC ob=%.0f%% < 62%%", sym, ob_spot * 100)
     # ob_sellers threshold: 60% fixed — all winners had ≥60% bids (REPAI=60%, BLINKY=68%)
     # BEAT=46% and RIVER=48% were losers — sub-60% bids = no real buyer conviction
     _ob_min_spot = 0.60
@@ -2884,20 +2756,15 @@ def _check(sym, ticker, interval, sector_boost=False):
     if (is_moonshot and ob_spot < 0.42 and ratio < 2.0
             and net < 150_000 and not funding_bullish):
         _rej(f"moonshot_bearish_ob_weak_flow(ob={ob_spot:.0%},ratio={ratio:.1f}x,net={_fv(net)})"); return
-    if exchange == "Binance":
-        if ticker.get("futures_only"):
-            ob_fut = ob_spot  # base_url already points to FAPI — no double call
-        elif ticker.get("binance_alpha"):
-            ob_fut = ob_spot  # no FAPI contract — use spot OB only
-        else:
-            ob_fut = fetch_ob_imbalance(sym, f"{BINANCE_FUTURES}/fapi/v1", levels=20)
+    if ticker.get("futures_only"):
+        ob_fut = ob_spot  # base_url already points to FAPI — no double call
+    elif ticker.get("binance_alpha"):
+        ob_fut = ob_spot  # no FAPI contract — use spot OB only
     else:
-        ob_fut = fetch_mexc_fut_ob(sym, levels=20)
+        ob_fut = fetch_ob_imbalance(sym, f"{BINANCE_FUTURES}/fapi/v1", levels=20)
     ob_score = ob_spot * 0.7 + ob_fut * 0.3
-    # Binance ob_min: 0.38 fixed — in bear market ctx["ob_min"] rises to 0.45-0.50
-    # but Binance market makers keep tighter spreads → 0.38 is still valid for breakouts
-    # (Wolf Flow catches FF/ILV/LPT in bear with weaker OB)
-    _ob_min_eff = 0.38 if exchange == "Binance" else ctx["ob_min"]
+    # ob_min: 0.38 — Binance market makers keep tighter spreads
+    _ob_min_eff = 0.38
     if ob_score < _ob_min_eff and not is_moonshot and not volume_explosion:
         _rej("ob_low"); return
     if ob_spot > 0.58:
@@ -3016,18 +2883,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Problem: pos24 penalty in score unfairly hurts coins already in motion
     # (IO at 73% pos24 scored 4.8 but went +88% — strong OB=78% + ratio=2.8x)
     #
-    # MEXC: strict score required (shallow liquidity, unreliable OB)
-    if exchange == "MEXC":
-        _mexc_floor = 8.0 if market_bias > -25 else 8.5
-        if sector_boost:
-            _mexc_floor = max(_mexc_floor - 1.0, 7.0)  # sector heat = relax MEXC floor
-        if score < _mexc_floor:
-            _rej("low_score"); return
-    else:
-        # Absolute floor — no path bypasses a score this weak
-        if score < 5.5 and not is_moonshot and not volume_explosion:
-            _rej("quality_fail"); return
-        # Binance: three paths to pass — any one is enough
+    # Absolute floor — no path bypasses a score this weak
+    if score < 5.5 and not is_moonshot and not volume_explosion:
+        _rej("quality_fail"); return
+    # Three paths to pass — any one is enough
         _good_score    = score >= 7.0
         _strong_signal = ob_spot >= 0.72 and ratio >= 2.5 and net >= net_min
         _huge_flow     = net > 100_000 and ob_spot >= 0.65
@@ -3353,8 +3212,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         for _tag in _cq_result["tags"]:
             _cq_line += f"\n   {_tag}"
         msg += _cq_line
-    _kb_exchange = "MEXC" if ticker.get("binance_alpha") else exchange
-    keyboard = _trade_keyboard(sym, _kb_exchange)   # signal has no orig link yet
+    keyboard = _trade_keyboard(sym, exchange)   # signal has no orig link yet
     ok, sig_msg_id = send_ex(msg, keyboard)
     if not ok:
         log.error("SIGNAL SEND FAILED for %s — not tracking to avoid ghost signals", sym)
@@ -3825,23 +3683,9 @@ def get_market_ctx(bias: int) -> dict:
                 "move_min": 2.5,  "late_pct": 0.82}  # Strong Bear: very strict
 
 
-def should_signal(tier_name: str, bias: int, exchange: str = "MEXC") -> bool:
-    """
-    Wolf Flow logic: only fire signals when market conditions allow.
-
-    Binance: signals even in bear market (FF +134%, ILV +35%, 0G +36% ALL in bear market)
-      → news-driven pumps happen regardless of macro bias on Binance large-caps
-    MEXC: stricter bias gate (thin liquidity = more false signals in bear)
-    """
-    if exchange == "Binance":
-        return bias > -60   # Binance: allow all tiers unless extreme bear
-    # MEXC
-    if tier_name in ("Micro", "Small"):
-        return bias > -70   # block only in extreme crash
-    if tier_name == "Mid":
-        return bias > -60
-    # Large MEXC
-    return bias > -40
+def should_signal(tier_name: str, bias: int, exchange: str = "Binance") -> bool:
+    """Allow signals even in bear market — news-driven pumps happen regardless of macro bias."""
+    return bias > -60   # block only in extreme bear
 
 
 def _is_late_entry(price, high_24h, low_24h):
@@ -3955,9 +3799,6 @@ def mid_scan(all_t):
 # ══════════════════════════════════════════════════════
 
 def slow_scan(all_t):
-    mexc_t    = {s: t for s, t in all_t.items() if t["exchange"] == "MEXC"}
-    binance_t = {s: t for s, t in all_t.items() if t["exchange"] == "Binance"}
-
     def _pool(coins, pump_limit):
         elig = [(s, t) for s, t in coins.items()
                 if t["vol"] >= 10_000 and (
@@ -3973,25 +3814,12 @@ def slow_scan(all_t):
                 seen.add(item[0]); out.append(item)
         return out
 
-    # MEXC: raised to 70% — REDO(+56%) should enter pool | TAP(+357%) still excluded by _check
-    # Binance: allow up to 80% (liquid coins can sustain bigger moves)
-    mexc_candidates    = _pool(mexc_t,    70.0)
-    binance_candidates = _pool(binance_t, 80.0)
+    candidates = _pool(all_t, 80.0)
 
-    # Merge — Binance candidates get their own dedicated slots
-    seen, candidates = set(), []
-    for item in mexc_candidates + binance_candidates:
-        if item[0] not in seen:
-            seen.add(item[0]); candidates.append(item)
-
-    log.info("slow_scan: %d/%d candidates (MEXC=%d Binance=%d)",
-             len(candidates), len(all_t),
-             len(mexc_candidates), len(binance_candidates))
+    log.info("slow_scan: %d/%d candidates", len(candidates), len(all_t))
     _diag.clear()
     for sym, ticker in candidates:
-        # Binance uses "1h", MEXC uses "60m" for hourly klines
-        _kl_interval = "1h" if ticker.get("exchange") == "Binance" else "60m"
-        _check(sym, ticker, _kl_interval)
+        _check(sym, ticker, "1h")
         time.sleep(0.12)
     if _diag:
         parts = sorted(_diag.items(), key=lambda x: -x[1])
@@ -4100,9 +3928,7 @@ def scan_supertrend(all_t):
         if not should_signal(get_tier(vol_24h)["name"], market_bias, exchange):
             _rj("st_bias"); continue
 
-        # Klines: 1h Binance, 60m MEXC — 55 candles for 12h flip window + stable ATR10
-        _kl = "1h" if exchange == "Binance" else "60m"
-        candles = fetch_klines(sym, base_url, interval=_kl, limit=55)
+        candles = fetch_klines(sym, base_url, interval="1h", limit=55)
         if len(candles) < 15:
             _rj("st_no_klines"); continue
 
@@ -4157,10 +3983,7 @@ def scan_supertrend(all_t):
         if sell_v <= 0:
             _rj("st_no_trades"); continue
         net = buy_v - sell_v
-        # Net flow — raised floors vs original: trend signals need real conviction
-        # Binance: $8K → $20K (STABLE had only $18.4K = fake/dust flow)
-        # MEXC: $3K → $6K (keeps micro-cap sensitivity but filters noise)
-        _net_floor = 6_000.0 if exchange == "MEXC" else 20_000.0
+        _net_floor = 20_000.0
         if net < _net_floor:
             _rj("st_low_net"); continue
 
@@ -4198,15 +4021,11 @@ def scan_supertrend(all_t):
         # Score check — aligned with main scanner floor (7.0)
         tier  = get_tier(vol_24h)
         score = _calc_score(pos24, net, _net_floor, ob_spot, vol_ratio)
-        if exchange == "MEXC":
-            if score < 8.0: _rj("st_low_score"); continue
-        else:
-            # Absolute floor — no path bypasses a score this weak
-            if score < 5.5: _rj("st_low_score"); continue
-            _st_ok = (score >= 7.0
-                      or (ob_spot >= 0.72 and vol_ratio >= 2.5 and net >= _net_floor)
-                      or (net > 100_000 and ob_spot >= 0.65))
-            if not _st_ok: _rj("st_low_score"); continue
+        if score < 5.5: _rj("st_low_score"); continue
+        _st_ok = (score >= 7.0
+                  or (ob_spot >= 0.72 and vol_ratio >= 2.5 and net >= _net_floor)
+                  or (net > 100_000 and ob_spot >= 0.65))
+        if not _st_ok: _rj("st_low_score"); continue
 
         # Dedup: don't re-signal if already tracking or within 2h
         if sym in tracking:
@@ -4243,8 +4062,7 @@ def scan_supertrend(all_t):
         if ai_blocked:
             continue
         msg += ai_str
-        _kb_ex = "MEXC" if ticker.get("binance_alpha") else exchange
-        keyboard = _trade_keyboard(sym, _kb_ex)
+        keyboard = _trade_keyboard(sym, exchange)
         ok, sig_msg_id = send_ex(msg, keyboard)
         if ok:
             fired += 1
@@ -4409,10 +4227,7 @@ def scan_quiet_accum(all_t):
             continue
         if now - alerted.get(sym, 0) < COOLDOWN:
             continue
-        # skip MEXC tokenized stocks
         price = t["price"]
-        if t["exchange"] == "MEXC" and sym[:-4].endswith("ON") and price > 20:
-            continue
         # Skip extreme micro-price coins (< $0.000001) — almost always scams/dead
         if price < 0.000001:
             continue
@@ -4458,38 +4273,22 @@ def scan_quiet_accum(all_t):
             continue
 
         # Adaptive net floor by price level — DENT $0.000061 type needs lower floor
-        if exchange == "Binance":
-            if price < 0.001:
-                _net_floor = max(vol_24h * 0.001, 500.0)    # DENT/SHIB type
-            elif price < 0.01:
-                _net_floor = max(vol_24h * 0.001, 1_000.0)
-            else:
-                _net_floor = max(vol_24h * 0.001, 3_000.0)
+        if price < 0.001:
+            _net_floor = max(vol_24h * 0.001, 500.0)    # DENT/SHIB type
+        elif price < 0.01:
+            _net_floor = max(vol_24h * 0.001, 1_000.0)
         else:
-            _net_floor = max(vol_24h * 0.001, 300.0)        # MEXC micro-caps
+            _net_floor = max(vol_24h * 0.001, 3_000.0)
         if net < _net_floor:
             continue
-
-        # MEXC wash trading guard
-        if exchange == "MEXC" and vol_24h > 0:
-            if (buy_v + sell_v) / vol_24h > 0.60:
-                continue
 
         ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
         # True bottom with relaxed ratio/spike: compensate with stricter order book (65%+)
         _ob_min = 0.65 if pos24 < 0.20 else 0.60
         if ob_spot < _ob_min:
             continue
-        # Fake wall guard: ≥95% bids = artificial buy wall (LSM/ZEUS pattern: pump+dump)
-        # ZEUS (ob=0.95, MEXC) confirmed P&D: +9.4% spike then -5.4% crash below entry
+        # Fake wall guard: ≥95% bids = artificial buy wall (pump+dump pattern)
         if ob_spot >= 0.95:
-            continue
-        # Falling-knife + fake accumulation — LKT/MEXC post-crash pattern:
-        # ratio ≥20x + ob ≥88% + still falling = artificial buy wall on dying token
-        if (exchange == "MEXC"
-                and ratio >= 20.0
-                and ob_spot >= 0.88
-                and t["change"] < -5.0):
             continue
 
         tier  = get_tier(vol_24h)
@@ -4517,7 +4316,7 @@ def scan_quiet_accum(all_t):
             f"{'━'*20}\n"
             f"💀 *MAFIO SNIPER* 📡\n"
             f"\n"
-            f"🆕 *#{sym[:-4]}* 💀 · {'Alpha' if (t.get('futures_only') or t.get('binance_alpha')) else ('MEXC' if exchange == 'MEXC' else 'Spot')} · Signal #{signal_count} {badge}\n"
+            f"🆕 *#{sym[:-4]}* 💀 · {'Alpha' if (t.get('futures_only') or t.get('binance_alpha')) else 'Spot'} · Signal #{signal_count} {badge}\n"
             f"💰 Price: `${_fp(price)}`\n"
             f"📉 24h Change: `{t['change']:+.2f}%`\n"
             f"📍 Position: `%{pos_pct} from Bottom` ✅\n"
@@ -4855,10 +4654,7 @@ def scan_sector_liquidity(all_t):
 def _fetch_daily_klines(sym: str, exchange: str, days: int = 14):
     """Fetch daily klines. Returns list of (close, volume) tuples, oldest first."""
     try:
-        if exchange == "Binance":
-            url  = "https://api.binance.com/api/v3/klines"
-        else:
-            url  = "https://api.mexc.com/api/v3/klines"
+        url  = "https://api.binance.com/api/v3/klines"
         data = _get(url, {"symbol": sym, "interval": "1d", "limit": days})
         if not data or not isinstance(data, list):
             return []
@@ -5008,7 +4804,7 @@ def main():
         "🔄 *MAFIO SNIPER v3.2 — Online*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"✅ Bot restarted — {datetime.now(timezone.utc).strftime('%d %b %Y %H:%M')} UTC\n"
-        f"📡 Exchange: {'*MEXC* 🟠  +  ' if USE_MEXC else ''}*Binance* 🟡\n"
+        f"📡 Exchange: *Binance* 🟡\n"
         f"⚡ Fast scan:    every {FAST_SCAN_S}s\n"
         f"😴 Sleep Giant: every {SLEEP_GIANT_S}s\n"
         f"🎯 Mid scan:    every {MID_SCAN_S}s\n"
@@ -5032,40 +4828,34 @@ def main():
                 time.sleep(1); continue
             last_fast = now
 
-            _mx = fetch_mexc()
-            all_t = dict(_mx)
-            if USE_BINANCE:
-                _bn = fetch_binance()
-                for _sym, _td in _bn.items():
-                    if _sym not in all_t or _td["vol"] > all_t[_sym]["vol"]:
-                        all_t[_sym] = _td
-                # Futures-only: Binance Alpha / pre-listing coins (RAVE type)
-                _bn_fut = fetch_binance_futures_only(set(_bn.keys()))
-                for _sym, _td in _bn_fut.items():
-                    all_t[_sym] = _td   # safe: spot_syms excluded upstream
-                    # Register dynamically as BNB Alpha sector for sector scanner
-                    _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
-                    if _base not in SECTOR_REGISTRY:
-                        SECTOR_REGISTRY[_base] = "BNB Alpha"
-                # Binance Alpha Web3 tokens (BSC — not on Spot/FAPI, traded on MEXC)
-                _bn_alpha = fetch_binance_alpha()
-                _bn_alpha_new = 0
-                for _sym, _td in _bn_alpha.items():
-                    _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
-                    if _sym not in all_t:
-                        all_t[_sym] = _td
-                        _bn_alpha_new += 1
-                    else:
-                        # Coin already fetched (MEXC/Spot) — propagate Alpha flag so
-                        # slow_scan pump bypass and _check() _max_pump=400% both apply
-                        all_t[_sym]["binance_alpha"] = True
-                    if _base not in SECTOR_REGISTRY:
-                        SECTOR_REGISTRY[_base] = "BNB Alpha"
-                _alpha_total = sum(1 for t in all_t.values() if t.get("binance_alpha") or t.get("futures_only"))
-                log.info("Tickers: MEXC=%d Binance=%d Fut-only=%d Alpha-new=%d Alpha-total=%d Total=%d Tracking=%d",
-                         len(_mx), len(_bn), len(_bn_fut), _bn_alpha_new, _alpha_total, len(all_t), len(tracking))
-            else:
-                log.info("Tickers: MEXC=%d Tracking=%d", len(all_t), len(tracking))
+            all_t = {}
+            _bn = fetch_binance()
+            for _sym, _td in _bn.items():
+                all_t[_sym] = _td
+            # Futures-only: Binance Alpha / pre-listing coins (RAVE type)
+            _bn_fut = fetch_binance_futures_only(set(_bn.keys()))
+            for _sym, _td in _bn_fut.items():
+                all_t[_sym] = _td   # safe: spot_syms excluded upstream
+                # Register dynamically as BNB Alpha sector for sector scanner
+                _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
+                if _base not in SECTOR_REGISTRY:
+                    SECTOR_REGISTRY[_base] = "BNB Alpha"
+            # Binance Alpha Web3 tokens (pre-listing candidates)
+            _bn_alpha = fetch_binance_alpha()
+            _bn_alpha_new = 0
+            for _sym, _td in _bn_alpha.items():
+                _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
+                if _sym not in all_t:
+                    all_t[_sym] = _td
+                    _bn_alpha_new += 1
+                else:
+                    # Propagate Alpha flag so slow_scan pump bypass and _max_pump=400% apply
+                    all_t[_sym]["binance_alpha"] = True
+                if _base not in SECTOR_REGISTRY:
+                    SECTOR_REGISTRY[_base] = "BNB Alpha"
+            _alpha_total = sum(1 for t in all_t.values() if t.get("binance_alpha") or t.get("futures_only"))
+            log.info("Tickers: Binance=%d Fut-only=%d Alpha-new=%d Alpha-total=%d Total=%d Tracking=%d",
+                     len(_bn), len(_bn_fut), _bn_alpha_new, _alpha_total, len(all_t), len(tracking))
 
             # ── Market Bias ───────────────────────────
             global market_bias, market_cvd, last_bias_log
