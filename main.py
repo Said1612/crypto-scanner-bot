@@ -4740,6 +4740,37 @@ def scan_trend_follow(all_t):
     log.info("scan_trend_follow: scored=%d fired=%d", len(scored), fired)
 
 
+def _swing_fractal(sym, base_url, price, score):
+    """
+    Fractal analysis for swing scanners — display + AI context only.
+    Returns (fractal_score or None, fra or None).
+    Does NOT modify score or block signals (swing entry criteria already strict).
+    """
+    candles = fetch_klines(sym, base_url, "1h", 50)
+    if not candles:
+        return None, None
+    _fra = _fva_result = _cq_result = None
+    try:
+        if _fractal_agent is not None:
+            _fra = _fractal_agent.analyze(candles, price)
+    except Exception:
+        pass
+    try:
+        if _fva is not None:
+            _fva_result = _fva.evaluate_fractal_confluence(candles, price)
+    except Exception:
+        pass
+    try:
+        if _cq_ok:
+            _cq_result = _cq_integrate(candles, price, score, False)
+    except Exception:
+        pass
+    if not (_fra or _fva_result or _cq_result):
+        return None, None
+    fs = _calc_fractal_score(_fra, _fva_result, _cq_result)
+    return fs, _fra
+
+
 def scan_weekly_breakout(all_t):
     """
     Wolf Flow-style swing scanner: weekly high breakout with volume build-up.
@@ -4822,6 +4853,11 @@ def scan_weekly_breakout(all_t):
 
             _weekly_swing_dedup[sym] = now
 
+            # Fractal analysis — display + AI context
+            _fs, _fra_wb = _swing_fractal(sym, base_url, price, score)
+            _fs_icon = "🟢" if (_fs or 0) >= 7.0 else ("🟡" if (_fs or 0) >= 5.0 else "🔴")
+            _fs_line = f"\n🔬 Fractal Score: `{_fs}/10` {_fs_icon}" if _fs is not None else ""
+
             vol_growth_pct = int(vol_3d / max(vol_7d, 1) * 100)
             breakout_pct   = (price / prev_7d_high - 1) * 100
             ob_pct         = int(ob_spot * 100)
@@ -4863,7 +4899,7 @@ def scan_weekly_breakout(all_t):
                 f"🛑 SL:  `${_fp(sl)}` (-10%)\n"
                 f"⏳ Swing — 72h window\n"
                 f"\n"
-                f"🎯 📈 *WEEKLY BREAKOUT* · Score: `{score}/10`\n"
+                f"🎯 📈 *WEEKLY BREAKOUT* · Score: `{score}/10`{_fs_line}\n"
                 f"\n"
                 f"🟡 Exchange: `{tier['name']} · Binance`\n"
                 f"🕐 {_ts()} UTC\n"
@@ -4874,6 +4910,7 @@ def scan_weekly_breakout(all_t):
                                             "weekly_breakout", score, ob_spot,
                                             ratio, pos24, spike_1h,
                                             net, t["change"], "—",
+                                            fractal_score=_fs,
                                             min_prob=50)
             if ai_blocked:
                 continue
@@ -5003,6 +5040,11 @@ def scan_deep_value(all_t):
 
             _weekly_swing_dedup[sym] = now
 
+            # Fractal analysis — display + AI context
+            _fs, _fra_dv = _swing_fractal(sym, base_url, price, score)
+            _fs_icon = "🟢" if (_fs or 0) >= 7.0 else ("🟡" if (_fs or 0) >= 5.0 else "🔴")
+            _fs_line = f"\n🔬 Fractal Score: `{_fs}/10` {_fs_icon}" if _fs is not None else ""
+
             above_low_pct  = (price / low_7d - 1) * 100
             vol_growth_pct = int(vol_3d / max(vol_7d, 1) * 100)
             ob_pct         = int(ob_spot * 100)
@@ -5044,7 +5086,7 @@ def scan_deep_value(all_t):
                 f"🛑 SL:  `${_fp(sl)}` (-12%)\n"
                 f"⏳ Swing — 72h window\n"
                 f"\n"
-                f"🎯 💎 *DEEP VALUE RECOVERY* · Score: `{score}/10`\n"
+                f"🎯 💎 *DEEP VALUE RECOVERY* · Score: `{score}/10`{_fs_line}\n"
                 f"\n"
                 f"🟡 Exchange: `{tier['name']} · Binance`\n"
                 f"🕐 {_ts()} UTC\n"
@@ -5055,6 +5097,7 @@ def scan_deep_value(all_t):
                                             "deep_value", score, ob_spot,
                                             ratio, pos24, spike_1h,
                                             net, t["change"], "—",
+                                            fractal_score=_fs,
                                             min_prob=50)
             if ai_blocked:
                 continue
