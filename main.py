@@ -1935,40 +1935,6 @@ def poll_telegram():
                 log.debug("poll_telegram: ignored cid=%s (not authorized)", cid)
                 continue
             # Accept /report with any bot suffix (e.g. /report@mybot)
-            if text.lower().split("@")[0] == "/weekly":
-                log.info("Manual /weekly from chat %s", cid)
-                send("⏳ Generating weekly report...")
-                try:
-                    send_weekly_report()
-                except Exception as e:
-                    send(f"❌ *Report failed*\n`{e}`")
-                continue
-
-            if text.lower().split("@")[0] == "/monthly":
-                log.info("Manual /monthly from chat %s", cid)
-                send("⏳ Generating monthly report...")
-                try:
-                    send_monthly_report()
-                except Exception as e:
-                    send(f"❌ *Report failed*\n`{e}`")
-                continue
-
-            if text.lower().split("@")[0] == "/report":
-                now_ts = time.time()
-                # Cooldown: ignore duplicate /report within 120 seconds
-                if now_ts - _last_report_time < 120:
-                    log.debug("/report ignored — cooldown active (%.0fs left)",
-                              120 - (now_ts - _last_report_time))
-                    continue
-                _last_report_time = now_ts
-                log.info("Manual /report from chat %s", cid)
-                # Immediate acknowledgment so user knows it's working
-                send("⏳ Generating daily report...")
-                try:
-                    send_daily_report(reset=False)
-                except Exception as report_err:
-                    log.error("/report failed: %s", report_err, exc_info=True)
-                    send(f"❌ *Report failed*\n`{report_err}`")
 
             if text.lower().split("@")[0] == "/positions":
                 log.info("Manual /positions from chat %s", cid)
@@ -4908,13 +4874,7 @@ def main():
                     # Daily report disabled — misleading for long-term positions
                     # send_daily_report()
 
-            # Weekly — fires Sunday at REPORT_HOUR:05-09 UTC, once per week
-            if (_utc.weekday() == 6 and _utc.hour == REPORT_HOUR
-                    and 5 <= _utc.minute < 10 and _week_str != last_weekly_date):
-                last_weekly_date = _week_str
-                if not _report_sent(_week_str, "weekly"):
-                    _mark_report_sent(_week_str, "weekly")
-                    send_weekly_report()
+            # Weekly report disabled
 
             # Monthly report disabled
             # if (_utc.day == 1 and _utc.hour == REPORT_HOUR
