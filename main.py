@@ -239,10 +239,14 @@ last_super    = 0.0
 last_accum    = 0.0
 last_sg       = 0.0
 last_sector   = 0.0
-last_trend    = 0.0
+last_trend        = 0.0
+last_weekly_swing = 0.0
+last_deep_value   = 0.0
 last_bias_log = 0.0
-ACCUM_SCAN_S     = 300    # every 5 min
-TREND_FOLLOW_S   = 1800   # every 30 min
+ACCUM_SCAN_S      = 300    # every 5 min
+TREND_FOLLOW_S    = 1800   # every 30 min
+WEEKLY_SWING_S    = 300    # every 5 min
+DEEP_VALUE_S      = 300    # every 5 min
 last_report        = 0.0   # last daily report sent (unix ts)
 last_report_date   = ""    # "YYYY-MM-DD" — ensures exactly one report per calendar day
 _last_report_time  = 0.0   # cooldown: prevents duplicate /report within 120s
@@ -316,6 +320,7 @@ def _is_primary_process() -> bool:
     except Exception:
         return True  # if file missing, assume primary
 _trend_dedup         : Dict[str, float] = {}  # {sym: last_trend_signal_ts} 12h cooldown
+_weekly_swing_dedup  : Dict[str, float] = {}  # {sym: last_weekly_swing_ts} 24h cooldown
 _dominance_hist      : List[Tuple[float, dict]] = []  # [(ts, {btcd, usdtd, usdcd, others})]
 
 # ── Circuit Breaker ──────────────────────────────────────────────────────────
@@ -1408,6 +1413,13 @@ def check_milestones(all_t):
                 _fire_stoploss(sym, gain, t["price"], info["entry"],
                                int(elapsed), info["exchange"])
             expired.append((sym, "stoploss"))   # close immediately on SL
+            continue
+
+        # 3. Signal timeout: expire if no target gain within timeout window
+        _timeout_h      = info.get("timeout_h", SIGNAL_TIMEOUT_H)
+        _timeout_target = 15.0 if info.get("is_swing") else 5.0
+        if elapsed > _timeout_h * 3600 and info.get("max", 0.0) < _timeout_target:
+            expired.append((sym, "timeout"))
             continue
 
         # ── Milestone alerts ─────────────────────────────────────────────
@@ -4724,6 +4736,343 @@ def scan_trend_follow(all_t):
     log.info("scan_trend_follow: scored=%d fired=%d", len(scored), fired)
 
 
+def scan_weekly_breakout(all_t):
+    """
+    Wolf Flow-style swing scanner: weekly high breakout with volume build-up.
+    Targets coins breaking above their 7-day closing high on increasing volume.
+    Swing signal: 72h timeout, SL -10%, TP 30%/60%/100%.
+
+    Conditions:
+      - Binance, vol >= $2M, pos24 < 85%
+      - price > max close of previous 7 days (weekly high breakout, 0.5% buffer)
+      - Volume building: 3d avg volume >= 120% of 7d avg volume
+      - 1h flow: ratio >= 1.5x, net > 0, OB >= 0.55
+      - 24h cooldown per coin
+    """
+    now = time.time()
+    candidates = [
+        (sym, t) for sym, t in all_t.items()
+        if t["exchange"] == "Binance"
+        and t["vol"] >= 2_000_000
+        and now - _weekly_swing_dedup.get(sym, 0) >= 86400
+        and now - alerted.get(sym, 0) >= COOLDOWN
+        and sym not in tracking
+        and sym not in BLACKLIST
+        and t.get("change", 0) >= -5.0    # not in freefall
+    ]
+
+    fired = 0
+    for sym, t in candidates:
+        try:
+            klines = _fetch_daily_klines(sym, "Binance", days=14)
+            if len(klines) < 10:
+                continue
+
+            closes   = [c for c, v in klines]
+            vols     = [v for c, v in klines]
+            price    = closes[-1]
+            vols_usd = [v * c for c, v in klines]
+
+            # Weekly high breakout: price > max close of previous 7 days (0.5% buffer)
+            prev_7d_high = max(closes[-8:-1])
+            if price <= prev_7d_high * 1.005:
+                continue
+
+            # Volume building: 3d avg must be >= 120% of 7d avg
+            vol_3d = sum(vols_usd[-4:-1]) / 3 if len(vols_usd) >= 4 else 0
+            vol_7d = sum(vols_usd[-8:-1]) / 7 if len(vols_usd) >= 8 else 0
+            if vol_7d <= 0 or vol_3d < vol_7d * 1.20:
+                continue
+
+            # Intraday position: not already overextended
+            rng   = t["high24"] - t["low24"]
+            pos24 = (price - t["low24"]) / rng if rng > 0 else 0.5
+            if pos24 > 0.85:
+                continue
+
+            # 1h flow check
+            base_url = t["base_url"]
+            buy_v, sell_v = fetch_agg_trades(sym, base_url, minutes=60)
+            if sell_v <= 0:
+                continue
+            ratio = buy_v / sell_v
+            if ratio < 1.5:
+                continue
+            net = buy_v - sell_v
+            if net <= 0:
+                continue
+
+            ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
+            if ob_spot < 0.55:
+                continue
+
+            tier   = get_tier(t["vol"])
+            score  = _calc_score(pos24, net, max(t["vol"] * 0.001, 1000.0),
+                                 ob_spot, (buy_v + sell_v) / max(t["vol"] / 24.0, 1))
+
+            _weekly_swing_dedup[sym] = now
+
+            vol_growth_pct = int(vol_3d / max(vol_7d, 1) * 100)
+            breakout_pct   = (price / prev_7d_high - 1) * 100
+            ob_pct         = int(ob_spot * 100)
+            pos_pct        = int(pos24 * 100)
+            ex_icon        = "🟡"
+            _, badge       = _register_confirm(sym, "weekly_breakout")
+
+            global signal_count
+            signal_count += 1
+
+            # Fixed TP for swing: 30% / 60% / 100%
+            tp1 = price * 1.30
+            tp2 = price * 1.60
+            tp3 = price * 2.00
+            sl  = price * 0.90
+
+            msg = (
+                f"{'━'*20}\n"
+                f"💀 *MAFIO SNIPER* 📡\n"
+                f"\n"
+                f"📈 *#{sym[:-4]}* 🐺 · Swing · Signal #{signal_count} {badge}\n"
+                f"💰 Price: `${_fp(price)}`\n"
+                f"📉 24h Change: `{t['change']:+.2f}%`\n"
+                f"📍 Position: `%{pos_pct} of range`\n"
+                f"\n"
+                f"🔓 Weekly Breakout: `+{breakout_pct:.1f}%` above 7d high\n"
+                f"📊 Volume Building: `{vol_growth_pct}%` of 7d avg\n"
+                f"📊 Ratio 1h: `{ratio:.1f}x` 🔥\n"
+                f"📗 Order Book: `{ob_pct}%` bids\n"
+                f"\n"
+                f"🎯 TP1: `${_fp(tp1)}` (+30%)\n"
+                f"🎯 TP2: `${_fp(tp2)}` (+60%)\n"
+                f"🎯 TP3: `${_fp(tp3)}` (+100%)\n"
+                f"🛑 SL:  `${_fp(sl)}` (-10%)\n"
+                f"⏳ Swing — 72h window\n"
+                f"\n"
+                f"🎯 🐺 *WEEKLY BREAKOUT* · Score: `{score}/10`\n"
+                f"\n"
+                f"{ex_icon} Exchange: `{tier['name']} · Binance`\n"
+                f"🕐 {_ts()} UTC\n"
+                f"{'━'*20}"
+            )
+
+            ai_str, ai_blocked = _ai_assess(sym, t["exchange"], tier["name"],
+                                            "weekly_breakout", score, ob_spot,
+                                            ratio, pos24,
+                                            (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
+                                            net, t["change"], "—")
+            if ai_blocked:
+                continue
+            msg += ai_str
+
+            alerted[sym]       = now
+            _signal_dedup[sym] = now
+            kb = _trade_keyboard(sym, t["exchange"])
+            ok, sig_msg_id = send_ex(msg, reply_markup=kb)
+            if ok:
+                _alerted_price[sym] = price
+                tracking[sym] = {
+                    "entry":      price,
+                    "t0":         now,
+                    "hit":        set(),
+                    "max":        0.0,
+                    "min":        0.0,
+                    "exchange":   t["exchange"],
+                    "is_flash":   False,
+                    "is_swing":   True,
+                    "timeout_h":  72,
+                    "sig_msg_id": sig_msg_id,
+                    "sl_pct":     -10.0,
+                    "tp1":        tp1,
+                }
+                _db_add(sym, price, t["exchange"], tier["name"], "weekly_breakout",
+                        ratio, ob_spot, score, pos24,
+                        (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
+                        net, t["change"], f"+{breakout_pct:.1f}%_above_7dh")
+                save_state()
+                fired += 1
+                log.info("WEEKLY_BREAKOUT %s breakout=+%.1f%% vol_growth=%d%% pos=%d%% ratio=%.1f",
+                         sym, breakout_pct, vol_growth_pct, pos_pct, ratio)
+            time.sleep(0.3)
+
+        except Exception as e:
+            log.debug("weekly_breakout %s: %s", sym, e)
+
+    if fired:
+        log.info("scan_weekly_breakout: fired=%d", fired)
+
+
+def scan_deep_value(all_t):
+    """
+    Wolf Flow-style swing scanner: deep value recovery.
+    Catches coins near multi-week lows that are showing early recovery signs.
+    Swing signal: 72h timeout, SL -12%, TP 20%/40%/80%.
+
+    Conditions:
+      - Binance, vol >= $500k
+      - price near 7-day low: current price <= 7d-low * 1.08 (within 8% of 7d low)
+      - Not in freefall: 7d change > -60%, today's change > -12%
+      - Volume building: 3d avg volume >= 110% of 7d avg (confirming recovery)
+      - pos24 < 35% (near bottom of today's range)
+      - 1h flow: net > 0, OB >= 0.58
+      - 24h cooldown per coin
+    """
+    now = time.time()
+    candidates = [
+        (sym, t) for sym, t in all_t.items()
+        if t["exchange"] == "Binance"
+        and t["vol"] >= 500_000
+        and now - _weekly_swing_dedup.get(sym, 0) >= 86400
+        and now - alerted.get(sym, 0) >= COOLDOWN
+        and sym not in tracking
+        and sym not in BLACKLIST
+        and -12.0 <= t.get("change", 0) <= 15.0   # not in freefall, not already pumped
+    ]
+
+    fired = 0
+    for sym, t in candidates:
+        try:
+            klines = _fetch_daily_klines(sym, "Binance", days=14)
+            if len(klines) < 10:
+                continue
+
+            closes   = [c for c, v in klines]
+            vols_usd = [v * c for c, v in klines]
+            price    = closes[-1]
+
+            # Near 7-day low: price within 8% above the 7d low close
+            low_7d = min(closes[-8:-1])
+            if price > low_7d * 1.08:
+                continue
+
+            # Not in freefall: 7d gain must not be catastrophic
+            gain_7d = (price - closes[-8]) / closes[-8] * 100 if closes[-8] > 0 else 0
+            if gain_7d < -60.0:
+                continue
+
+            # Volume building: 3d avg must be >= 110% of 7d avg (recovery confirmation)
+            vol_3d = sum(vols_usd[-4:-1]) / 3 if len(vols_usd) >= 4 else 0
+            vol_7d = sum(vols_usd[-8:-1]) / 7 if len(vols_usd) >= 8 else 0
+            if vol_7d <= 0 or vol_3d < vol_7d * 1.10:
+                continue
+
+            # Near bottom of today's range
+            rng   = t["high24"] - t["low24"]
+            pos24 = (price - t["low24"]) / rng if rng > 0 else 0.5
+            if pos24 > 0.35:
+                continue
+
+            # 1h flow check
+            base_url = t["base_url"]
+            buy_v, sell_v = fetch_agg_trades(sym, base_url, minutes=60)
+            if sell_v <= 0:
+                continue
+            net = buy_v - sell_v
+            if net <= 0:
+                continue
+            ratio = buy_v / sell_v
+            if ratio < 1.3:
+                continue
+
+            ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
+            if ob_spot < 0.58:
+                continue
+
+            tier   = get_tier(t["vol"])
+            score  = _calc_score(pos24, net, max(t["vol"] * 0.001, 500.0),
+                                 ob_spot, (buy_v + sell_v) / max(t["vol"] / 24.0, 1))
+            if score < 7.0:
+                continue
+
+            _weekly_swing_dedup[sym] = now
+
+            above_low_pct  = (price / low_7d - 1) * 100
+            vol_growth_pct = int(vol_3d / max(vol_7d, 1) * 100)
+            ob_pct         = int(ob_spot * 100)
+            pos_pct        = int(pos24 * 100)
+            _, badge       = _register_confirm(sym, "deep_value")
+
+            global signal_count
+            signal_count += 1
+
+            # Fixed TP for swing: 20% / 40% / 80%
+            tp1 = price * 1.20
+            tp2 = price * 1.40
+            tp3 = price * 1.80
+            sl  = price * 0.88
+
+            msg = (
+                f"{'━'*20}\n"
+                f"💀 *MAFIO SNIPER* 📡\n"
+                f"\n"
+                f"💎 *#{sym[:-4]}* 🐺 · Swing · Signal #{signal_count} {badge}\n"
+                f"💰 Price: `${_fp(price)}`\n"
+                f"📉 24h Change: `{t['change']:+.2f}%`\n"
+                f"📍 Position: `%{pos_pct} of range` ✅\n"
+                f"\n"
+                f"📍 7d Low Zone: `+{above_low_pct:.1f}%` above 7d low\n"
+                f"📊 Volume Recovery: `{vol_growth_pct}%` of 7d avg\n"
+                f"📊 Buy/Sell Ratio: `{ratio:.1f}x`\n"
+                f"📗 Order Book: `{ob_pct}%` bids\n"
+                f"\n"
+                f"🎯 TP1: `${_fp(tp1)}` (+20%)\n"
+                f"🎯 TP2: `${_fp(tp2)}` (+40%)\n"
+                f"🎯 TP3: `${_fp(tp3)}` (+80%)\n"
+                f"🛑 SL:  `${_fp(sl)}` (-12%)\n"
+                f"⏳ Swing — 72h window\n"
+                f"\n"
+                f"🎯 💎 *DEEP VALUE RECOVERY* · Score: `{score}/10`\n"
+                f"\n"
+                f"🟡 Exchange: `{tier['name']} · Binance`\n"
+                f"🕐 {_ts()} UTC\n"
+                f"{'━'*20}"
+            )
+
+            ai_str, ai_blocked = _ai_assess(sym, t["exchange"], tier["name"],
+                                            "deep_value", score, ob_spot,
+                                            ratio, pos24,
+                                            (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
+                                            net, t["change"], "—")
+            if ai_blocked:
+                continue
+            msg += ai_str
+
+            alerted[sym]       = now
+            _signal_dedup[sym] = now
+            kb = _trade_keyboard(sym, t["exchange"])
+            ok, sig_msg_id = send_ex(msg, reply_markup=kb)
+            if ok:
+                _alerted_price[sym] = price
+                tracking[sym] = {
+                    "entry":      price,
+                    "t0":         now,
+                    "hit":        set(),
+                    "max":        0.0,
+                    "min":        0.0,
+                    "exchange":   t["exchange"],
+                    "is_flash":   False,
+                    "is_swing":   True,
+                    "timeout_h":  72,
+                    "sig_msg_id": sig_msg_id,
+                    "sl_pct":     -12.0,
+                    "tp1":        tp1,
+                }
+                _db_add(sym, price, t["exchange"], tier["name"], "deep_value",
+                        ratio, ob_spot, score, pos24,
+                        (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
+                        net, t["change"], f"7dLow+{above_low_pct:.1f}%")
+                save_state()
+                fired += 1
+                log.info("DEEP_VALUE %s gain7d=%.1f%% low_zone=+%.1f%% pos=%d%% vol_growth=%d%%",
+                         sym, gain_7d, above_low_pct, pos_pct, vol_growth_pct)
+            time.sleep(0.3)
+
+        except Exception as e:
+            log.debug("deep_value %s: %s", sym, e)
+
+    if fired:
+        log.info("scan_deep_value: fired=%d", fired)
+
+
 # ══════════════════════════════════════════════════════
 #  REPORT DEDUP — file-based lock prevents duplicate sends
 #  across multiple bot instances (nohup + systemd race)
@@ -4755,7 +5104,7 @@ def _mark_report_sent(key: str, report_type: str):
 # ══════════════════════════════════════════════════════
 
 def main():
-    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_report, last_report_date, last_weekly_date, last_monthly_date
+    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_weekly_swing, last_deep_value, last_report, last_report_date, last_weekly_date, last_monthly_date
     # Error tracking — alert Telegram on repeated loop errors
     _loop_err_count = [0]    # [count] — mutable so inner scope can modify
     _loop_last_err  = [""]   # [last_error_str]
@@ -4917,6 +5266,16 @@ def main():
             if now - last_trend >= TREND_FOLLOW_S:
                 last_trend = now
                 scan_trend_follow(all_t)
+
+            # Swing: weekly high breakout with volume build-up (Wolf Flow style)
+            if now - last_weekly_swing >= WEEKLY_SWING_S:
+                last_weekly_swing = now
+                scan_weekly_breakout(all_t)
+
+            # Swing: deep value recovery near 7-day low (Wolf Flow style)
+            if now - last_deep_value >= DEEP_VALUE_S:
+                last_deep_value = now
+                scan_deep_value(all_t)
 
         except KeyboardInterrupt:
             log.info("Stopped."); break
