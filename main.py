@@ -4825,8 +4825,9 @@ def scan_weekly_breakout(all_t):
             vol_growth_pct = int(vol_3d / max(vol_7d, 1) * 100)
             breakout_pct   = (price / prev_7d_high - 1) * 100
             ob_pct         = int(ob_spot * 100)
+            ob_lbl         = "🟢 Buyers" if ob_spot > 0.58 else "⚪ Balanced"
             pos_pct        = int(pos24 * 100)
-            ex_icon        = "🟡"
+            _mkt           = "Alpha" if (t.get("futures_only") or t.get("binance_alpha")) else "Spot"
             _, badge       = _register_confirm(sym, "weekly_breakout")
 
             global signal_count
@@ -4842,15 +4843,19 @@ def scan_weekly_breakout(all_t):
                 f"{'━'*20}\n"
                 f"💀 *MAFIO SNIPER* 📡\n"
                 f"\n"
-                f"📈 *#{sym[:-4]}* 🐺 · Swing · Signal #{signal_count} {badge}\n"
+                f"📈 *#{sym[:-4]}* 💀 · {_mkt} · Swing · Signal #{signal_count} {badge}\n"
                 f"💰 Price: `${_fp(price)}`\n"
                 f"📉 24h Change: `{t['change']:+.2f}%`\n"
                 f"📍 Position: `%{pos_pct} of range`\n"
                 f"\n"
                 f"🔓 Weekly Breakout: `+{breakout_pct:.1f}%` above 7d high\n"
                 f"📊 Volume Building: `{vol_growth_pct}%` of 7d avg\n"
-                f"📊 Ratio 1h: `{ratio:.1f}x` 🔥\n"
-                f"📗 Order Book: `{ob_pct}%` bids\n"
+                f"⚡ Volume 1h: `{spike_1h:.1f}x` above avg\n"
+                f"💹 1h Flow:\n"
+                f"  📥 In:  `{_fv(buy_v)}`\n"
+                f"  📤 Out: `{_fv(sell_v)}`\n"
+                f"  ▲ Net: `+{_fv(net)}` ✅\n"
+                f"📗 Order Book: {ob_lbl} `{ob_pct}%` bids\n"
                 f"\n"
                 f"🎯 TP1: `${_fp(tp1)}` (+30%)\n"
                 f"🎯 TP2: `${_fp(tp2)}` (+60%)\n"
@@ -4858,9 +4863,9 @@ def scan_weekly_breakout(all_t):
                 f"🛑 SL:  `${_fp(sl)}` (-10%)\n"
                 f"⏳ Swing — 72h window\n"
                 f"\n"
-                f"🎯 🐺 *WEEKLY BREAKOUT* · Score: `{score}/10`\n"
+                f"🎯 📈 *WEEKLY BREAKOUT* · Score: `{score}/10`\n"
                 f"\n"
-                f"{ex_icon} Exchange: `{tier['name']} · Binance`\n"
+                f"🟡 Exchange: `{tier['name']} · Binance`\n"
                 f"🕐 {_ts()} UTC\n"
                 f"{'━'*20}"
             )
@@ -5001,7 +5006,9 @@ def scan_deep_value(all_t):
             above_low_pct  = (price / low_7d - 1) * 100
             vol_growth_pct = int(vol_3d / max(vol_7d, 1) * 100)
             ob_pct         = int(ob_spot * 100)
+            ob_lbl         = "🟢 Buyers" if ob_spot > 0.58 else "⚪ Balanced"
             pos_pct        = int(pos24 * 100)
+            _mkt           = "Alpha" if (t.get("futures_only") or t.get("binance_alpha")) else "Spot"
             _, badge       = _register_confirm(sym, "deep_value")
 
             global signal_count
@@ -5017,15 +5024,19 @@ def scan_deep_value(all_t):
                 f"{'━'*20}\n"
                 f"💀 *MAFIO SNIPER* 📡\n"
                 f"\n"
-                f"💎 *#{sym[:-4]}* 🐺 · Swing · Signal #{signal_count} {badge}\n"
+                f"💎 *#{sym[:-4]}* 💀 · {_mkt} · Swing · Signal #{signal_count} {badge}\n"
                 f"💰 Price: `${_fp(price)}`\n"
                 f"📉 24h Change: `{t['change']:+.2f}%`\n"
-                f"📍 Position: `%{pos_pct} of range` ✅\n"
+                f"📍 Position: `%{pos_pct} from Bottom` ✅\n"
                 f"\n"
                 f"📍 7d Low Zone: `+{above_low_pct:.1f}%` above 7d low\n"
                 f"📊 Volume Recovery: `{vol_growth_pct}%` of 7d avg\n"
-                f"📊 Buy/Sell Ratio: `{ratio:.1f}x`\n"
-                f"📗 Order Book: `{ob_pct}%` bids\n"
+                f"⚡ Volume 1h: `{spike_1h:.1f}x` above avg\n"
+                f"💹 1h Flow:\n"
+                f"  📥 In:  `{_fv(buy_v)}`\n"
+                f"  📤 Out: `{_fv(sell_v)}`\n"
+                f"  ▲ Net: `+{_fv(net)}` ✅\n"
+                f"📗 Order Book: {ob_lbl} `{ob_pct}%` bids\n"
                 f"\n"
                 f"🎯 TP1: `${_fp(tp1)}` (+20%)\n"
                 f"🎯 TP2: `${_fp(tp2)}` (+40%)\n"
