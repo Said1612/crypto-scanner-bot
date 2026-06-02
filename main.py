@@ -998,8 +998,10 @@ def send(text, reply_markup=None):
 
 def _ai_assess(sym, exchange, tier, scanner, score,
                ob_spot, ratio, pos24, spike, net_usd, move_pct, funding,
-               fractal_score=None, h_value=None, oi_delta=None) -> tuple:
-    """Return (ai_text, blocked). blocked=True only when AI<40% + sellers dominate OB."""
+               fractal_score=None, h_value=None, oi_delta=None,
+               min_prob=0) -> tuple:
+    """Return (ai_text, blocked). blocked=True only when AI<40% + sellers dominate OB.
+    min_prob: if set, also blocks when AI probability is below this threshold."""
     if _ai_agent is None:
         return "", False
     try:
@@ -1035,7 +1037,9 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         dump_pattern  = (prob < 45 and ob_spot < 0.40)
         # Block condition 3: weak on ALL dimensions simultaneously (very rare)
         weak_combined = (prob < 50 and score < 6.0 and spike < 2.0)
-        blocked = extreme_avoid or dump_pattern or weak_combined
+        # Block condition 4: per-scanner minimum prob (swing scanners require >= 50%)
+        below_min     = (min_prob > 0 and prob < min_prob)
+        blocked = extreme_avoid or dump_pattern or weak_combined or below_min
         if blocked:
             if extreme_avoid:
                 reason = "AI<35%% avoid"
@@ -4790,25 +4794,31 @@ def scan_weekly_breakout(all_t):
             if pos24 > 0.85:
                 continue
 
-            # 1h flow check
+            # 1h flow check — stricter for swing quality
             base_url = t["base_url"]
             buy_v, sell_v = fetch_agg_trades(sym, base_url, minutes=60)
             if sell_v <= 0:
                 continue
             ratio = buy_v / sell_v
-            if ratio < 1.5:
+            if ratio < 2.0:
                 continue
             net = buy_v - sell_v
             if net <= 0:
                 continue
 
+            spike_1h = (buy_v + sell_v) / max(t["vol"] / 24.0, 1)
+            if spike_1h < 1.5:
+                continue
+
             ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
-            if ob_spot < 0.55:
+            if ob_spot < 0.60:
                 continue
 
             tier   = get_tier(t["vol"])
             score  = _calc_score(pos24, net, max(t["vol"] * 0.001, 1000.0),
-                                 ob_spot, (buy_v + sell_v) / max(t["vol"] / 24.0, 1))
+                                 ob_spot, spike_1h)
+            if score < 8.0:
+                continue
 
             _weekly_swing_dedup[sym] = now
 
@@ -4857,9 +4867,9 @@ def scan_weekly_breakout(all_t):
 
             ai_str, ai_blocked = _ai_assess(sym, t["exchange"], tier["name"],
                                             "weekly_breakout", score, ob_spot,
-                                            ratio, pos24,
-                                            (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
-                                            net, t["change"], "—")
+                                            ratio, pos24, spike_1h,
+                                            net, t["change"], "—",
+                                            min_prob=50)
             if ai_blocked:
                 continue
             msg += ai_str
@@ -4885,8 +4895,7 @@ def scan_weekly_breakout(all_t):
                     "tp1":        tp1,
                 }
                 _db_add(sym, price, t["exchange"], tier["name"], "weekly_breakout",
-                        ratio, ob_spot, score, pos24,
-                        (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
+                        ratio, ob_spot, score, pos24, spike_1h,
                         net, t["change"], f"+{breakout_pct:.1f}%_above_7dh")
                 save_state()
                 fired += 1
@@ -4949,10 +4958,10 @@ def scan_deep_value(all_t):
             if gain_7d < -60.0:
                 continue
 
-            # Volume building: 3d avg must be >= 110% of 7d avg (recovery confirmation)
+            # Volume building: 3d avg must be >= 130% of 7d avg (strong recovery confirmation)
             vol_3d = sum(vols_usd[-4:-1]) / 3 if len(vols_usd) >= 4 else 0
             vol_7d = sum(vols_usd[-8:-1]) / 7 if len(vols_usd) >= 8 else 0
-            if vol_7d <= 0 or vol_3d < vol_7d * 1.10:
+            if vol_7d <= 0 or vol_3d < vol_7d * 1.30:
                 continue
 
             # Near bottom of today's range
@@ -4961,7 +4970,7 @@ def scan_deep_value(all_t):
             if pos24 > 0.35:
                 continue
 
-            # 1h flow check
+            # 1h flow check — stricter ratio & spike for swing quality
             base_url = t["base_url"]
             buy_v, sell_v = fetch_agg_trades(sym, base_url, minutes=60)
             if sell_v <= 0:
@@ -4970,17 +4979,21 @@ def scan_deep_value(all_t):
             if net <= 0:
                 continue
             ratio = buy_v / sell_v
-            if ratio < 1.3:
+            if ratio < 2.0:
+                continue
+
+            spike_1h = (buy_v + sell_v) / max(t["vol"] / 24.0, 1)
+            if spike_1h < 1.5:
                 continue
 
             ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
-            if ob_spot < 0.58:
+            if ob_spot < 0.60:
                 continue
 
             tier   = get_tier(t["vol"])
             score  = _calc_score(pos24, net, max(t["vol"] * 0.001, 500.0),
-                                 ob_spot, (buy_v + sell_v) / max(t["vol"] / 24.0, 1))
-            if score < 7.0:
+                                 ob_spot, spike_1h)
+            if score < 8.0:
                 continue
 
             _weekly_swing_dedup[sym] = now
@@ -5029,9 +5042,9 @@ def scan_deep_value(all_t):
 
             ai_str, ai_blocked = _ai_assess(sym, t["exchange"], tier["name"],
                                             "deep_value", score, ob_spot,
-                                            ratio, pos24,
-                                            (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
-                                            net, t["change"], "—")
+                                            ratio, pos24, spike_1h,
+                                            net, t["change"], "—",
+                                            min_prob=50)
             if ai_blocked:
                 continue
             msg += ai_str
@@ -5057,8 +5070,7 @@ def scan_deep_value(all_t):
                     "tp1":        tp1,
                 }
                 _db_add(sym, price, t["exchange"], tier["name"], "deep_value",
-                        ratio, ob_spot, score, pos24,
-                        (buy_v + sell_v) / max(t["vol"] / 24.0, 1),
+                        ratio, ob_spot, score, pos24, spike_1h,
                         net, t["change"], f"7dLow+{above_low_pct:.1f}%")
                 save_state()
                 fired += 1
