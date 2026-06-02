@@ -4916,13 +4916,10 @@ def main():
                     _mark_report_sent(_week_str, "weekly")
                     send_weekly_report()
 
-            # Monthly — fires on 1st of month at REPORT_HOUR:10-14 UTC, once per month
-            if (_utc.day == 1 and _utc.hour == REPORT_HOUR
-                    and 10 <= _utc.minute < 15 and _month_str != last_monthly_date):
-                last_monthly_date = _month_str
-                if not _report_sent(_month_str, "monthly"):
-                    _mark_report_sent(_month_str, "monthly")
-                    send_monthly_report()
+            # Monthly report disabled
+            # if (_utc.day == 1 and _utc.hour == REPORT_HOUR
+            #         and 10 <= _utc.minute < 15 and _month_str != last_monthly_date):
+            #     send_monthly_report()
 
             poll_telegram()   # check for /report and other commands
             fast_scan(all_t)
