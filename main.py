@@ -2433,7 +2433,7 @@ def _check(sym, ticker, interval, sector_boost=False):
             # Raised: MEXC Mid 75%→100%, Large 60%→80% — OPN-type moves are valid
             _dist_max = {"Micro": 150.0, "Small": 120.0, "Mid": 100.0, "Large": 80.0}.get(tier["name"], 100.0)
         if _rise_pct > _dist_max:
-            _rej("far_from_low"); return
+            _rej(f"far_from_low(rise={_rise_pct:.0f}%,max={_dist_max:.0f}%,exch={exchange},tier={tier['name']})"); return
 
     # ── Step 1: Klines FIRST (1 API call — main filter) ──────────────────
     # limit=50: gives stable EMA20 (30 seed + 20 rolling points)
