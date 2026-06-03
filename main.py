@@ -695,7 +695,9 @@ def fetch_binance_alpha():
                 continue
             if 0.97 <= price <= 1.03 and abs(chg) < 0.5:
                 continue
-            high = price if chg >= 0 else price / (1 + abs(chg) / 100)
+            # Add 5% buffer above current price — setting high=price makes pos24=1.0
+            # for all positive-change Alpha coins, blocking them with high_pos
+            high = price * 1.05 if chg >= 0 else price / (1 + abs(chg) / 100)
             low  = price / (1 + chg / 100) if chg > 0 else price * (1 + abs(chg) / 100)
             out[sym] = {
                 "price":         price,
@@ -2514,8 +2516,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     elif interval == "5m":
         move_min = min(move_min, 0.3)
 
-    # Sector momentum: confirm spike >= 1.5x after klines are available
-    _sector_mom = _sector_mom_pre and spike >= 1.5
+    # Sector momentum: confirm spike after klines are available
+    # Alpha coins accumulate with subtler spikes (1.2x) vs regular coins (1.5x)
+    _sector_mom_spike_thr = 1.2 if _is_alpha_coin else 1.5
+    _sector_mom = _sector_mom_pre and spike >= _sector_mom_spike_thr
     if move < move_min and not _sector_mom: _rej(f"low_move({move:.1f}%)"); return
 
     # ── Volume-adjusted ratio: ILV pattern — big spike + lower ratio at breakout start ──
