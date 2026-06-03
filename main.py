@@ -3668,8 +3668,11 @@ def get_market_ctx(bias: int) -> dict:
 
 
 def should_signal(tier_name: str, bias: int, exchange: str = "Binance") -> bool:
-    """Allow signals even in bear market — news-driven pumps happen regardless of macro bias."""
-    return bias > -60   # block only in extreme bear
+    """Strong liquidity flow is independent of market direction.
+    Only block in total market collapse (bias < -85) — a coin with ratio=5x,
+    spike=4x, net=$50K is a real signal regardless of BTC direction.
+    Normal bear markets: flow filters (ratio/spike/net/OB) handle quality."""
+    return bias > -85   # only block in total market collapse
 
 
 def _is_late_entry(price, high_24h, low_24h):
@@ -3908,7 +3911,7 @@ def scan_supertrend(all_t):
         if _is_late_entry(price, ticker["high24"], ticker["low24"]):
             _rj("st_top"); continue
 
-        # Market bias gate — skip micro-caps in strong bear
+        # Market bias gate — only block in total collapse (bias < -85)
         if not should_signal(get_tier(vol_24h)["name"], market_bias, exchange):
             _rj("st_bias"); continue
 
