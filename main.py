@@ -4114,7 +4114,7 @@ def scan_sleeping_giant(all_t):
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if -5.0 <= t["change"] <= 15.0         # extended to +15%: catches early-stage explosions
-        and t["vol"] >= 100_000                 # minimum real liquidity ($100K/day)
+        and t["vol"] >= 500_000                 # minimum real liquidity ($500K/day) — filters ghost/delisted coins
         and sym not in tracking
         and now - _signal_dedup.get(sym, 0) >= 7200
         and now - alerted.get(sym, 0) >= COOLDOWN
