@@ -127,6 +127,7 @@ BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "WAVES",                           # Delisted from Binance — ghost volume causes false sleeping giant signals
                   "KMD",                             # Delisted from Binance — ghost volume causes false sleeping giant signals
                   "COCOS",                           # Dead gaming blockchain — ghost volume causes false 92x sleeping giant signals
+                  "ORN",                             # Delisted from Binance — ghost 202x volume causes false sleeping giant signals
                   }
 
 # ── Coin Categories — used in daily report Top 10 ──────────────
