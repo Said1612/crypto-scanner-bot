@@ -124,6 +124,8 @@ BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "TOMO",                            # Delisted/rebranded — stale API data causes false sleeping giant loops
                   "FTM",                             # Rebranded to SONIC — old ticker shows ghost volume
                   "REN",                             # Ren Protocol shut down — dead project, ghost volume
+                  "WAVES",                           # Delisted from Binance — ghost volume causes false sleeping giant signals
+                  "KMD",                             # Delisted from Binance — ghost volume causes false sleeping giant signals
                   }
 
 # ── Coin Categories — used in daily report Top 10 ──────────────
