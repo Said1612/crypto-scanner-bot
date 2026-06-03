@@ -2423,15 +2423,15 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # ── Distance from 24h low: pre-klines guard (no API call) ────────────
     # Only blocks coins that have ALREADY completed a massive pump (>80-90% from daily low).
-    # Lighter guard — pos_limit + late_entry handle true late entries.
-    # MEXC: Micro=120% (micro-caps can 2x and still be early), Large=70%
-    # Binance: slightly wider (liquid large-caps sustain longer trends)
-    if ticker["low24"] > 0:
+    # Alpha: bypass — high/low are estimated, not real API data
+    # Sleeping giant (1m_sg): bypass — explosive moves from deep lows are the point
+    if ticker["low24"] > 0 and not _is_alpha_coin and interval != "1m_sg":
         _rise_pct = (price - ticker["low24"]) / ticker["low24"] * 100
         if exchange == "Binance":
             _dist_max = {"Micro": 200.0, "Small": 150.0, "Mid": 120.0, "Large": 120.0}.get(tier["name"], 120.0)
         else:
-            _dist_max = {"Micro": 120.0, "Small": 90.0, "Mid": 75.0, "Large": 60.0}.get(tier["name"], 75.0)
+            # Raised: MEXC Mid 75%→100%, Large 60%→80% — OPN-type moves are valid
+            _dist_max = {"Micro": 150.0, "Small": 120.0, "Mid": 100.0, "Large": 80.0}.get(tier["name"], 100.0)
         if _rise_pct > _dist_max:
             _rej("far_from_low"); return
 
