@@ -2371,7 +2371,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     _sector_mom_pre = (
         change >= 15.0 and          # strong 24h trend
         _rise_from_low < 55.0 and   # not overextended — raised from 40% to 55% to catch PORTAL/STG type
-        vol_24h >= 1_000_000        # meaningful liquidity — no micro-cap wash trading
+        (vol_24h >= 1_000_000 or _is_alpha_coin)  # Alpha bypass: pre-listing coins have thin vol by nature
     )
 
     # Get tier thresholds based on 24h volume
@@ -2408,7 +2408,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Wick/OB filters handle true pump-dumps
     _late_pct = 0.97
     rng = ticker["high24"] - ticker["low24"]
-    if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre and not momentum_bypass and interval != "1m_sg":
+    if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre and not momentum_bypass and interval != "1m_sg" and not _is_alpha_coin:
         _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
@@ -2482,7 +2482,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     if move < -1.0: _rej(f"low_move({move:.1f}%)"); return
 
     # Thin coin + big move = pump already over (AURORA, SIX type)
-    if move > 8.0 and vol_24h < 200_000:
+    if move > 8.0 and vol_24h < 200_000 and not _is_alpha_coin:
         _rej("thin_pump"); return
 
     # Reject dead coins (zero base volume)
@@ -3759,7 +3759,7 @@ def mid_scan(all_t):
     # Alpha/futures-only coins: allow up to 400% (listing-day pumps reach 200-400%)
     by_chg = sorted(
         [(s, t) for s, t in all_t.items()
-         if t["vol"] >= 150_000 and (
+         if (t["vol"] >= 150_000 or t.get("binance_alpha") or t.get("futures_only")) and (
              2.0 <= t["change"] <= 70.0
              or ((t.get("binance_alpha") or t.get("futures_only")) and 70.0 < t["change"] <= 400.0)
          )],
