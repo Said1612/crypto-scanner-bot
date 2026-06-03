@@ -2410,7 +2410,8 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("low_vol"); return
 
     # Market bias gate — Binance: allow Mid+Large in bear (FF/ILV/LPT proof)
-    if not should_signal(tier["name"], market_bias, exchange):
+    # Alpha/futures-only coins bypass bias_gate — they move independently of market
+    if not should_signal(tier["name"], market_bias, exchange) and not _is_alpha_coin:
         _rej("bias_gate"); return
 
     # ── Distance from 24h low: pre-klines guard (no API call) ────────────
