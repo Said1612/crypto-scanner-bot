@@ -3667,13 +3667,13 @@ def get_market_ctx(bias: int) -> dict:
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
                 "move_min": 1.0,  "late_pct": 0.88}  # Neutral
     if bias >= -60:
-        return {"pos_limit": 0.68, "crash_limit":  8.0,
-                "spike_mult": 1.15, "ratio_mult": 1.15, "ob_min": 0.45,
-                "move_min": 2.0,  "late_pct": 0.85}  # Bear
-    # Strong Bear
-    return     {"pos_limit": 0.55, "crash_limit":  5.0,
-                "spike_mult": 1.30, "ratio_mult": 1.20, "ob_min": 0.50,
-                "move_min": 2.5,  "late_pct": 0.82}  # Strong Bear: very strict
+        return {"pos_limit": 0.72, "crash_limit":  8.0,
+                "spike_mult": 0.95, "ratio_mult": 0.95, "ob_min": 0.42,
+                "move_min": 1.0,  "late_pct": 0.88}  # Bear — strength-in-weakness is MORE significant
+    # Strong Bear: flow filters (ratio/spike/OB/net) handle quality — don't double-penalise
+    return     {"pos_limit": 0.68, "crash_limit":  5.0,
+                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.45,
+                "move_min": 1.0,  "late_pct": 0.85}  # Strong Bear
 
 
 def should_signal(tier_name: str, bias: int, exchange: str = "Binance") -> bool:
