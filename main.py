@@ -126,6 +126,7 @@ BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "REN",                             # Ren Protocol shut down — dead project, ghost volume
                   "WAVES",                           # Delisted from Binance — ghost volume causes false sleeping giant signals
                   "KMD",                             # Delisted from Binance — ghost volume causes false sleeping giant signals
+                  "COCOS",                           # Dead gaming blockchain — ghost volume causes false 92x sleeping giant signals
                   }
 
 # ── Coin Categories — used in daily report Top 10 ──────────────
