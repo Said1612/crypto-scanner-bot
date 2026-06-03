@@ -2350,9 +2350,10 @@ def _check(sym, ticker, interval, sector_boost=False):
 
 
     # Skip already pumped — Alpha/pre-listing: allow 400% (listing-day pumps reach 200-300%)
-    # MEXC micro-caps: allow up to 70% | Binance: allow up to 80%
+    # Sleeping giant (1m_sg): explosion from multi-week low → allow up to 300%
+    # Regular Spot: raised 80%→150% — OPN-type moves (depressed coin explodes) are valid signals
     _is_alpha_coin = ticker.get("binance_alpha") or ticker.get("futures_only")
-    _max_pump = 400.0 if _is_alpha_coin else 80.0
+    _max_pump = 400.0 if _is_alpha_coin else (300.0 if interval == "1m_sg" else 150.0)
     h24, l24 = ticker["high24"], ticker["low24"]
     range_pump = (h24 - l24) / l24 * 100 if l24 > 0 else 0
     _max_range = 600.0 if _is_alpha_coin else 200.0
