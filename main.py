@@ -4241,6 +4241,10 @@ def scan_quiet_accum(all_t):
         buy_v, sell_v = fetch_agg_trades(sym, base_url, minutes=60)
         if sell_v <= 0 or (buy_v + sell_v) < 500:
             continue
+        # Thin sell-side: ratio becomes meaningless when sellers are nearly absent
+        # sell_v<200 + ratio>500x = empty market, not real accumulation (WBETH: $44 sells → 23984x)
+        if sell_v < 200 and buy_v / sell_v > 500:
+            continue
 
         ratio = buy_v / sell_v
         # Ratio floors: winners show ≥2.5x minimum (PGVERSE=3.5x, SXT=9.3x, GT=34.9x)
