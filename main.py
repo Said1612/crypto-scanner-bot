@@ -1251,17 +1251,14 @@ def _calc_tp_sl(price, high24, low24, spike, score, exchange, is_moonshot=False,
     sl = price * (1 - sl_pct)
 
     # TP based on signal strength and spike size
-    # Wolf Flow benchmark: avg peak +7.03% → baseline TP1 aligned to +7%
     if is_moonshot or spike >= 20:
         tp_pcts = [0.12, 0.25, 0.50]
     elif vol_explosion or spike >= 10:
         tp_pcts = [0.08, 0.18, 0.35]
     elif score >= 8.0:
-        tp_pcts = [0.08, 0.18, 0.35]
-    elif score >= 7.0:
         tp_pcts = [0.07, 0.15, 0.28]
     else:
-        tp_pcts = [0.07, 0.15, 0.28]
+        tp_pcts = [0.05, 0.12, 0.22]
 
     tp1 = price * (1 + tp_pcts[0])
     tp2 = price * (1 + tp_pcts[1])
