@@ -2635,6 +2635,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     # CAKE pattern: volume_explosion triggered with net=$68 (buyers ≈ sellers)
     # Real accumulation needs visible imbalance: $5K Binance, $1.5K MEXC
     _abs_net_floor = 5_000.0 if exchange == "Binance" else 1_500.0
+    # FORM pattern: sleeping giant 13x volume but price barely moved (accumulation battle)
+    # Extreme spike alone = real demand even if net is small → lower floor
+    if interval == "1m_sg" and spike >= 10.0:
+        _abs_net_floor = 1_000.0
     if net < _abs_net_floor:
         _rej("noise_net"); return
 
