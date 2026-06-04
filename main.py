@@ -68,9 +68,9 @@ except Exception as _cq_err:
 #  CONFIG
 # ══════════════════════════════════════════════════════
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7696119722:AAGNRMyvhQXyqLdYNbsNTjTcETT957a6-S8")
 CHAT_ID        = os.getenv("CHAT_ID") or ""
-GROUP_ID       = os.getenv("GROUP_ID") or "-1003992515031"
+GROUP_ID       = os.getenv("GROUP_ID") or "-1001003987371310"
 REDIS_URL      = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
 REDIS_TOKEN    = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY      = "mafio_v31"
