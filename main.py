@@ -68,7 +68,7 @@ except Exception as _cq_err:
 #  CONFIG
 # ══════════════════════════════════════════════════════
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7696119722:AAHtxydYz5qg4SmyF38M0X6agntIYSuOjXY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.getenv("CHAT_ID") or ""
 GROUP_ID       = os.getenv("GROUP_ID") or "-1003992515031"
 REDIS_URL      = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
@@ -1251,14 +1251,17 @@ def _calc_tp_sl(price, high24, low24, spike, score, exchange, is_moonshot=False,
     sl = price * (1 - sl_pct)
 
     # TP based on signal strength and spike size
+    # Wolf Flow benchmark: avg peak +7.03% → baseline TP1 aligned to +7%
     if is_moonshot or spike >= 20:
         tp_pcts = [0.12, 0.25, 0.50]
     elif vol_explosion or spike >= 10:
         tp_pcts = [0.08, 0.18, 0.35]
     elif score >= 8.0:
+        tp_pcts = [0.08, 0.18, 0.35]
+    elif score >= 7.0:
         tp_pcts = [0.07, 0.15, 0.28]
     else:
-        tp_pcts = [0.05, 0.12, 0.22]
+        tp_pcts = [0.07, 0.15, 0.28]
 
     tp1 = price * (1 + tp_pcts[0])
     tp2 = price * (1 + tp_pcts[1])
@@ -2879,23 +2882,23 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Absolute floor — no path bypasses a score this weak
     if score < 5.5 and not is_moonshot and not volume_explosion:
         _rej("quality_fail"); return
-    # Three paths to pass — any one is enough
-        _good_score    = score >= 7.0
-        _strong_signal = ob_spot >= 0.72 and ratio >= 2.5 and net >= net_min
-        _huge_flow     = net > 100_000 and ob_spot >= 0.65
-        # Sector boost: hot sector = 4th path — positive flow + decent OB enough
+    # Multi-path quality gate — any one path is enough
+    _good_score    = score >= 7.0
+    _strong_signal = ob_spot >= 0.72 and ratio >= 2.5 and net >= net_min
+    _huge_flow     = net > 100_000 and ob_spot >= 0.65
+    # Sector boost: hot sector = 4th path — positive flow + decent OB enough
+    _sector_path   = (sector_boost and net > 0
+                      and ob_spot >= 0.55 and ratio >= 1.5)
+    # Bear market: tighten each path (sector path stays — sector is strongest signal)
+    if market_bias <= -25:
+        _good_score    = score >= 7.5
+        _strong_signal = ob_spot >= 0.74 and ratio >= 3.0 and net >= net_min * 1.5
+        _huge_flow     = net > 150_000 and ob_spot >= 0.67
         _sector_path   = (sector_boost and net > 0
-                          and ob_spot >= 0.55 and ratio >= 1.5)
-        # Bear market: tighten each path (sector path stays — sector is strongest signal)
-        if market_bias <= -25:
-            _good_score    = score >= 7.5
-            _strong_signal = ob_spot >= 0.74 and ratio >= 3.0 and net >= net_min * 1.5
-            _huge_flow     = net > 150_000 and ob_spot >= 0.67
-            _sector_path   = (sector_boost and net > 0
-                              and ob_spot >= 0.62 and ratio >= 2.0)
-        if not (_good_score or _strong_signal or _huge_flow or _sector_path):
-            if not is_moonshot and not volume_explosion:
-                _rej("quality_fail"); return
+                          and ob_spot >= 0.62 and ratio >= 2.0)
+    if not (_good_score or _strong_signal or _huge_flow or _sector_path):
+        if not is_moonshot and not volume_explosion:
+            _rej("quality_fail"); return
 
     # In bear market: allow volume explosions only if buyers clearly dominate (OB>=55%)
     # GUN/ORDI/HIGH type: real buying despite BTC decline = valid signal
@@ -2903,11 +2906,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     if volume_explosion and market_bias <= -25 and not is_moonshot and ob_spot < 0.55:
         _rej("vol_exp_bear"); return
 
-    # Bear market fighting bonus: coin rising strongly against BTC decline = lower score floor
+    # Bear market fighting bonus: coin rising strongly against BTC decline
     _fighting_bear = (market_bias <= -20 and move >= 5.0
                       and net > net_min * 2 and ob_spot >= 0.60)
-    if _fighting_bear and score >= 5.0:
-        _score_floor = min(_score_floor, 5.0)
 
     # ── Fractal Analysis (Bill Williams patterns + self-learning) ────────
     _fra = None
