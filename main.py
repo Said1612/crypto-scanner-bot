@@ -4989,14 +4989,21 @@ def scan_deep_value(all_t):
 
     Conditions:
       - Binance, vol >= $500k
+      - market_bias >= -40 (no swing signals in strong bear market)
       - price near 7-day low: current price <= 7d-low * 1.08 (within 8% of 7d low)
       - Not in freefall: 7d change > -60%, today's change > -12%
-      - Volume building: 3d avg volume >= 110% of 7d avg (confirming recovery)
+      - Volume building: 3d avg volume >= 130% of 7d avg (confirming recovery)
       - pos24 < 35% (near bottom of today's range)
-      - 1h flow: net > 0, OB >= 0.58
+      - 1h flow: net > tier_min, ratio >= 2.5, spike >= 2.0, OB >= 0.68
       - 24h cooldown per coin
     """
     now = time.time()
+
+    # No swing signals in strong bear market — too many coins near lows = noise
+    if market_bias < -40:
+        log.debug("scan_deep_value: skipped (bear market bias=%d)", market_bias)
+        return
+
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t["exchange"] == "Binance"
@@ -5050,15 +5057,20 @@ def scan_deep_value(all_t):
             if net <= 0:
                 continue
             ratio = buy_v / sell_v
-            if ratio < 2.0:
+            if ratio < 2.5:
                 continue
 
             spike_1h = (buy_v + sell_v) / max(t["vol"] / 24.0, 1)
-            if spike_1h < 1.5:
+            if spike_1h < 2.0:
                 continue
 
             ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
-            if ob_spot < 0.60:
+            if ob_spot < 0.68:
+                continue
+
+            # Net flow must be meaningful relative to coin size
+            _net_min = get_tier(t["vol"])["net"]
+            if net < _net_min * 0.5:
                 continue
 
             tier   = get_tier(t["vol"])
