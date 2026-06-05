@@ -4880,8 +4880,10 @@ def scan_weekly_breakout(all_t):
 
             _weekly_swing_dedup[sym] = now
 
-            # Fractal analysis — display + AI context
+            # Fractal analysis — display + filter
             _fs, _fra_wb = _swing_fractal(sym, base_url, price, score)
+            if _fs is not None and _fs < 5.0:
+                continue  # weak fractal structure — skip swing signal
             _fs_icon = "🟢" if (_fs or 0) >= 7.0 else ("🟡" if (_fs or 0) >= 5.0 else "🔴")
             _fs_line = f"\n🔬 Fractal Score: `{_fs}/10` {_fs_icon}" if _fs is not None else ""
 
@@ -5067,8 +5069,10 @@ def scan_deep_value(all_t):
 
             _weekly_swing_dedup[sym] = now
 
-            # Fractal analysis — display + AI context
+            # Fractal analysis — display + filter
             _fs, _fra_dv = _swing_fractal(sym, base_url, price, score)
+            if _fs is not None and _fs < 5.0:
+                continue  # weak fractal structure — skip swing signal
             _fs_icon = "🟢" if (_fs or 0) >= 7.0 else ("🟡" if (_fs or 0) >= 5.0 else "🔴")
             _fs_line = f"\n🔬 Fractal Score: `{_fs}/10` {_fs_icon}" if _fs is not None else ""
 
