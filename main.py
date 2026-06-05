@@ -1281,7 +1281,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50,
                  score=0.0, moonshot=False, momentum=False, vol_explosion=False,
                  interval="1h", is_flash=False, signal_type=None, is_alpha=False,
-                 fractal_score=None, oi_label=""):
+                 fractal_score=None, oi_label="", counter_trend=False):
     global signal_count
     signal_count += 1
 
@@ -1341,6 +1341,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
     _type_line = f"📈 *{signal_type}*\n" if signal_type else ""
+    _counter_tag = "\n🔥 *Counter-trend* — Rising against BTC decline\n" if counter_trend else ""
 
     # TP/SL lines
     tp1, tp2, tp3, sl, sl_pct, tp_pcts = _calc_tp_sl(
@@ -1360,6 +1361,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         f"💀 *MAFIO SNIPER* 📡\n"
         f"{_type_line}"
         f"{_flash_tag}"
+        f"{_counter_tag}"
         f"\n"
         f"🆕 *#{base}* 💀 · {_mkt_label} · Signal #{signal_count} {badge}\n"
         f"💰 Price: `${_fp(price)}`\n"
@@ -2915,6 +2917,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     if volume_explosion and market_bias <= -25 and not is_moonshot and ob_spot < 0.55:
         _rej("vol_exp_bear"); return
 
+    # Counter-trend: coin rising while BTC declining = independent capital flow (EPIC pattern)
+    _btc_24h = all_t.get("BTCUSDT", {}).get("change", 0.0) if "all_t" in dir() else 0.0
+    _counter_trend_main = market_bias < -15 and change > 0.5
     # Bear market fighting bonus: coin rising strongly against BTC decline
     _fighting_bear = (market_bias <= -20 and move >= 5.0
                       and net > net_min * 2 and ob_spot >= 0.60)
@@ -3138,7 +3143,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                        is_flash=is_flash,
                        is_alpha=(ticker.get("futures_only", False) or ticker.get("binance_alpha", False)),
                        fractal_score=_fractal_score,
-                       oi_label=(_oi["label"] if _oi and _oi.get("label") else ""))
+                       oi_label=(_oi["label"] if _oi and _oi.get("label") else ""),
+                       counter_trend=_counter_trend_main)
     ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "main",
                                     score, ob_spot, ratio, pos24, spike, net, move, funding_label,
                                     fractal_score=_fractal_score,
@@ -4864,6 +4870,10 @@ def scan_weekly_breakout(all_t):
             if net <= 0:
                 continue
 
+            # Counter-trend: if BTC falling, coin must be rising independently
+            if _btc_falling_wb and t.get("change", 0.0) <= 0:
+                continue
+
             spike_1h = (buy_v + sell_v) / max(t["vol"] / 24.0, 1)
             if spike_1h < 1.5:
                 continue
@@ -5065,6 +5075,13 @@ def scan_deep_value(all_t):
             _net_min = get_tier(t["vol"])["net"]
             if net < _net_min * 0.5:
                 continue
+
+            # Counter-trend check: if BTC is falling, coin must be rising (independent flow)
+            # Coins that fall WITH BTC have no independent buyers — follow BTC back down
+            _coin_change = t.get("change", 0.0)
+            _counter_trend = _btc_falling and _coin_change > 0.5
+            if _btc_falling and _coin_change <= 0:
+                continue  # BTC falling + coin also falling = correlated, skip
 
             tier   = get_tier(t["vol"])
             score  = _calc_score(pos24, net, max(t["vol"] * 0.001, 500.0),
