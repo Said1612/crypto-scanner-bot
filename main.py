@@ -4190,6 +4190,127 @@ def scan_sleeping_giant(all_t):
             break
 
 
+def scan_whale_flow(all_t):
+    """
+    Detects silent whale accumulation at multi-week lows.
+    Whales buy quietly without moving price — focus on ABSOLUTE net flow
+    over 4h, not volume spikes. High net + near 7d low + strong OB = signal.
+
+    Unlike scan_quiet_accum (needs spike 2.5x), this scanner catches
+    sustained slow buying that never triggers a volume alert.
+
+    Conditions:
+      - vol >= $2M (enough liquidity for whales to operate)
+      - coin near 7d low (within 12%)
+      - pos24 < 0.40 (bottom 40% of today's range)
+      - price movement < 5% (quiet — not already a momentum move)
+      - 4h net flow >= tier threshold (absolute whale-scale buying)
+      - spike < 6x (if spike > 6x, other scanners handle it)
+      - OB >= 0.70 (strong bid dominance)
+      - score >= 7.0
+    """
+    now = time.time()
+
+    # Whale thresholds by tier — absolute net flow over 4h
+    _whale_net = {"Micro": 40_000, "Small": 100_000, "Mid": 400_000, "Large": 1_200_000}
+
+    candidates = []
+    for sym, t in all_t.items():
+        if t["exchange"] != "Binance":
+            continue
+        if sym in BLACKLIST or sym in tracking:
+            continue
+        if now - alerted.get(sym, 0) < COOLDOWN:
+            continue
+        if now - _signal_dedup.get(sym, 0) < 7200:
+            continue
+        vol_24h = t["vol"]
+        if vol_24h < 2_000_000:
+            continue
+        # Only bottom 40% of today's range
+        rng = t["high24"] - t["low24"]
+        if rng <= 0:
+            continue
+        pos24 = (t["price"] - t["low24"]) / rng
+        if pos24 > 0.40:
+            continue
+        # Not in freefall, not already pumped
+        chg = t.get("change", 0)
+        if chg < -20.0 or chg > 5.0:
+            continue
+        candidates.append((sym, pos24, t))
+
+    candidates.sort(key=lambda x: x[1])  # deepest in range first
+
+    # Check 7d low proximity via daily klines
+    fired = 0
+    for sym, pos24, t in candidates[:40]:
+        try:
+            price    = t["price"]
+            vol_24h  = t["vol"]
+            base_url = t["base_url"]
+            tier     = get_tier(vol_24h)
+
+            # Must be near 7d low (within 12%)
+            klines_d = _fetch_daily_klines(sym, "Binance", days=9)
+            if len(klines_d) < 7:
+                continue
+            closes   = [c for c, v in klines_d]
+            low_7d   = min(closes[-8:-1])
+            if price > low_7d * 1.12:
+                continue
+
+            # 4h aggregate flow — catches sustained quiet buying
+            buy_v, sell_v = fetch_agg_trades(sym, base_url, minutes=240)
+            if sell_v <= 0 or (buy_v + sell_v) < 5_000:
+                continue
+            net = buy_v - sell_v
+            if net <= 0:
+                continue
+
+            # Absolute whale-scale net floor
+            _net_thr = _whale_net.get(tier["name"], 100_000)
+            if net < _net_thr:
+                continue
+
+            # Spike check — if already spiking hard, other scanners handle it
+            spike_4h = (buy_v + sell_v) / max(vol_24h / 6.0, 1)
+            if spike_4h > 6.0:
+                continue
+
+            # OB must strongly favour buyers
+            ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
+            if ob_spot < 0.70:
+                continue
+
+            score = _calc_score(pos24, net, tier["net"], ob_spot, spike_4h)
+            if score < 7.0:
+                continue
+
+            ratio = buy_v / sell_v
+            move  = abs(t.get("change", 0))
+
+            log.info("WHALE_FLOW %s net=+%s 4h spike=%.1fx pos24=%.0f%% ob=%.0f%% score=%.1f",
+                     sym, _fv(net), spike_4h, pos24 * 100, ob_spot * 100, score)
+
+            # Pass through main signal builder
+            ticker_copy = dict(t)
+            ticker_copy["momentum_signal"] = False
+            ok = _check(sym, ticker_copy, "1h", sector_boost=False)
+            if ok is not None:
+                fired += 1
+
+            time.sleep(0.1)
+            if fired >= 3:  # max 3 whale signals per cycle
+                break
+
+        except Exception as e:
+            log.debug("scan_whale_flow %s: %s", sym, e)
+
+    if fired:
+        log.info("scan_whale_flow: fired=%d", fired)
+
+
 def scan_quiet_accum(all_t):
     """
     Catches coins being accumulated quietly near their 24h low
@@ -5370,6 +5491,7 @@ def main():
             if now - last_accum >= ACCUM_SCAN_S:
                 last_accum = now
                 scan_quiet_accum(all_t)
+                scan_whale_flow(all_t)
 
             global last_sg
             if now - last_sg >= SLEEP_GIANT_S:
