@@ -4989,21 +4989,14 @@ def scan_deep_value(all_t):
 
     Conditions:
       - Binance, vol >= $500k
-      - market_bias >= -40 (no swing signals in strong bear market)
       - price near 7-day low: current price <= 7d-low * 1.08 (within 8% of 7d low)
       - Not in freefall: 7d change > -60%, today's change > -12%
       - Volume building: 3d avg volume >= 130% of 7d avg (confirming recovery)
       - pos24 < 35% (near bottom of today's range)
-      - 1h flow: net > tier_min, ratio >= 2.5, spike >= 2.0, OB >= 0.68
+      - 1h flow: net > tier_min*0.5, ratio >= 2.5, spike >= 2.0, OB >= 0.68
       - 24h cooldown per coin
     """
     now = time.time()
-
-    # No swing signals in strong bear market — too many coins near lows = noise
-    if market_bias < -40:
-        log.debug("scan_deep_value: skipped (bear market bias=%d)", market_bias)
-        return
-
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t["exchange"] == "Binance"
