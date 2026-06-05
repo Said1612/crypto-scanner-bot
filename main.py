@@ -128,6 +128,14 @@ BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "KMD",                             # Delisted from Binance — ghost volume causes false sleeping giant signals
                   "COCOS",                           # Dead gaming blockchain — ghost volume causes false 92x sleeping giant signals
                   "ORN",                             # Delisted from Binance — ghost 202x volume causes false sleeping giant signals
+                  # Staked/wrapped derivatives — price follows underlying, no independent signal
+                  "BNSOL",                           # Binance Staked SOL → follows SOL
+                  "WBETH",                           # Wrapped Binance ETH → follows ETH
+                  "BETH",                            # Binance ETH staking → follows ETH
+                  "WBTC",                            # Wrapped Bitcoin → follows BTC
+                  "WBNB",                            # Wrapped BNB → follows BNB
+                  "SOLVBTC",                         # Solv BTC → follows BTC
+                  "BTCB",                            # Binance BTC → follows BTC
                   }
 
 # ── Coin Categories — used in daily report Top 10 ──────────────
