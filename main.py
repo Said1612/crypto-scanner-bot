@@ -2599,11 +2599,15 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("pump_dump"); return
 
     # Post-pump crash filter — uses ctx.crash_limit (adaptive)
+    # Breakout bypass: strong volume explosion + buyer dominance = fresh consolidation breakout,
+    # not a dump continuation. ALLO pattern: consolidated at 75% pos, then 10x+ vol broke out.
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
         if pump_size > 30.0 and crash_from_top > ctx["crash_limit"]:
-            _rej("post_pump"); return
+            _vol_breakout = (spike >= 5.0 and ob_quick >= 0.58 and move >= 1.5)
+            if not _vol_breakout:
+                _rej("post_pump"); return
 
     # Position guard — uses ctx.pos_limit (adaptive)
     # Sector momentum: use rise_from_low instead of pos24 (pos24=1.0 when at new highs)
@@ -2616,9 +2620,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     elif pos24 > ctx["pos_limit"]:
         # BLINKY pattern: very high ratio (≥20x) overrides position limit
         # Sleeping Giant: flat coin with tiny daily range — high pos24 is misleading
-        # Lowered from 20x to 10x: volume_explosion requires spike ≥ 10x, bypass should match
+        # Volume breakout: 5x+ spike + buyer dominance = consolidation breakout (ALLO pattern)
         _sg_bypass = (interval == "1m_sg" and spike >= 10.0)
-        if _pre_ratio < 20.0 and not _sg_bypass:
+        _vol_breakout = (spike >= 5.0 and ob_quick >= 0.58 and move >= 1.5)
+        if _pre_ratio < 20.0 and not _sg_bypass and not _vol_breakout:
             _rej("high_pos"); return
 
     # High position + weak volume = false signal (我踏马来了 pattern)
