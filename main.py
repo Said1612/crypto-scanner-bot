@@ -4278,9 +4278,9 @@ def scan_whale_flow(all_t):
             if spike_4h > 6.0:
                 continue
 
-            # OB must strongly favour buyers
+            # OB must favour buyers — whales hide orders so 63% is enough
             ob_spot = fetch_ob_imbalance(sym, base_url, levels=20)
-            if ob_spot < 0.70:
+            if ob_spot < 0.63:
                 continue
 
             score = _calc_score(pos24, net, tier["net"], ob_spot, spike_4h)
