@@ -2798,10 +2798,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         if _declining:
             log.debug("BULL_TRAP skip %s ob=%.0f%% ema_bull=%s declining", sym, ob_spot*100, ema_bull)
             _rej("bull_trap"); return
-        # Even without declining candles: extreme bids in a downtrend (bear bias + below EMA20) = trap
-        if market_bias <= -3 and not price_above_ema20:
-            log.debug("BEAR_BIDS skip %s ob=%.0f%% bias=%d ema_bull=False", sym, ob_spot*100, market_bias)
-            _rej("bear_bids"); return
+        # bear_bids check removed: liquidity explosions happen in any bias direction.
 
     # ── Fake Wall filter ─────────────────────────────────────────────────
     # PHY pattern: OB=90% bids + net=$4.6K = artificial buy wall with no real flow
@@ -2881,15 +2878,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     if score < 6.0 and ob_spot < 0.65 and not is_moonshot and not momentum_bypass and not volume_explosion and not _extreme_vol and not _strong_ratio:
         _rej("weak_ob_score"); return
 
-    # ── Bear market + high bids score penalty ────────────────────────────
-    # In a bearish market (bias ≤ -2), an unusually high bids% (>82%) is a warning:
-    # Smart money may be distributing into retail buy orders (MBG-type trap).
-    # Exception: moonshot / funding_bullish (genuine demand confirmed by funding)
-    if market_bias <= -2 and ob_spot > 0.82 and not is_moonshot and not funding_bullish:
-        _bear_pen = min(1.5, (ob_spot - 0.82) / 0.18 * 1.5)   # 0→+1.5 as ob 82%→100%
-        score = max(0.0, round(score - _bear_pen, 1))
-        log.debug("BEAR_BIDS_PENALTY %s bias=%d ob=%.0f%% -%.1f → score=%.1f",
-                  sym, market_bias, ob_spot * 100, _bear_pen, score)
+    # bear_bids score penalty removed: bias does not determine signal quality.
 
     # ── Quality gate — dual-path instead of pure score floor ─────────────
     # Problem: pos24 penalty in score unfairly hurts coins already in motion
@@ -2899,28 +2888,16 @@ def _check(sym, ticker, interval, sector_boost=False):
     if score < 5.5 and not is_moonshot and not volume_explosion:
         _rej("quality_fail"); return
     # Multi-path quality gate — any one path is enough
+    # Bias does NOT tighten these thresholds — flow quality decides, not market direction.
     _good_score    = score >= 7.0
     _strong_signal = ob_spot >= 0.72 and ratio >= 2.5 and net >= net_min
     _huge_flow     = net > 100_000 and ob_spot >= 0.65
     # Sector boost: hot sector = 4th path — positive flow + decent OB enough
     _sector_path   = (sector_boost and net > 0
                       and ob_spot >= 0.55 and ratio >= 1.5)
-    # Bear market: tighten each path (sector path stays — sector is strongest signal)
-    if market_bias <= -25:
-        _good_score    = score >= 7.5
-        _strong_signal = ob_spot >= 0.74 and ratio >= 3.0 and net >= net_min * 1.5
-        _huge_flow     = net > 150_000 and ob_spot >= 0.67
-        _sector_path   = (sector_boost and net > 0
-                          and ob_spot >= 0.62 and ratio >= 2.0)
     if not (_good_score or _strong_signal or _huge_flow or _sector_path):
         if not is_moonshot and not volume_explosion:
             _rej("quality_fail"); return
-
-    # In bear market: allow volume explosions only if buyers clearly dominate (OB>=55%)
-    # GUN/ORDI/HIGH type: real buying despite BTC decline = valid signal
-    # Weak OB + bear market = noise, block it
-    if volume_explosion and market_bias <= -25 and not is_moonshot and ob_spot < 0.55:
-        _rej("vol_exp_bear"); return
 
     # Counter-trend: coin rising while BTC declining = independent capital flow (EPIC pattern)
     _btc_24h = all_t.get("BTCUSDT", {}).get("change", 0.0) if "all_t" in dir() else 0.0
@@ -3662,14 +3639,10 @@ def check_dump_cascade(all_t: dict):
 
 def get_market_ctx(bias: int) -> dict:
     """
-    Returns adaptive thresholds based on market bias — Sniper Mode active in Bull conditions.
-
-    Strong Bull (≥60)  : SNIPER — max aggression, late_pct=0.95, loose spike/ob
-    Bullish    (25-59) : SNIPER — late_pct=0.93, spike_mult=0.65, ob_min=0.37
-    Mild Bull   (5-24) : Relaxed — late_pct=0.91, moderate filters
-    Neutral   (-24-4)  : Standard filters
-    Bear      (-25-59) : Strict — only high-conviction signals
-    Strong Bear (<-60) : Very strict — almost only funding_bullish signals pass
+    Returns adaptive thresholds based on market bias.
+    Bull market: Sniper Mode (looser filters — more signals in strong uptrend).
+    Bear/Neutral: Standard filters — flow quality (ratio/spike/OB/net) decides, NOT bias.
+    Coins explode in any market condition when real liquidity enters.
     """
     if bias >= 60:
         return {"pos_limit": 0.82, "crash_limit": 30.0,
@@ -3683,18 +3656,11 @@ def get_market_ctx(bias: int) -> dict:
         return {"pos_limit": 0.78, "crash_limit": 18.0,
                 "spike_mult": 0.80, "ratio_mult": 0.88, "ob_min": 0.38,
                 "move_min": 0.5,  "late_pct": 0.91}  # Mild Bullish
-    if bias >= -24:
-        return {"pos_limit": 0.75, "crash_limit": 12.0,
+    # Neutral + Bear + Strong Bear: all use standard filters.
+    # Do NOT penalise bear markets — liquidity explosions happen regardless of BTC direction.
+    return     {"pos_limit": 0.75, "crash_limit": 12.0,
                 "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.40,
-                "move_min": 1.0,  "late_pct": 0.88}  # Neutral
-    if bias >= -60:
-        return {"pos_limit": 0.72, "crash_limit":  8.0,
-                "spike_mult": 0.95, "ratio_mult": 0.95, "ob_min": 0.42,
-                "move_min": 1.0,  "late_pct": 0.88}  # Bear — strength-in-weakness is MORE significant
-    # Strong Bear: flow filters (ratio/spike/OB/net) handle quality — don't double-penalise
-    return     {"pos_limit": 0.68, "crash_limit":  5.0,
-                "spike_mult": 1.00, "ratio_mult": 1.00, "ob_min": 0.45,
-                "move_min": 1.0,  "late_pct": 0.85}  # Strong Bear
+                "move_min": 1.0,  "late_pct": 0.88}  # Neutral/Bear — standard
 
 
 def should_signal(tier_name: str, bias: int, exchange: str = "Binance") -> bool:
