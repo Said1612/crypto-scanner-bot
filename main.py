@@ -2421,7 +2421,15 @@ def _check(sym, ticker, interval, sector_boost=False):
     _late_pct = 0.97
     rng = ticker["high24"] - ticker["low24"]
     if rng > 0 and (price - ticker["low24"]) / rng > _late_pct and not _sector_mom_pre and not momentum_bypass and interval != "1m_sg" and not _is_alpha_coin:
-        _rej("late_entry"); return
+        # New-high breakout bypass: coin up 10%+ AND still within 5% of its high = genuine breakout
+        # JTO pattern: breaking to new 24h highs with +26% day = real move, not late chasing
+        _at_new_high = (
+            ticker.get("change", 0.0) > 10.0 and
+            ticker["high24"] > 0 and
+            (ticker["high24"] - price) / ticker["high24"] * 100 < 5.0
+        )
+        if not _at_new_high:
+            _rej("late_entry"); return
 
     # ── Quick vol floor (no API call) ─────────────────────────────────────
     if vol_24h < tier["vol_min"]:
