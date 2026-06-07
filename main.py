@@ -92,13 +92,10 @@ FAST_TICKER_MOVE = 0.3   # 5s price delta trigger — lowered 0.5→0.3 to catch
 # Large cap  > $80M : hardest to move
 TIERS = [
     # Micro: tiny liquidity — high ratio required (VINE 2.2x failed; 3.0 base → ~2.64 neutral)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 2.5, "net": 5_000},
-    # Small: medium liquidity
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.2, "ratio": 2.0, "net": 15_000},
-    # Mid: good liquidity — aligned with Small/Large spike requirement
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.2, "ratio": 2.2, "net": 60_000},
-    # Large: deep liquidity
-    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 2.2, "ratio": 1.8, "net": 250_000},
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.4, "ratio": 2.5, "net": 5_000},
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 1.9, "ratio": 2.0, "net": 15_000},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 1.9, "ratio": 2.2, "net": 60_000},
+    {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 1.8, "ratio": 1.8, "net": 250_000},
 ]
 
 FLOW_CANDLES     = 3     # candles for flow calculation
