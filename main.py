@@ -5,6 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
+BOT_VERSION = "3.2.6"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -5321,7 +5322,7 @@ def main():
     _loop_last_err  = [""]   # [last_error_str]
     _signal.signal(_signal.SIGTERM, _handle_sigterm)  # invalidate PID on shutdown
     _register_primary()   # claim PID lock — old process will detect mismatch and stop sending
-    log.info("🎯 MAFIO SNIPER — starting (PID %d)", _MY_PID)
+    log.info("🎯 MAFIO SNIPER v%s — starting (PID %d)", BOT_VERSION, _MY_PID)
     clear_bot_commands()
     register_commands()
     load_state()
