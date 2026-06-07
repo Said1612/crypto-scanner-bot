@@ -5329,7 +5329,7 @@ def main():
     load_signal_db()
 
     _startup_msg = (
-        "🔄 *MAFIO SNIPER v3.2 — Online*\n"
+        f"🔄 *MAFIO SNIPER v{BOT_VERSION} — Online*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"✅ Bot restarted — {datetime.now(timezone.utc).strftime('%d %b %Y %H:%M')} UTC\n"
         f"📡 Exchange: *Binance* 🟡\n"
