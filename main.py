@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.8"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.9"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2609,11 +2609,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Post-pump crash filter — uses ctx.crash_limit (adaptive)
     # Breakout bypass: strong volume explosion + buyer dominance = fresh consolidation breakout,
     # not a dump continuation. ALLO pattern: consolidated at 75% pos, then 10x+ vol broke out.
+    # MOVE pattern: Large cap 3x spike on 1h = tens of millions extra — real breakout signal.
+    _breakout_spike_min = 2.5 if tier["name"] in ("Large", "Mid") else 5.0
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
         if pump_size > 30.0 and crash_from_top > ctx["crash_limit"]:
-            _vol_breakout = (spike >= 5.0 and ob_quick >= 0.58 and move >= 1.5)
+            _vol_breakout = (spike >= _breakout_spike_min and ob_quick >= 0.55 and move >= 1.0)
             if not _vol_breakout:
                 _rej("post_pump"); return
 
@@ -2628,9 +2630,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     elif pos24 > ctx["pos_limit"]:
         # BLINKY pattern: very high ratio (≥20x) overrides position limit
         # Sleeping Giant: flat coin with tiny daily range — high pos24 is misleading
-        # Volume breakout: 5x+ spike + buyer dominance = consolidation breakout (ALLO pattern)
+        # Volume breakout: Mid/Large = 2.5x spike enough (absolute $ >>> small cap 5x)
         _sg_bypass = (interval == "1m_sg" and spike >= 10.0)
-        _vol_breakout = (spike >= 5.0 and ob_quick >= 0.58 and move >= 1.5)
+        _vol_breakout = (spike >= _breakout_spike_min and ob_quick >= 0.55 and move >= 1.0)
         if _pre_ratio < 20.0 and not _sg_bypass and not _vol_breakout:
             _rej("high_pos"); return
 
