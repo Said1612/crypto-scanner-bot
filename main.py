@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.7"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.8"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -248,6 +248,8 @@ last_slow     = 0.0
 last_super    = 0.0
 last_accum    = 0.0
 last_sg       = 0.0
+last_alpha    = 0.0          # scan_alpha_explosion interval
+_alpha_vol_cache: dict = {}  # sym → (vol24h, timestamp) for surge detection
 last_sector   = 0.0
 last_trend        = 0.0
 last_weekly_swing = 0.0
@@ -4488,6 +4490,83 @@ def scan_quiet_accum(all_t):
         log.info("scan_quiet_accum: fired=%d", fired)
 
 
+def scan_alpha_explosion(all_t: dict):
+    """
+    Catches Binance Alpha on-chain tokens exploding — no klines needed.
+    Uses ticker data only: percentChange24h + volume surge between scans.
+    Separate from _check() — simplified signal with on-chain risk warning.
+    """
+    global _alpha_vol_cache
+    MAX_SIGNALS = 2
+    sent = 0
+    now  = time.time()
+
+    # Sort by 24h change descending — biggest movers first
+    alpha_coins = [
+        (sym, t) for sym, t in all_t.items()
+        if t.get("binance_alpha") and t.get("vol", 0) >= 50_000
+    ]
+    alpha_coins.sort(key=lambda x: x[1].get("change", 0), reverse=True)
+
+    for sym, t in alpha_coins:
+        if sent >= MAX_SIGNALS:
+            break
+
+        chg   = t.get("change", 0.0)
+        vol   = t.get("vol",    0.0)
+        price = t.get("price",  0.0)
+
+        if price <= 0:
+            continue
+
+        sym_base = sym.replace("USDT", "")
+        if sym_base in BLACKLIST:
+            continue
+        if sym_base in alerted:
+            continue
+        if sym in _signal_dedup:
+            continue
+
+        # Volume surge: compare vs previous scan
+        prev      = _alpha_vol_cache.get(sym)
+        vol_surge = 0.0
+        if prev:
+            prev_vol, prev_ts = prev
+            elapsed = now - prev_ts
+            if 60 < elapsed < 700 and prev_vol > 0:
+                vol_surge = vol / prev_vol
+        _alpha_vol_cache[sym] = (vol, now)
+
+        # Signal conditions — at least one must pass
+        _big_move  = chg >= 40.0 and vol >= 200_000
+        _explosion = vol_surge >= 2.0 and chg >= 20.0 and vol >= 100_000
+
+        if not (_big_move or _explosion):
+            continue
+
+        # Build and send simplified Alpha signal
+        _surge_txt = f"⚡ Vol surge: {vol_surge:.1f}x\n" if vol_surge >= 2.0 else ""
+        _msg = (
+            f"💀 *MAFIO SNIPER* 📡\n\n"
+            f"🆕 *#{sym_base}* 🔥 Alpha On-Chain · Signal\n"
+            f"💰 Price: `${price:.8g}`\n"
+            f"📈 24h Move: *+{chg:.1f}%*\n"
+            f"📊 Vol 24h: `${vol:,.0f}`\n"
+            f"{_surge_txt}"
+            f"⚠️ _On-chain BSC — verify liquidity before entry_\n"
+            f"🕐 {_ts()} UTC\n"
+        )
+        if send(CHAT_ID, _msg):
+            alerted[sym_base] = now
+            _signal_dedup[sym] = now
+            sent += 1
+            log.info("scan_alpha_explosion: signal %s chg=%.1f%% vol=%.0f surge=%.1fx",
+                     sym, chg, vol, vol_surge)
+
+    if sent:
+        log.info("scan_alpha_explosion: fired=%d", sent)
+
+
 # ══════════════════════════════════════════════════════
 #  SECTOR LIQUIDITY SCANNER — standalone, no changes to bot strategy
 #  Detects sector rotation and alerts when liquidity flows into a sector
@@ -5321,7 +5400,7 @@ def _mark_report_sent(key: str, report_type: str):
 # ══════════════════════════════════════════════════════
 
 def main():
-    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_weekly_swing, last_deep_value, last_report, last_report_date, last_weekly_date, last_monthly_date
+    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_weekly_swing, last_deep_value, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
     # Error tracking — alert Telegram on repeated loop errors
     _loop_err_count = [0]    # [count] — mutable so inner scope can modify
     _loop_last_err  = [""]   # [last_error_str]
@@ -5469,6 +5548,11 @@ def main():
                 last_accum = now
                 scan_quiet_accum(all_t)
                 scan_whale_flow(all_t)
+
+            global last_alpha
+            if now - last_alpha >= ACCUM_SCAN_S:
+                last_alpha = now
+                scan_alpha_explosion(all_t)
 
             global last_sg
             if now - last_sg >= SLEEP_GIANT_S:
