@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.9"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.10"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2599,9 +2599,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Only block when: extreme spike + price already near top of range + sellers dominating
     # Sleeping giant: require stronger seller dominance (ob<0.40) — temporary post-spike
     # selling is normal and shouldn't block a 50x+ move
+    # FTT pattern: dead coin (near-zero vol) wakes up with 20x+ spike — ob naturally thin,
+    # but if price is still actively rising (move >= 2%), we're early in the move, not a dump.
     _pd_ob_thr = 0.40 if interval == "1m_sg" else 0.50
+    _still_rising = move >= 2.0
     is_pump_dump = (
         spike > 20.0 and pos24 > 0.55 and ob_quick < _pd_ob_thr
+        and not _still_rising
     )
     if is_pump_dump:
         _rej("pump_dump"); return
