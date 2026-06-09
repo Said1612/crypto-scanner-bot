@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.10"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.11"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2539,7 +2539,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Alpha coins accumulate with subtler spikes (1.2x) vs regular coins (1.5x)
     _sector_mom_spike_thr = 1.2 if _is_alpha_coin else 1.5
     _sector_mom = _sector_mom_pre and spike >= _sector_mom_spike_thr
-    if move < move_min and not _sector_mom: _rej(f"low_move({move:.1f}%)"); return
+    # Volume-before-price bypass: spike >= 4x but candle still flat = accumulation starting
+    # MOVE pattern: price hasn't moved yet in the 5m candle but volume pouring in (explosion imminent)
+    _vol_before_price = (spike >= 4.0 and move >= -0.5)
+    if move < move_min and not _sector_mom and not _vol_before_price:
+        _rej(f"low_move({move:.1f}%)"); return
 
     # ── Volume-adjusted ratio: ILV pattern — big spike + lower ratio at breakout start ──
     # High spike (≥5x) = institutional volume → accept lower ratio (early accumulation)
@@ -2574,7 +2578,9 @@ def _check(sym, ticker, interval, sector_boost=False):
         sc_close_pct = (float(_wick_candle[4]) - float(_wick_candle[3])) / sc_rng if sc_rng > 0 else 0.5
     except Exception:
         sc_close_pct = 0.5
-    if sc_close_pct < 0.50:
+    # Bypass dump_wick when price is actively rising — wick is temporary profit-taking
+    # MOVE pattern: previous 1h candle was bearish, but current move is +10%+ = new momentum
+    if sc_close_pct < 0.50 and move < 2.0:
         _rej("dump_wick"); return
 
     # Wick distribution: 3+ candles with long upper wicks in last 5 = sellers distributing
