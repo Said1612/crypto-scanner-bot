@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.12"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.13"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2574,7 +2574,9 @@ def _check(sym, ticker, interval, sector_boost=False):
         sc_close_pct = (float(_wick_candle[4]) - float(_wick_candle[3])) / sc_rng if sc_rng > 0 else 0.5
     except Exception:
         sc_close_pct = 0.5
-    if sc_close_pct < 0.50:
+    # Bypass when price is actively rising — wick is temporary profit-taking, not distribution
+    # SENT/MOVE pattern: previous candle bearish (downtrend), new candle exploding = real reversal
+    if sc_close_pct < 0.50 and move < 2.0:
         _rej("dump_wick"); return
 
     # Wick distribution: 3+ candles with long upper wicks in last 5 = sellers distributing
