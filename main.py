@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.11"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.12"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -92,9 +92,9 @@ FAST_TICKER_MOVE = 0.3   # 5s price delta trigger — lowered 0.5→0.3 to catch
 # Large cap  > $80M : hardest to move
 TIERS = [
     # Micro: tiny liquidity — high ratio required (VINE 2.2x failed; 3.0 base → ~2.64 neutral)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.4, "ratio": 2.5, "net": 5_000},
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 1.9, "ratio": 2.0, "net": 15_000},
-    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 1.9, "ratio": 2.2, "net": 60_000},
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 2.5, "net": 5_000},
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.5, "ratio": 2.2, "net": 15_000},
+    {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.2, "ratio": 2.0, "net": 60_000},
     {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 1.8, "ratio": 1.8, "net": 250_000},
 ]
 
@@ -2539,11 +2539,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Alpha coins accumulate with subtler spikes (1.2x) vs regular coins (1.5x)
     _sector_mom_spike_thr = 1.2 if _is_alpha_coin else 1.5
     _sector_mom = _sector_mom_pre and spike >= _sector_mom_spike_thr
-    # Volume-before-price bypass: spike >= 4x but candle still flat = accumulation starting
-    # MOVE pattern: price hasn't moved yet in the 5m candle but volume pouring in (explosion imminent)
-    _vol_before_price = (spike >= 4.0 and move >= -0.5)
-    if move < move_min and not _sector_mom and not _vol_before_price:
-        _rej(f"low_move({move:.1f}%)"); return
+    if move < move_min and not _sector_mom: _rej(f"low_move({move:.1f}%)"); return
 
     # ── Volume-adjusted ratio: ILV pattern — big spike + lower ratio at breakout start ──
     # High spike (≥5x) = institutional volume → accept lower ratio (early accumulation)
@@ -2578,9 +2574,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         sc_close_pct = (float(_wick_candle[4]) - float(_wick_candle[3])) / sc_rng if sc_rng > 0 else 0.5
     except Exception:
         sc_close_pct = 0.5
-    # Bypass dump_wick when price is actively rising — wick is temporary profit-taking
-    # MOVE pattern: previous 1h candle was bearish, but current move is +10%+ = new momentum
-    if sc_close_pct < 0.50 and move < 2.0:
+    if sc_close_pct < 0.50:
         _rej("dump_wick"); return
 
     # Wick distribution: 3+ candles with long upper wicks in last 5 = sellers distributing
@@ -2619,8 +2613,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Post-pump crash filter — uses ctx.crash_limit (adaptive)
     # Breakout bypass: strong volume explosion + buyer dominance = fresh consolidation breakout,
     # not a dump continuation. ALLO pattern: consolidated at 75% pos, then 10x+ vol broke out.
-    # MOVE pattern: Large cap 3x spike on 1h = tens of millions extra — real breakout signal.
-    _breakout_spike_min = 2.5 if tier["name"] in ("Large", "Mid") else 5.0
+    # MOVE pattern: Large cap spike of 2.5x = tens of millions in absolute $ — real breakout.
+    _breakout_spike_min = 2.5 if tier["name"] == "Large" else (3.5 if tier["name"] == "Mid" else 5.0)
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
