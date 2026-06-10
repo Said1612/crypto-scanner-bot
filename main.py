@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.19"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.20"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -989,8 +989,9 @@ def send_ex(text, reply_markup=None, reply_to_msg_id=None):
                 # 400 = usually bad Markdown (unescaped _ * ` [ chars)
                 # Fallback: retry as plain text so the message is never lost
                 if r.status_code == 400:
-                    log.warning("TG Markdown failed cid=%s — retrying as plain text", cid)
+                    log.warning("TG send failed cid=%s — retrying as plain text, no markup", cid)
                     payload.pop("parse_mode", None)
+                    payload.pop("reply_markup", None)
                     r = S.post(f"{_TG}/sendMessage", json=payload, timeout=10)
                 if r.status_code == 200:
                     ok = True
