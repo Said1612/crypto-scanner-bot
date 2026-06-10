@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.16"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.17"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -288,7 +288,7 @@ _funding_cache       : Dict[str, dict] = {}   # {sym: {"rate": float, "label": s
 FUNDING_TTL          = 300   # refresh funding rate every 5 min
 _oi_cache            : Dict[str, dict] = {}   # {sym: {oi data} + "ts": float}
 OI_TTL               = 180   # refresh OI every 3 min (Binance updates every 15m)
-_signal_dedup        : Dict[str, float] = {}  # {sym: ts} — 60s dedup window (FAST_SCAN_S retrigger guard)
+_signal_dedup        : Dict[str, float] = {}  # {sym: ts} — 2h dedup (same as COOLDOWN, prevents all scanners re-firing)
 _alerted_price       : Dict[str, float] = {}  # {sym: price} — frozen data guard (MFT type)
 _ms_dedup            : Dict[str, float] = {}  # {sym_ms: ts} — prevents duplicate milestone sends (multiple instances guard)
 _sl_dedup            : Dict[str, float] = {}  # {sym: ts} — prevents duplicate SL sends across restarts
@@ -3097,26 +3097,25 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     # ── Open Interest Gate ────────────────────────────────────────────────
-    # OI contracting during a price move = short covering, not real breakout.
-    # Real breakouts attract NEW money (OI expands). Corrective bounces just
-    # close existing shorts (OI flat/contracts). Only moonshots/vol_exp bypass.
+    # OI contracting + price rising = short squeeze (shorts forced to close = bullish).
+    # Only block weak signals — strong flow (score ≥ 6.5) overrides OI contraction.
     if (_oi and _oi["contracting"] and not is_moonshot and not volume_explosion
-            and score < 9.0):
+            and score < 6.5):
         _rej(f"oi_contracting({_oi['oi_delta_1h']:.1f}%)"); return
 
-    # L/S crowded longs = too many retail longs piled in = liquidation cascade risk.
-    # At high pos24: no score bypass — crowded longs at top cannot be saved by score.
-    _ls_block = score < 9.0 or pos24 > 0.80
+    # L/S crowded longs = liquidation cascade risk, but only when BOTH conditions true:
+    # weak score AND high position (one alone is not enough to block).
+    _ls_block = score < 9.0 and pos24 > 0.80
     if (_oi and _oi["long_crowded"] and not is_moonshot and _ls_block):
         _rej(f"ls_crowded_longs({_oi['ls_ratio']:.2f},pos={pos24*100:.0f}%)"); return
 
-    # SL-hunt setup: crowded longs (L/S>2.0) + OI exiting + price at top = EPIC pattern.
-    # EPIC: L/S 2.24 + OI -2% + pos24 98% → SL hit in 7min then +16% recovery.
-    # No score bypass — stop-loss hunt mechanics override any technical score.
+    # SL-hunt setup: crowded longs + OI exiting + price at top = stop-loss hunt risk.
+    # Exception: strong net flow (score ≥ 7.5) — real institutional buying overrides.
     if (_oi and not is_moonshot and not momentum_bypass
             and pos24 > 0.75
             and _oi["ls_ratio"] > 2.0
-            and _oi["oi_delta_1h"] < 0.0):
+            and _oi["oi_delta_1h"] < 0.0
+            and score < 7.5):
         _rej(f"sl_hunt_risk(L/S={_oi['ls_ratio']:.2f},OI={_oi['oi_delta_1h']:.1f}%,pos={pos24*100:.0f}%)"); return
 
     # OI score boost: expanding OI = institutional confirmation of the move.
