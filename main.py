@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.21"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.22"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -77,7 +77,7 @@ _cq_ok  = False
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.getenv("CHAT_ID") or ""
-GROUP_ID       = os.getenv("GROUP_ID") or "-1003992515031"
+GROUP_ID       = os.getenv("GROUP_ID") or ""
 REDIS_URL      = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
 REDIS_TOKEN    = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY      = "mafio_v31"
