@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.15"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.16"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1206,12 +1206,12 @@ def _ts():
 # ══════════════════════════════════════════════════════
 
 def _calc_score(pos24, net, net_min, ob_spot, spike):
-    """Confidence score 0–10: quality of the signal. All components clamped ≥ 0."""
-    pos_pts   = max(0.0, 1.0 - pos24) * 2.0                              # 0-2
-    net_pts   = max(0.0, min(4.0, (net / max(net_min, 1)) / 5.0 * 4.0)) # 0-4 (was unbounded negative — APR bug)
+    """Confidence score 0–8: pure flow quality (net, ob, spike). pos24 not penalized.
+    net_pts maxes at 2× net_min so realistic signals score 5-7, not 2-3."""
+    net_pts   = max(0.0, min(4.0, (net / max(net_min, 1)) / 2.0 * 4.0)) # 0-4, max at 2x net_min
     bids_pts  = max(0.0, (ob_spot - 0.45) / 0.35) * 2.0                 # 0-2
     spike_pts = min(2.0, spike / 10.0 * 2.0)                             # 0-2
-    return round(min(10.0, pos_pts + net_pts + bids_pts + spike_pts), 1)
+    return round(min(10.0, net_pts + bids_pts + spike_pts), 1)           # 0-8 in practice
 
 def _calc_fractal_score(fra, fva_result, cq_result):
     """
@@ -2904,26 +2904,24 @@ def _check(sym, ticker, interval, sector_boost=False):
     # TST pattern: ratio≥4x = strong buyer dominance compensates weak OB
     _extreme_vol = spike >= 30.0 and net > 0   # real demand confirmed by volume alone
     _strong_ratio = ratio >= 4.0 and net > 0   # buy/sell imbalance confirms real demand
-    if score < 6.0 and ob_spot < 0.65 and not is_moonshot and not momentum_bypass and not volume_explosion and not _extreme_vol and not _strong_ratio:
+    if score < 4.5 and ob_spot < 0.65 and not is_moonshot and not momentum_bypass and not volume_explosion and not _extreme_vol and not _strong_ratio:
         _rej("weak_ob_score"); return
 
     # bear_bids score penalty removed: bias does not determine signal quality.
 
     # ── Quality gate — dual-path instead of pure score floor ─────────────
-    # Problem: pos24 penalty in score unfairly hurts coins already in motion
-    # (IO at 73% pos24 scored 4.8 but went +88% — strong OB=78% + ratio=2.8x)
-    #
-    # Absolute floor — no path bypasses a score this weak
-    if score < 5.5 and not is_moonshot and not volume_explosion:
-        _rej("quality_fail"); return
-    # Multi-path quality gate — any one path is enough
-    # Bias does NOT tighten these thresholds — flow quality decides, not market direction.
-    _good_score    = score >= 7.0
+    # Score is pure flow quality (net+ob+spike), max ~8. Good signals score 5-7.
+    # Pre-compute flow paths so _strong_signal/_huge_flow can bypass the floor.
     _strong_signal = ob_spot >= 0.72 and ratio >= 2.5 and net >= net_min
     _huge_flow     = net > 100_000 and ob_spot >= 0.65
     # Sector boost: hot sector = 4th path — positive flow + decent OB enough
     _sector_path   = (sector_boost and net > 0
                       and ob_spot >= 0.55 and ratio >= 1.5)
+    # Absolute floor — only pure noise signals (score < 4.0) with no flow backup are blocked.
+    if score < 4.0 and not is_moonshot and not volume_explosion and not _strong_signal and not _huge_flow:
+        _rej("quality_fail"); return
+    # Good score = 5.5+ on 0-8 scale (calibrated for pos24-neutral formula)
+    _good_score = score >= 5.5
     if not (_good_score or _strong_signal or _huge_flow or _sector_path):
         if not is_moonshot and not volume_explosion:
             _rej("quality_fail"); return
