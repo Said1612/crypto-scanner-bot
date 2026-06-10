@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.22"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.23"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4544,11 +4544,11 @@ def scan_alpha_explosion(all_t: dict):
                 vol_surge = vol / prev_vol
         _alpha_vol_cache[sym] = (vol, now)
 
-        # Signal conditions — at least one must pass
-        _big_move  = chg >= 40.0 and vol >= 200_000
-        _explosion = vol_surge >= 2.0 and chg >= 20.0 and vol >= 100_000
+        # Signal condition: volume surging NOW + early in the move (not already +30%)
+        # _big_move removed — chg>=40% means the move is over, not an entry signal
+        _explosion = vol_surge >= 2.0 and chg >= 5.0 and chg <= 30.0 and vol >= 100_000
 
-        if not (_big_move or _explosion):
+        if not _explosion:
             continue
 
         # Build and send simplified Alpha signal
