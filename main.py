@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.23"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.24"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -65,11 +65,14 @@ except Exception as _cq_err:
     _cq_ok = False
     logging.getLogger(__name__).warning("chaos_quant not loaded: %s", _cq_err)
 
-# FVA + CQ disabled: both modules were silently reducing scores and blocking valid signals.
+# FVA + CQ disabled for gating: both modules were silently reducing scores and blocking valid signals.
 # When enabled, a raw score of 8.0 could become < 3.0 after FCF + Hurst + pos-penalty,
 # causing the bot to be completely silent during explosive market moves.
-_fva    = None
-_cq_ok  = False
+# Display references kept so FCF/Chaos-Quant sections still appear in signal messages (display-only, no gating).
+_fva_show   = _fva      # display-only — used after all gates pass
+_cq_show_ok = _cq_ok    # display-only flag
+_fva    = None           # force None → all gate checks skip
+_cq_ok  = False          # force False → all gate checks skip
 
 # ══════════════════════════════════════════════════════
 #  CONFIG
@@ -3188,6 +3191,18 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Weak order book + high position = no buyer support to sustain the move
     if ob_spot < 0.52 and pos24 > 0.70 and not is_moonshot and not volume_explosion and not momentum_bypass and not _sector_mom:
         _rej(f"weak_ob_highpos(ob={ob_spot:.0%},pos={int(pos24*100)}%)"); return
+
+    # Compute FVA + CQ display data — all gates already passed, display-only (no score modification)
+    if _fva_show is not None and _fva_result is None:
+        try:
+            _fva_result = _fva_show.evaluate_fractal_confluence(candles, price)
+        except Exception as _fve_disp:
+            log.debug("FVA display error: %s", _fve_disp)
+    if _cq_show_ok and _cq_result is None:
+        try:
+            _cq_result = _cq_integrate(candles, price, score, is_moonshot)
+        except Exception as _cqe_disp:
+            log.debug("CQ display error: %s", _cqe_disp)
 
     # Append fractal lines to signal — each tag on its own indented line
     if _fra and _fra["detail"]:
