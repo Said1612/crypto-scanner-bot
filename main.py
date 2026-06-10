@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.20"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.21"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4563,7 +4563,7 @@ def scan_alpha_explosion(all_t: dict):
             f"⚠️ _On-chain BSC — verify liquidity before entry_\n"
             f"🕐 {_ts()} UTC\n"
         )
-        if send(CHAT_ID, _msg):
+        if send(_msg):
             alerted[sym_base] = now
             _signal_dedup[sym] = now
             sent += 1
