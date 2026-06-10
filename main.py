@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.13"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.14"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2825,9 +2825,9 @@ def _check(sym, ticker, interval, sector_boost=False):
         log.debug("FAKE_WALL skip %s ob=%.0f%% net=%s net_min=%s", sym, ob_spot*100, _fv(net), _fv(net_min))
         _rej("fake_wall"); return
 
-    # Funding bearish block — any negative funding = shorts winning = avoid
-    if funding_rate is not None and funding_rate < -0.02:
-        _rej("bearish_funding"); return
+    # Funding bearish: very negative funding = aggressive shorting = score penalty only
+    # (do NOT block — spot-driven moves often have negative funding as shorts chase)
+    _funding_bearish = (funding_rate is not None and funding_rate < -0.02)
 
     # Flash pump detection: 1m candle with spike≥8x AND move≥3% = explosive 1-minute burst
     # CATI/ALCX pattern — reverses very fast, needs tighter exit threshold (4% not 5%)
@@ -2850,6 +2850,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     #   that go +1% then dump. NEOS(6.9) REPAI(10) PGVERSE(9) LKT(9) all ≥ 4.0 ✓
     # Binance: floor 2.0 — more institutional signals have lower net but are still valid
     score = _calc_score(pos24, net, net_min, ob_spot, spike)
+
+    # Bearish funding penalty: shorts are fighting the move — lower confidence
+    if _funding_bearish:
+        score = max(0.0, round(score - 1.5, 1))
 
     # C. Alpha/Futures Priority bonus: RAVE-type (futures-only + positive net flow)
     # Futures-only coins lack spot OB history → compensate with +1.5 when flow is real
