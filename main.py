@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.14"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.15"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -65,11 +65,17 @@ except Exception as _cq_err:
     _cq_ok = False
     logging.getLogger(__name__).warning("chaos_quant not loaded: %s", _cq_err)
 
+# FVA + CQ disabled: both modules were silently reducing scores and blocking valid signals.
+# When enabled, a raw score of 8.0 could become < 3.0 after FCF + Hurst + pos-penalty,
+# causing the bot to be completely silent during explosive market moves.
+_fva    = None
+_cq_ok  = False
+
 # ══════════════════════════════════════════════════════
 #  CONFIG
 # ══════════════════════════════════════════════════════
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7696119722:AAHtxydYz5qg4SmyF38M0X6agntIYSuOjXY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.getenv("CHAT_ID") or ""
 GROUP_ID       = os.getenv("GROUP_ID") or "-1003992515031"
 REDIS_URL      = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
@@ -1211,7 +1217,10 @@ def _calc_fractal_score(fra, fva_result, cq_result):
     """
     Fractal quality score 0-10 — display only, does not affect filters.
     FCF(0-4) + H(0-3) + MTF(0-2) + bearish_end bonus(0-1)
+    Returns 7.0 (neutral pass) when FVA and CQ are both disabled.
     """
+    if fva_result is None and cq_result is None:
+        return 7.0
     pts = 0.0
     # FCF: fractal confluence quality
     if fva_result:
@@ -2964,21 +2973,8 @@ def _check(sym, ticker, interval, sector_boost=False):
         except Exception as _cqe:
             log.debug("chaos_quant error: %s", _cqe)
 
-    # ── Late Position Penalty on Score ───────────────────────────────────
-    # EPIC pattern: pos24=98% + FCF=1.32 → score 10/10 "Whale Action"
-    # Score measures MOMENTUM QUALITY, not ENTRY TIMING.
-    # When pos24 > 80%, the signal is technically strong but timing is dangerous.
-    # Apply multiplier so score reflects reality:
-    #   pos24=0.85 → ×0.80 → 10 becomes 8.0  ("Scalp")
-    #   pos24=0.90 → ×0.60 → 10 becomes 6.0
-    #   pos24=0.95 → ×0.40 → 10 becomes 4.0
-    #   pos24=0.98 → ×0.28 → 10 becomes 2.8  (no label = "Score: 2.8/10")
-    # Exception: moonshot + volume_explosion legitimately fire at high pos
-    if pos24 > 0.80 and not is_moonshot and not volume_explosion:
-        _pos_penalty = max(0.2, 1.0 - (pos24 - 0.80) * 4.0)
-        score = round(score * _pos_penalty, 1)
-        log.debug("POS_PENALTY %s pos=%.0f%% ×%.2f score→%.1f",
-                  sym, pos24 * 100, _pos_penalty, score)
+    # Late Position Penalty removed: was multiplying score by 0.2-0.8 for pos24 > 0.80,
+    # causing valid signals (coins already in motion) to fail the quality gate.
 
     # ── Fractal Structure Gate ────────────────────────────────────────────
     # Blocks signals where the fractal layer signals strong structural risk,
