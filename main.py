@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.18"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.19"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2626,7 +2626,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Breakout bypass: strong volume explosion + buyer dominance = fresh consolidation breakout,
     # not a dump continuation. ALLO pattern: consolidated at 75% pos, then 10x+ vol broke out.
     # MOVE pattern: Large cap spike of 2.5x = tens of millions in absolute $ — real breakout.
-    _breakout_spike_min = 2.5 if tier["name"] == "Large" else (3.5 if tier["name"] == "Mid" else 5.0)
+    _breakout_spike_min = 2.5 if tier["name"] == "Large" else 3.0
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
