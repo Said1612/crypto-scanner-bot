@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.17"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.18"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -132,6 +132,7 @@ BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "KMD",                             # Delisted from Binance — ghost volume causes false sleeping giant signals
                   "COCOS",                           # Dead gaming blockchain — ghost volume causes false 92x sleeping giant signals
                   "ORN",                             # Delisted from Binance — ghost 202x volume causes false sleeping giant signals
+                  "TVK",                             # DEX-only token — not tradeable on Binance/MEXC, ghost volume causes false signals
                   # Staked/wrapped derivatives — price follows underlying, no independent signal
                   "BNSOL",                           # Binance Staked SOL → follows SOL
                   "WBETH",                           # Wrapped Binance ETH → follows ETH
