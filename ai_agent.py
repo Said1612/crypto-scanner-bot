@@ -206,21 +206,27 @@ class MafioAgent:
     def _similar_summary(self, similar: List[dict]) -> Tuple[float, str]:
         """
         Returns (win_prob_0_100, display_string) from a list of similar signals.
-        win_prob is the fraction that achieved >= +5%.
+        win_prob is fraction that achieved >= +5% peak.
+        Shows peak gain + drawdown when available: "AIO ▲+71% ▼-12%"
         """
         if not similar:
             return 0.0, ""
 
-        wins = sum(1 for s in similar if s.get("max_gain_pct", 0) >= 5)
+        wins     = sum(1 for s in similar if s.get("max_gain_pct", 0) >= 5)
         win_prob = wins / len(similar) * 100
 
         parts = []
         for s in similar:
-            gain  = s.get("max_gain_pct", 0)
-            sym   = s.get("sym", "?").replace("USDT", "")
-            sign  = "+" if gain >= 0 else ""
-            icon  = "✅" if gain >= 5 else ("❌" if gain < 0 else "⚠️")
-            parts.append(f"{sym} {sign}{gain:.0f}% {icon}")
+            peak = s.get("max_gain_pct", 0)
+            dd   = s.get("max_drawdown_pct")   # None for old records without retro update
+            sym  = s.get("sym", "?").replace("USDT", "")
+            sign = "+" if peak >= 0 else ""
+            icon = "✅" if peak >= 5 else ("❌" if peak < 0 else "⚠️")
+            if dd is not None and dd < -3.0:
+                # Show drawdown only if meaningful (> -3%)
+                parts.append(f"{sym} ▲{sign}{peak:.0f}% ▼{dd:.0f}% {icon}")
+            else:
+                parts.append(f"{sym} {sign}{peak:.0f}% {icon}")
 
         return win_prob, " · ".join(parts)
 

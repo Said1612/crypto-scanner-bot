@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.36"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.37"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -528,11 +528,12 @@ def _db_add(sym, price, exchange, tier_name, scanner,
         "h_value":       round(h_value, 4) if h_value is not None else None,
         "oi_delta":      round(oi_delta, 2) if oi_delta is not None else None,
         # Outcome (filled when signal closes)
-        "outcome":      "active",       # active → success / stoploss / timeout / expired
-        "max_gain_pct": 0.0,
-        "price_exit":   None,
-        "duration_min": None,
-        "close_reason": None,
+        "outcome":          "active",   # active → success / stoploss / timeout / expired
+        "max_gain_pct":     0.0,       # highest % reached from entry (before reversal)
+        "max_drawdown_pct": None,      # deepest % from entry (negative = below entry)
+        "price_exit":       None,
+        "duration_min":     None,
+        "close_reason":     None,
     })
     _save_signal_db()
 
@@ -572,15 +573,19 @@ def _db_close(sym, outcome, max_gain, price_exit, duration_min, reason):
 
 def _retroactive_peak_update(max_per_call: int = 3):
     """
-    For timed-out signals (last 14 days), fetch real historical klines and
-    update max_gain_pct to the true peak since entry.
+    For timed-out signals (last 14 days), fetch real 1h klines and record:
+      - max_gain_pct   : highest peak reached from entry (before reversal)
+      - max_drawdown_pct: deepest trough reached from entry (can be negative)
 
-    Why: the 8h/24h tracking window closes before slow-moving coins peak.
-    AIO was stored as +2% but actually reached +71% — this poisons AI training.
-    This function fixes those records so the AI learns the true outcome.
+    Example: coin entered $1 → peaked at $2 (+100%) → crashed to $0.60 (-40%)
+      max_gain_pct    = +100%  (the real opportunity available)
+      max_drawdown_pct= -40%   (the worst moment after entry)
+
+    This gives AI full picture — a signal that peaked +100% is a winner even if
+    the coin later fell below entry. Without this, all timeout signals look weak.
     """
     now    = time.time()
-    cutoff = now - 14 * 86400   # only look back 14 days
+    cutoff = now - 14 * 86400
 
     candidates = [
         rec for rec in _signal_db
@@ -606,7 +611,7 @@ def _retroactive_peak_update(max_per_call: int = 3):
             base_url  = MEXC_BASE if exchange == "MEXC" else BINANCE_BASE
             start_ms  = signal_ts * 1000
             hours_ago = max(1, int((now - signal_ts) / 3600))
-            limit     = min(hours_ago + 1, 168)   # cap at 7 days of 1h data
+            limit     = min(hours_ago + 1, 168)   # cap at 7 days of 1h candles
 
             r = S.get(f"{base_url}/klines",
                       params={"symbol": sym, "interval": "1h",
@@ -617,13 +622,26 @@ def _retroactive_peak_update(max_per_call: int = 3):
                 rec["retro_updated"] = True
                 continue
 
-            max_high     = max(float(k[2]) for k in klines)   # index 2 = high
-            true_peak    = (max_high - entry_price) / entry_price * 100
+            # k[2] = high, k[3] = low across all candles since entry
+            max_high  = max(float(k[2]) for k in klines)
+            min_low   = min(float(k[3]) for k in klines)
+
+            true_peak     = (max_high - entry_price) / entry_price * 100
+            true_drawdown = (min_low  - entry_price) / entry_price * 100  # negative if below entry
 
             stored = rec.get("max_gain_pct") or 0.0
+            changed = False
+
             if true_peak > stored + 1.0:
                 rec["max_gain_pct"] = round(true_peak, 2)
-                log.info("RETRO_PEAK %s: %.1f%% → %.1f%% (true 14d peak)", sym, stored, true_peak)
+                changed = True
+
+            # Always update drawdown — shows the real risk
+            rec["max_drawdown_pct"] = round(true_drawdown, 2)
+
+            if changed:
+                log.info("RETRO_PEAK %s: peak %.1f%% | drawdown %.1f%%",
+                         sym, true_peak, true_drawdown)
                 updated += 1
 
             rec["retro_updated"] = True
