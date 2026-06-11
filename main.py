@@ -5,9 +5,9 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.29"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.30"  # bump this with every push — verify after restart
 
-import os, time, json, logging, base64, signal as _signal, sys
+import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Optional
 import requests
@@ -28,26 +28,6 @@ except Exception as _fra_err:
     _fractal_agent = None
     logging.getLogger(__name__).warning("Fractal agent not loaded: %s", _fra_err)
 
-# Claude API reviewer — optional, reviews each signal before sending
-try:
-    import anthropic as _anthropic_sdk
-    _ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-    # Fallback: read from .anthropic_key file next to main.py
-    if not _ANTHROPIC_KEY:
-        _key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".anthropic_key")
-        try:
-            with open(_key_file) as _kf:
-                _ANTHROPIC_KEY = _kf.read().strip()
-        except FileNotFoundError:
-            pass
-    _claude_client = _anthropic_sdk.Anthropic(api_key=_ANTHROPIC_KEY) if _ANTHROPIC_KEY else None
-    if _claude_client:
-        logging.getLogger(__name__).info("Claude API reviewer loaded ✅")
-    else:
-        logging.getLogger(__name__).warning("ANTHROPIC_API_KEY not set — Claude reviewer disabled")
-except Exception as _cl_err:
-    _claude_client = None
-    logging.getLogger(__name__).warning("Claude client not loaded: %s", _cl_err)
 
 # Fractal Validation Agent — multi-source confluence engine (Almazov 5-book synthesis)
 try:
@@ -261,12 +241,10 @@ last_sg       = 0.0
 last_alpha    = 0.0          # scan_alpha_explosion interval
 _alpha_vol_cache: dict = {}  # sym → (vol24h, timestamp) for surge detection
 last_sector   = 0.0
-last_trend        = 0.0
 last_weekly_swing = 0.0
 last_deep_value   = 0.0
 last_bias_log = 0.0
 ACCUM_SCAN_S      = 300    # every 5 min
-TREND_FOLLOW_S    = 1800   # every 30 min
 WEEKLY_SWING_S    = 300    # every 5 min
 DEEP_VALUE_S      = 300    # every 5 min
 last_report        = 0.0   # last daily report sent (unix ts)
@@ -362,12 +340,6 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("mafio")
 
 # Log deferred startup statuses (modules loaded before logging was configured)
-if _claude_client:
-    log.info("Claude API reviewer loaded ✅")
-elif _ANTHROPIC_KEY == "":
-    log.warning("ANTHROPIC_API_KEY not set — Claude reviewer disabled")
-else:
-    log.warning("Claude client failed to initialize — check API key")
 
 # ══════════════════════════════════════════════════════
 #  CIRCUIT BREAKER
@@ -1066,10 +1038,6 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                 reason = "AI<35%% avoid"
             elif dump_pattern:
                 reason = "AI<50%% + sellers dominate"
-            elif ai_avoid:
-                reason = "AI<60%% avoid signal"
-            elif ai_caution:
-                reason = "AI<65%%+score<7.0 cautious regardless of volume"
             else:
                 reason = "weak combined: AI<75%%+score<7.5+vol<5x"
             log.info("AI_BLOCK %s prob=%.1f%% ob=%.0f%% score=%.1f spike=%.1fx (%s)",
@@ -1077,73 +1045,6 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         return text, blocked
     except Exception:
         return "", False
-
-def claude_review(sym, score, spike, ratio, ob_spot, pos24, net_usd,
-                  fractal_score, h_value, oi_label, scanner, tier) -> dict:
-    """
-    Ask Claude API to review the signal before sending.
-    Returns {"verdict": "buy"|"avoid"|"neutral", "confidence": 0-100,
-             "reason": str, "text": formatted string, "block": bool}
-    Blocks only if verdict=avoid AND confidence >= 88.
-    """
-    if _claude_client is None:
-        return {"verdict": "neutral", "confidence": 0, "reason": "", "text": "", "block": False}
-    try:
-        fs_str  = f"{fractal_score}/10" if fractal_score is not None else "N/A"
-        h_str   = f"{h_value:.3f}" if h_value is not None else "N/A"
-        oi_str  = oi_label if oi_label else "N/A"
-        prompt  = (
-            f"You are an expert crypto futures signal reviewer.\n"
-            f"Analyze this Binance signal and respond with JSON only — no extra text.\n\n"
-            f"Signal: {sym.replace('USDT','')} | Scanner: {scanner} | Tier: {tier}\n"
-            f"Score: {score}/10 | Spike: {spike:.1f}x | Buy/Sell ratio: {ratio:.1f}x\n"
-            f"Order book bids: {int(ob_spot*100)}% | Position in 24h range: {int(pos24*100)}%\n"
-            f"Net buy flow: ${net_usd:,.0f} | Fractal quality: {fs_str} | Hurst H={h_str}\n"
-            f"OI/Derivatives: {oi_str}\n\n"
-            f"Rules:\n"
-            f"- Score >= 9.0 + spike >= 5x + ob >= 65% = strong buy\n"
-            f"- pos24 > 70% = late entry risk (exhaustion)\n"
-            f"- H < 0.53 = random market (no trend)\n"
-            f"- Fractal < 6 = weak structure\n\n"
-            f'Respond ONLY with this JSON: {{"verdict":"buy"|"avoid"|"neutral",'
-            f'"confidence":0-100,"reason":"max 12 words"}}'
-        )
-        resp = _claude_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=60,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = resp.content[0].text.strip()
-        # Parse JSON safely
-        import re as _re
-        m = _re.search(r'\{[^}]+\}', raw)
-        data = json.loads(m.group()) if m else {}
-        verdict    = data.get("verdict", "neutral")
-        confidence = int(data.get("confidence", 50))
-        reason     = data.get("reason", "")
-
-        if verdict == "buy":
-            v_emoji = "🟢"
-        elif verdict == "avoid":
-            v_emoji = "🔴"
-        else:
-            v_emoji = "🟡"
-
-        text = (f"\n🧠 *Claude AI:* {v_emoji} `{confidence}%` · {verdict.upper()}"
-                + (f"\n   _{reason}_" if reason else "")
-                + f"\n{'━'*20}")
-
-        # Block only on high-confidence avoid
-        block = (verdict == "avoid" and confidence >= 93)
-        if block:
-            log.info("CLAUDE_BLOCK %s verdict=%s conf=%d reason=%s", sym, verdict, confidence, reason)
-
-        return {"verdict": verdict, "confidence": confidence,
-                "reason": reason, "text": text, "block": block}
-
-    except Exception as e:
-        log.debug("claude_review error %s: %s", sym, e)
-        return {"verdict": "neutral", "confidence": 0, "reason": "", "text": "", "block": False}
 
 
 def _notify_once(key: str, ttl: int = 300) -> bool:
@@ -1770,56 +1671,6 @@ def _send_eod_reflection(all_entries: list):
         log.info("EOD reflection sent: %d signals analyzed", total)
     except Exception as e:
         log.warning("EOD reflection failed: %s", e)
-
-
-def _build_reasoning(ratio, ob_spot, pos24, spike, net_usd, move_pct, funding, prob, score) -> str:
-    """Generate a 1-sentence AI reasoning log based on signal parameters."""
-    strengths, warnings = [], []
-
-    # Order book & ratio
-    if ob_spot >= 0.75 and ratio >= 4.0:
-        strengths.append(f"strong buyer dominance ({ratio:.1f}x ratio, {int(ob_spot*100)}% bids)")
-    elif ob_spot >= 0.65:
-        strengths.append(f"healthy OB ({int(ob_spot*100)}% bids)")
-    elif ratio >= 6.0:
-        strengths.append(f"aggressive buy flow ({ratio:.1f}x)")
-    elif ob_spot < 0.55:
-        warnings.append(f"weak OB ({int(ob_spot*100)}% bids)")
-
-    # Position in 24h range
-    if pos24 < 0.20:
-        strengths.append("very early entry near 24h low")
-    elif pos24 < 0.35:
-        strengths.append(f"good entry position ({int(pos24*100)}% from bottom)")
-    elif pos24 > 0.70:
-        warnings.append("late position — exhaustion risk")
-
-    # Volume spike
-    if spike >= 20.0:
-        strengths.append(f"explosive volume ({spike:.0f}x above avg)")
-    elif spike >= 8.0:
-        strengths.append(f"strong volume surge ({spike:.1f}x)")
-    elif spike < 3.0:
-        warnings.append(f"weak volume ({spike:.1f}x)")
-
-    # Net flow
-    if net_usd >= 300_000:
-        strengths.append(f"massive net inflow (${net_usd/1000:.0f}K)")
-    elif net_usd >= 80_000:
-        strengths.append(f"strong net inflow (${net_usd/1000:.0f}K)")
-    elif net_usd < 15_000:
-        warnings.append(f"low net flow (${net_usd/1000:.0f}K)")
-
-    # Funding
-    if "Bullish" in str(funding):
-        strengths.append("bullish funding")
-
-    # Build sentence
-    quality = "exceptional" if score >= 9.0 else "solid" if score >= 7.5 else "moderate" if score >= 6.0 else "weak"
-    parts = strengths[:3] + ([f"⚠ {warnings[0]}"] if warnings else [])
-    if parts:
-        return f"🧠 _{quality.capitalize()} setup: {', '.join(parts)}_"
-    return f"🧠 _Score {score:.1f} — mixed signals, no dominant factor_"
 
 
 
@@ -3193,32 +3044,12 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("ai_block"); return
     msg += ai_str
 
-    # ── Claude API Review (blocking only — text not shown, verdict covers it) ─
-    _cl = claude_review(
-        sym, score, spike, ratio, ob_spot, pos24, net,
-        fractal_score=_fractal_score,
-        h_value=(_cq_result["H"] if _cq_result else None),
-        oi_label=(_oi["label"] if _oi and _oi.get("label") else ""),
-        scanner=("moonshot" if is_moonshot else "volume_explosion" if volume_explosion else "momentum" if momentum_bypass else "main"),
-        tier=tier["name"],
-    )
-    if _cl["block"]:
-        _rej(f"claude_avoid({_cl['confidence']}%)"); return
-
     # ── Late Entry Hard Block ─────────────────────────────────────────────
     if pos24 > 0.80 and not is_moonshot and not momentum_bypass:
-        _claude_ok = (_cl.get("verdict") != "avoid")
-        if volume_explosion and score >= 8.5 and _claude_ok:
-            pass
+        if volume_explosion and score >= 8.5:
+            pass   # allow: explosive volume + high quality
         else:
             _rej(f"late_entry_hard({pos24*100:.0f}%)"); return
-
-    # Claude AVOID (≥70%) + high position
-    if (not is_moonshot and not volume_explosion and not momentum_bypass
-            and _cl.get("verdict") == "avoid"
-            and _cl.get("confidence", 0) >= 70
-            and pos24 > 0.70):
-        _rej(f"claude_avoid_highpos(conf={_cl['confidence']}%,pos={int(pos24*100)}%)"); return
 
     # Weak order book + high position
     if ob_spot < 0.52 and pos24 > 0.70 and not is_moonshot and not volume_explosion and not momentum_bypass and not _sector_mom:
@@ -4893,87 +4724,6 @@ def _ema(values: list, period: int) -> float:
     return ema
 
 
-def scan_trend_follow(all_t):
-    """
-    Catches coins in sustained multi-day uptrends (STG/ZEC-type slow grind).
-    Uses momentum_signal flag to relax spike/ratio/net in _check() — gradual
-    movers don't have explosive volume but have consistent positive flow.
-
-    Conditions:
-      - Binance, vol >= $1M, daily change 0.5-40%
-      - price > EMA10 * 1.01 (trending up)
-      - 7d gain 8-60% (was 15-50% — catches early trend like STG)
-      - volume not fading (3d avg >= 85% of 7d avg)
-      - pos24 < 82% (not extremely extended intraday)
-      - Top 5 by quality per run, 12h cooldown
-    """
-    now = time.time()
-    candidates = [
-        (sym, t) for sym, t in all_t.items()
-        if t["exchange"] == "Binance"
-        and t["vol"] >= 1_000_000
-        and 0.5 <= t["change"] <= 40.0
-        and now - _trend_dedup.get(sym, 0) >= 43200
-        and now - alerted.get(sym, 0) >= COOLDOWN
-        and sym not in tracking
-        and sym not in BLACKLIST
-    ]
-
-    scored = []
-    for sym, t in candidates:
-        try:
-            klines = _fetch_daily_klines(sym, "Binance", days=14)
-            if len(klines) < 10:
-                continue
-
-            closes   = [c for c, v in klines]
-            price    = closes[-1]
-            vols_usd = [v * c for c, v in klines]
-            ema10    = _ema(closes[:-1], 10)
-
-            if price <= ema10 * 1.01:
-                continue
-
-            gain_7d = (price - closes[-8]) / closes[-8] * 100 if closes[-8] > 0 else 0
-            if not (8.0 <= gain_7d <= 60.0):
-                continue
-
-            vol_3d_usd = sum(vols_usd[-4:-1]) / 3 if len(vols_usd) >= 4 else 0
-            vol_7d_usd = sum(vols_usd[-8:-1]) / 7 if len(vols_usd) >= 8 else 0
-            if vol_3d_usd < vol_7d_usd * 0.85:
-                continue
-
-            rng   = t["high24"] - t["low24"]
-            pos24 = (price - t["low24"]) / rng * 100 if rng > 0 else 50
-            if pos24 > 82:
-                continue
-
-            vol_growth = vol_3d_usd / max(vol_7d_usd, 1)
-            quality    = gain_7d * vol_growth
-            scored.append((sym, t, ema10, gain_7d, vol_3d_usd, pos24, quality))
-
-        except Exception as e:
-            log.debug("trend_follow_score %s: %s", sym, e)
-
-    scored.sort(key=lambda x: -x[-1])
-
-    fired = 0
-    for sym, t, ema10, gain_7d, vol_3d_usd, pos24, _ in scored[:5]:
-        try:
-            _trend_dedup[sym] = now
-            log.info("TREND_FOLLOW %s gain7d=+%.1f%% ema10=%s vol3d=%s pos=%.0f%%",
-                     sym, gain_7d, _fp(ema10), _fv(vol_3d_usd), pos24)
-            # Pass momentum_signal=True → relaxes spike/ratio/net in _check()
-            t_copy = dict(t)
-            t_copy["momentum_signal"] = True
-            _check(sym, t_copy, "1h")
-            fired += 1
-            time.sleep(0.5)
-        except Exception as e:
-            log.debug("trend_follow_send %s: %s", sym, e)
-
-    log.info("scan_trend_follow: scored=%d fired=%d", len(scored), fired)
-
 
 def _swing_fractal(sym, base_url, price, score):
     """
@@ -5425,7 +5175,7 @@ def _mark_report_sent(key: str, report_type: str):
 # ══════════════════════════════════════════════════════
 
 def main():
-    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_trend, last_weekly_swing, last_deep_value, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
+    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_weekly_swing, last_deep_value, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
     # Error tracking — alert Telegram on repeated loop errors
     _loop_err_count = [0]    # [count] — mutable so inner scope can modify
     _loop_last_err  = [""]   # [last_error_str]
@@ -5589,7 +5339,6 @@ def main():
                 last_sector = now
                 scan_sector_liquidity(all_t)
 
-            # scan_trend_follow disabled: 38% win rate / 2.2% avg gain (166-signal history) — negative edge
 
             # Swing: weekly high breakout with volume build-up (Wolf Flow style)
             if now - last_weekly_swing >= WEEKLY_SWING_S:
