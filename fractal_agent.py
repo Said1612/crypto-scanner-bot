@@ -560,22 +560,26 @@ class FractalAgent:
         }
 
         return {
-            "score":        score,
-            "verdict":      verdict,
-            "detail":       detail,
-            "warning":      warning,
-            "hurst":        round(H, 3),
-            "jy":           jy_norm,
-            "support":      round(nearest_sup, 8) if nearest_sup else None,
-            "resistance":   round(nearest_res, 8) if nearest_res else None,
-            "bull_trend":   bull_trend,
-            "bear_trend":   bear_trend,
-            "bulls_count":  len(bulls),
-            "bears_count":  len(bears),
-            "bearish_end":  bearish_end,
-            "tornado":      tornado,
-            "quad_valid":   quad["valid"],
-            "_features":    features,
+            "score":                score,
+            "verdict":              verdict,
+            "detail":               detail,
+            "warning":              warning,
+            "hurst":                round(H, 3),
+            "jy":                   jy_norm,
+            "support":              round(nearest_sup, 8) if nearest_sup else None,
+            "resistance":           round(nearest_res, 8) if nearest_res else None,
+            "bull_trend":           bull_trend,
+            "bear_trend":           bear_trend,
+            "bulls_count":          len(bulls),
+            "bears_count":          len(bears),
+            "bearish_end":          bearish_end,
+            "tornado":              tornado,
+            "quad_valid":           quad["valid"],
+            "wave3":                wave3,
+            "compression":          compression["detected"],
+            "compression_pct":      compression.get("range_pct", 0),
+            "compression_candles":  compression.get("candles_compressed", 0),
+            "_features":            features,
         }
 
     def _empty_result(self) -> dict:
@@ -586,7 +590,8 @@ class FractalAgent:
             "bull_trend": "neutral", "bear_trend": "neutral",
             "bulls_count": 0, "bears_count": 0,
             "bearish_end": False, "tornado": False, "quad_valid": False,
-            "_features": {},
+            "wave3": False, "compression": False, "compression_pct": 0,
+            "compression_candles": 0, "_features": {},
         }
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

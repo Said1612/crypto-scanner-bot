@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.39"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.40"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -587,9 +587,10 @@ def _retroactive_peak_update(max_per_call: int = 3):
     now    = time.time()
     cutoff = now - 14 * 86400
 
+    # Include both timeout AND stoploss — some SL-triggered signals recovered strongly
     candidates = [
         rec for rec in _signal_db
-        if rec.get("outcome") == "timeout"
+        if rec.get("outcome") in ("timeout", "stoploss")
         and (rec.get("timestamp") or 0) >= cutoff
         and not rec.get("retro_updated")
     ]
@@ -636,8 +637,14 @@ def _retroactive_peak_update(max_per_call: int = 3):
                 rec["max_gain_pct"] = round(true_peak, 2)
                 changed = True
 
-            # Always update drawdown — shows the real risk
+            # Always update drawdown — shows real risk profile
             rec["max_drawdown_pct"] = round(true_drawdown, 2)
+
+            # Stoploss that recovered strongly → reclassify for AI training
+            if rec.get("outcome") == "stoploss" and true_peak >= 5.0:
+                rec["outcome"] = "stoploss_recovered"
+                changed = True
+                log.info("RETRO_SL_RECOVERED %s: SL triggered but peak=%.1f%%", sym, true_peak)
 
             if changed:
                 log.info("RETRO_PEAK %s: peak %.1f%% | drawdown %.1f%%",
@@ -3165,15 +3172,25 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Line 2: Key patterns from fractal agent (priority order)
     _fra_tags = []
     if _fra:
-        if _fra.get("bearish_end"):  _fra_tags.append("🔄 Bearish End")
-        if _fra.get("tornado"):      _fra_tags.append("🌪️ Tornado")
-        if _fra.get("quad_valid"):   _fra_tags.append("QUAD ✅")
+        if _fra.get("bearish_end"):
+            _fra_tags.append("🔄 Bearish End")
+        if _fra.get("compression"):
+            _cp = _fra.get("compression_pct", 0)
+            _cc = _fra.get("compression_candles", 0)
+            _fra_tags.append(f"💥 Compression {_cp:.1f}% / {_cc}c")
+        if _fra.get("tornado"):
+            _fra_tags.append("🌪️ Tornado")
+        if _fra.get("wave3"):
+            _fra_tags.append("〽️ Wave3")
+        if _fra.get("quad_valid"):
+            _fra_tags.append("QUAD ✅")
         # Jy flow
         _jy = _fra.get("jy", 0.0)
         if _jy > 0.04:               _fra_tags.append(f"〰️ Jy +{_jy:.2f} 🟢")
         elif _jy < -0.04:            _fra_tags.append(f"〰️ Jy {_jy:.2f} 🔴")
-        # Support/Resistance proximity
-        if _fra.get("warning"):      _fra_tags.append(f"⚠️ {_fra['warning']}")
+        # Warning OR nearest support
+        if _fra.get("warning"):
+            _fra_tags.append(f"⚠️ {_fra['warning']}")
         elif _fra.get("support"):
             _sup = _fra["support"]
             _sup_dist = (price - _sup) / price * 100
@@ -4519,17 +4536,43 @@ def scan_alpha_explosion(all_t: dict):
         if not _explosion:
             continue
 
-        # Build and send simplified Alpha signal
-        _surge_txt = f"⚡ Vol surge: {vol_surge:.1f}x\n" if vol_surge >= 2.0 else ""
+        # Verdict based on surge strength
+        if vol_surge >= 5.0:
+            _alpha_verdict = "🟢 *Strong Signal* ✅"
+        elif vol_surge >= 3.0:
+            _alpha_verdict = "🟡 *Moderate Signal* ⚠️"
+        else:
+            _alpha_verdict = "🟡 *Early Move — Watch Closely* ⚠️"
+
+        # Simple TP/SL for Alpha (no klines, use fixed %%)
+        _tp1 = price * 1.08
+        _tp2 = price * 1.20
+        _tp3 = price * 1.40
+        _sl  = price * 0.92
+
+        global signal_count
+        signal_count += 1
+
         _msg = (
-            f"💀 *MAFIO SNIPER* 📡\n\n"
-            f"🆕 *#{sym_base}* 🔥 Alpha On-Chain · Signal\n"
-            f"💰 Price: `${price:.8g}`\n"
-            f"📈 24h Move: *+{chg:.1f}%*\n"
-            f"📊 Vol 24h: `${vol:,.0f}`\n"
-            f"{_surge_txt}"
-            f"⚠️ _On-chain BSC — verify liquidity before entry_\n"
-            f"🕐 {_ts()} UTC\n"
+            f"{'━'*20}\n"
+            f"💀 *MAFIO SNIPER* 📡\n"
+            f"{'━'*20}\n"
+            f"{_alpha_verdict}\n"
+            f"{'━'*20}\n"
+            f"\n"
+            f"🆕 *#{sym_base}* 🔥 · Alpha BSC · Signal #{signal_count}\n"
+            f"💰 `${_fp(price)}`  📈 `+{chg:.1f}%` 24h\n"
+            f"\n"
+            f"⚡ Vol surge: `{vol_surge:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
+            f"\n"
+            f"🎯 TP1: `${_fp(_tp1)}` *(+8%)*\n"
+            f"🎯 TP2: `${_fp(_tp2)}` *(+20%)*\n"
+            f"🎯 TP3: `${_fp(_tp3)}` *(+40%)*\n"
+            f"🛑 SL:  `${_fp(_sl)}` *(-8%)*\n"
+            f"\n"
+            f"⚠️ _BSC On-Chain — verify liquidity before entry_\n"
+            f"🟡 Binance Alpha  🕐 {_ts()} UTC\n"
+            f"{'━'*20}"
         )
         if send(_msg):
             alerted[sym_base] = now
