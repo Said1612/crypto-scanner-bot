@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.26"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.27"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2740,11 +2740,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     _ratio_bypass   = 8.0
     # momentum_bypass already set at function start from ticker.get("momentum_signal")
 
-    # Volume Explosion: spike + REAL net = extraordinary event.
-    # Threshold lowered 10→7.5 based on 166-signal history: volume_explosion = 84% win rate / 36.8% avg gain.
-    # pos24 raised 0.75→0.80: even coins 75-80% into range can explode further with this volume.
+    # Volume Explosion: spike + REAL net = extraordinary event → bypasses ob/quality/pos24 filters.
+    # Threshold 5x: still an unusual event (normal is 1-2x), but opens bypass gates for coins
+    # that have real volume but fail strict ob/quality gates. Most winning signals are 2-6x spike.
     # Sleeping Giant bypass: pos24 is misleading for flat coins with tiny daily range.
-    volume_explosion = (spike >= 7.5 and (pos24 < 0.80 or interval == "1m_sg") and net > _abs_net_floor)
+    volume_explosion = (spike >= 5.0 and (pos24 < 0.82 or interval == "1m_sg") and net > _abs_net_floor)
 
     # ── Net Flow Intensity: net relative to coin size ────────────────────
     # Problem: same $20K net flow means nothing on QNT ($20M/day) but is huge on XNY ($650K/day)
