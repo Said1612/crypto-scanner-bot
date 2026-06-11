@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.40"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.41"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1814,7 +1814,7 @@ def _period_report(period_label: str, days: int):
         send(f"📊 *{period_label}*\nNo signals found for this period.")
         return
 
-    WIN_OUT  = {"success", "partial"}
+    WIN_OUT  = {"success", "partial", "stoploss_recovered"}
     LOSS_OUT = {"stoploss", "reversal", "timeout"}
 
     wins   = [e for e in entries if e.get("outcome") in WIN_OUT]
@@ -4577,6 +4577,20 @@ def scan_alpha_explosion(all_t: dict):
         if send(_msg):
             alerted[sym_base] = now
             _signal_dedup[sym] = now
+            # Track for milestones + SL monitoring + AI learning
+            tracking[sym] = {
+                "entry":    price,
+                "t0":       now,
+                "hit":      set(),
+                "max":      0.0,
+                "min":      0.0,
+                "exchange": "Binance",
+                "is_flash": False,
+                "sl_pct":   -8.0,   # Alpha signals use fixed -8% SL
+            }
+            _db_add(sym, price, "Binance", "Alpha", "alpha_explosion",
+                    vol_surge, 0.5, 5.0, 0.3, vol_surge, 0.0, chg, "Alpha BSC")
+            save_state()
             sent += 1
             log.info("scan_alpha_explosion: signal %s chg=%.1f%% vol=%.0f surge=%.1fx",
                      sym, chg, vol, vol_surge)

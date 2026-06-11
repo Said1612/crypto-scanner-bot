@@ -108,7 +108,8 @@ class MafioAgent:
         if len(completed) == self._trained_on:
             return
 
-        wins  = [s for s in completed if s.get("max_gain_pct", 0) >= 5]
+        wins  = [s for s in completed if s.get("max_gain_pct", 0) >= 5
+                 or s.get("outcome") == "stoploss_recovered"]
         loses = [s for s in completed if s.get("max_gain_pct", 0) < 0]
 
         def _avg(lst, key):
