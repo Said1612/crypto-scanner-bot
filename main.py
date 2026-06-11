@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.42"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.44"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -501,8 +501,9 @@ def _save_signal_db():
 
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding,
-            fractal_score=None, h_value=None, oi_delta=None):
+            fractal_score=None, h_value=None, oi_delta=None, fra=None):
     """Record a new signal with all parameters for future ML training."""
+    _fra_d = fra or {}
     _signal_db.append({
         "id":           f"{sym}_{int(time.time())}",
         "sym":          sym,
@@ -523,10 +524,22 @@ def _db_add(sym, price, exchange, tier_name, scanner,
         "net_usd":      round(net, 0),
         "move_pct":     round(move, 2),
         "funding":      funding,
-        # Fractal + OI features for k-NN pattern matching (v3 AI)
+        # Fractal aggregate
         "fractal_score": fractal_score,
         "h_value":       round(h_value, 4) if h_value is not None else None,
         "oi_delta":      round(oi_delta, 2) if oi_delta is not None else None,
+        # Fractal detail components (for pattern analysis)
+        "fra_verdict":      _fra_d.get("verdict"),
+        "fra_quad":         bool(_fra_d.get("quad_valid")),
+        "fra_tornado":      bool(_fra_d.get("tornado")),
+        "fra_wave3":        bool(_fra_d.get("wave3")),
+        "fra_compression":  bool(_fra_d.get("compression")),
+        "fra_bearish_end":  bool(_fra_d.get("bearish_end")),
+        "fra_jy":           round(_fra_d.get("jy", 0.0), 4) if _fra_d.get("jy") is not None else None,
+        "fra_support":      round(_fra_d.get("support"), 8) if _fra_d.get("support") else None,
+        "fra_resistance":   round(_fra_d.get("resistance"), 8) if _fra_d.get("resistance") else None,
+        "fra_res_pct":      round((_fra_d["resistance"] - price) / price * 100, 2)
+                            if (_fra_d.get("resistance") and _fra_d["resistance"] > price) else None,
         # Outcome (filled when signal closes)
         "outcome":          "active",   # active → success / stoploss / timeout / expired
         "max_gain_pct":     0.0,       # highest % reached from entry (before reversal)
@@ -3250,7 +3263,8 @@ def _check(sym, ticker, interval, sector_boost=False):
             ratio, ob_spot, score, pos24, spike, net, move, funding_label,
             fractal_score=_fractal_score,
             h_value=(_cq_result["H"] if _cq_result else None),
-            oi_delta=(_oi["oi_delta_1h"] if _oi else None))
+            oi_delta=(_oi["oi_delta_1h"] if _oi else None),
+            fra=_fra)
     # Record fractal snapshot for self-learning
     if _fractal_agent is not None and _fra and _fra.get("_features"):
         _fractal_agent.record_signal(sym, _fra["_features"])
