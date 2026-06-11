@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.41"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.42"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1202,11 +1202,11 @@ def _ts():
 #  SIGNAL MESSAGE
 # ══════════════════════════════════════════════════════
 
-def _entry_verdict(score, ratio, ob_spot, pos24, hurst, fcf, ls_crowded, net, net_min):
+def _entry_verdict(score, ratio, ob_spot, pos24, hurst, fcf, ls_crowded, net, net_min,
+                   res_pct=999.0):
     """3-tier entry verdict for subscribers — returns points 0-8+.
-    Flow factors (score/ratio/net/ob) weigh more than pattern factors (H/FCF/pos):
-    SSV won +6.6% in 86min with H=0.478 + FCF=0.90 + pos 65% but ratio 4x + net 1.1x min.
-    >= 5.0 strong | >= 2.5 moderate | < 2.5 weak (blocked unless moonshot/vol-explosion)."""
+    >= 5.0 strong | >= 3.5 moderate | < 3.5 blocked (clean signals only).
+    res_pct: distance % to nearest fractal resistance above price (999 = no resistance)."""
     pts = 0.0
     # Flow quality — the factors that actually predict wins (up to 6.0)
     if score >= 7.0:   pts += 2.0
@@ -1214,24 +1214,27 @@ def _entry_verdict(score, ratio, ob_spot, pos24, hurst, fcf, ls_crowded, net, ne
     elif score >= 5.0: pts += 1.0
     if ratio >= 4.0:      pts += 1.5
     elif ratio >= 2.5:    pts += 1.0
-    elif ratio < 1.5:     pts -= 0.5   # sellers slightly dominate
+    elif ratio < 1.5:     pts -= 0.5
     if ob_spot >= 0.62:   pts += 1.0
     elif ob_spot >= 0.55: pts += 0.5
     if net >= 2 * max(net_min, 1):   pts += 1.5
     elif net >= max(net_min, 1):     pts += 1.0
-    # Pattern adjustments — advisory weight only
+    # Pattern adjustments
     if hurst is not None:
         if hurst >= 0.55:  pts += 1.0
         elif hurst < 0.45: pts -= 1.0
         elif hurst < 0.49: pts -= 0.5
     if fcf is not None:
         if fcf > 1.0:    pts += 0.5
-        elif fcf < 0.60: pts -= 2.0   # extreme bearish fractal structure
+        elif fcf < 0.60: pts -= 2.0
         elif fcf < 0.85: pts -= 1.0
         elif fcf < 0.95: pts -= 0.5
-    if pos24 > 0.85:   pts -= 1.0
+    if pos24 > 0.85:    pts -= 1.0
     elif pos24 <= 0.45: pts += 0.5
-    if ls_crowded:     pts -= 1.0   # raised: long squeeze risk is significant
+    if ls_crowded:      pts -= 1.0
+    # Fractal resistance too close = price will likely bounce off it
+    if res_pct < 1.0:   pts -= 2.0   # wall right above — very likely rejection
+    elif res_pct < 2.5: pts -= 1.0   # close resistance — risky entry
     return round(pts, 1)
 
 
@@ -3108,15 +3111,19 @@ def _check(sym, ticker, interval, sector_boost=False):
             log.debug("CQ display error: %s", _cqe_disp)
 
     # ── Entry Verdict — computed before building signal so it shows at top ──
+    _fra_res = (_fra.get("resistance") if _fra else None)
+    _fra_res_pct = ((_fra_res - price) / price * 100) if (_fra_res and _fra_res > price) else 999.0
+
     _v_pts = _entry_verdict(score, ratio, ob_spot, pos24,
                             (_cq_result["H"] if _cq_result else None),
                             (_fva_result["fcf"] if _fva_result else None),
-                            bool(_oi and _oi.get("long_crowded")), net, net_min)
-    if _v_pts < 2.5 and not is_moonshot and not volume_explosion:
+                            bool(_oi and _oi.get("long_crowded")), net, net_min,
+                            res_pct=_fra_res_pct)
+    if _v_pts < 3.5 and not is_moonshot and not (volume_explosion and _v_pts >= 3.5):
         _rej(f"verdict_weak({_v_pts:.1f})"); return
     if _v_pts >= 5.0:
         _v_label = "🟢 *Strong Signal* ✅"
-    elif _v_pts >= 2.5:
+    elif _v_pts >= 3.5:
         _v_label = "🟡 *Moderate Signal* ⚠️"
     else:
         _v_label = "🟠 *High Risk — Speculation Only*"
