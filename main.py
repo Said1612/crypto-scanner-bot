@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.35"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.36"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -569,6 +569,75 @@ def _db_close(sym, outcome, max_gain, price_exit, duration_min, reason):
             if _fractal_agent is not None:
                 _fractal_agent.record_outcome(sym, max_gain)
             return
+
+def _retroactive_peak_update(max_per_call: int = 3):
+    """
+    For timed-out signals (last 14 days), fetch real historical klines and
+    update max_gain_pct to the true peak since entry.
+
+    Why: the 8h/24h tracking window closes before slow-moving coins peak.
+    AIO was stored as +2% but actually reached +71% — this poisons AI training.
+    This function fixes those records so the AI learns the true outcome.
+    """
+    now    = time.time()
+    cutoff = now - 14 * 86400   # only look back 14 days
+
+    candidates = [
+        rec for rec in _signal_db
+        if rec.get("outcome") == "timeout"
+        and (rec.get("timestamp") or 0) >= cutoff
+        and not rec.get("retro_updated")
+    ]
+    if not candidates:
+        return
+
+    updated = 0
+    for rec in candidates[:max_per_call]:
+        sym         = rec.get("sym", "")
+        entry_price = float(rec.get("price_entry") or 0)
+        signal_ts   = int(rec.get("timestamp") or 0)
+        exchange    = rec.get("exchange", "Binance")
+
+        if not sym or entry_price <= 0 or signal_ts <= 0:
+            rec["retro_updated"] = True
+            continue
+
+        try:
+            base_url  = MEXC_BASE if exchange == "MEXC" else BINANCE_BASE
+            start_ms  = signal_ts * 1000
+            hours_ago = max(1, int((now - signal_ts) / 3600))
+            limit     = min(hours_ago + 1, 168)   # cap at 7 days of 1h data
+
+            r = S.get(f"{base_url}/klines",
+                      params={"symbol": sym, "interval": "1h",
+                              "startTime": start_ms, "limit": limit},
+                      timeout=10)
+            klines = r.json() if r.ok else []
+            if not isinstance(klines, list) or not klines:
+                rec["retro_updated"] = True
+                continue
+
+            max_high     = max(float(k[2]) for k in klines)   # index 2 = high
+            true_peak    = (max_high - entry_price) / entry_price * 100
+
+            stored = rec.get("max_gain_pct") or 0.0
+            if true_peak > stored + 1.0:
+                rec["max_gain_pct"] = round(true_peak, 2)
+                log.info("RETRO_PEAK %s: %.1f%% → %.1f%% (true 14d peak)", sym, stored, true_peak)
+                updated += 1
+
+            rec["retro_updated"] = True
+
+        except Exception as _rpe:
+            log.debug("retro_peak error %s: %s", sym, _rpe)
+            rec["retro_updated"] = True
+
+    if updated:
+        _save_signal_db()
+        if _ai_agent is not None:
+            _ai_agent.force_retrain()
+            log.info("RETRO_PEAK: %d records updated → AI retrained", updated)
+
 
 # ══════════════════════════════════════════════════════
 #  DATA FETCHING
@@ -5333,6 +5402,7 @@ def main():
             if now - last_alpha >= ACCUM_SCAN_S:
                 last_alpha = now
                 scan_alpha_explosion(all_t)
+                _retroactive_peak_update()   # fix timeout records with true historical peak
 
             global last_sg
             if now - last_sg >= SLEEP_GIANT_S:

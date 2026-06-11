@@ -161,6 +161,11 @@ class MafioAgent:
         if self._new_outcomes >= 10:
             self._train()
 
+    def force_retrain(self):
+        """Force immediate retrain — call after retroactive max_gain updates."""
+        self._trained_on = -1  # invalidate cache so _train() doesn't skip
+        self._train()
+
     # ── Pattern Matching (k-NN) ───────────────────────────────────────────────
 
     def _normalize(self, val: float, feat: str) -> float:
