@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.32"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.33"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1033,14 +1033,10 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         weak_combined = (prob < 50 and score < 6.0 and spike < 2.0)
         # Block condition 4: per-scanner minimum prob (swing scanners require >= 50%)
         below_min     = (min_prob > 0 and prob < min_prob)
-        # Block condition 5: bearish AI + crowded longs = long squeeze risk
-        crowd_risk    = (prob < 50 and crowded_longs)
-        blocked = extreme_avoid or dump_pattern or weak_combined or below_min or crowd_risk
+        blocked = extreme_avoid or dump_pattern or weak_combined or below_min
         if blocked:
             if extreme_avoid:
                 reason = "AI<35%% avoid"
-            elif crowd_risk:
-                reason = f"AI<50%%({prob}%%) + crowded longs (L/S squeeze risk)"
             elif dump_pattern:
                 reason = "AI<45%% + sellers dominate OB"
             else:
