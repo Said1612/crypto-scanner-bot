@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.24"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.25"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1209,6 +1209,37 @@ def _ts():
 # ══════════════════════════════════════════════════════
 #  SIGNAL MESSAGE
 # ══════════════════════════════════════════════════════
+
+def _entry_verdict(score, ratio, ob_spot, pos24, hurst, fcf, ls_crowded, net, net_min):
+    """3-tier entry verdict for subscribers — returns points 0-8+.
+    Flow factors (score/ratio/net/ob) weigh more than pattern factors (H/FCF/pos):
+    SSV won +6.6% in 86min with H=0.478 + FCF=0.90 + pos 65% but ratio 4x + net 1.1x min.
+    >= 5.0 strong | >= 2.5 moderate | < 2.5 weak (blocked unless moonshot/vol-explosion)."""
+    pts = 0.0
+    # Flow quality — the factors that actually predict wins (up to 6.0)
+    if score >= 7.0:   pts += 2.0
+    elif score >= 6.0: pts += 1.5
+    elif score >= 5.0: pts += 1.0
+    if ratio >= 4.0:   pts += 1.5
+    elif ratio >= 2.5: pts += 1.0
+    if ob_spot >= 0.62:   pts += 1.0
+    elif ob_spot >= 0.55: pts += 0.5
+    if net >= 2 * max(net_min, 1):   pts += 1.5
+    elif net >= max(net_min, 1):     pts += 1.0
+    # Pattern adjustments — advisory weight only (±2.0)
+    if hurst is not None:
+        if hurst >= 0.55:  pts += 1.0
+        elif hurst < 0.45: pts -= 1.0
+        elif hurst < 0.49: pts -= 0.5
+    if fcf is not None:
+        if fcf > 1.0:    pts += 0.5
+        elif fcf < 0.85: pts -= 1.0
+        elif fcf < 0.95: pts -= 0.5
+    if pos24 > 0.85:   pts -= 1.0
+    elif pos24 <= 0.45: pts += 0.5
+    if ls_crowded:     pts -= 0.5
+    return round(pts, 1)
+
 
 def _calc_score(pos24, net, net_min, ob_spot, spike):
     """Confidence score 0–8: pure flow quality (net, ob, spike). pos24 not penalized.
@@ -3204,6 +3235,15 @@ def _check(sym, ticker, interval, sector_boost=False):
         except Exception as _cqe_disp:
             log.debug("CQ display error: %s", _cqe_disp)
 
+    # ── Entry Verdict — final 3-tier rating for subscribers ──────────────
+    # Weak tier (< 2.5 pts) is not sent at all; moonshot/vol-explosion bypass the block.
+    _v_pts = _entry_verdict(score, ratio, ob_spot, pos24,
+                            (_cq_result["H"] if _cq_result else None),
+                            (_fva_result["fcf"] if _fva_result else None),
+                            bool(_oi and _oi.get("long_crowded")), net, net_min)
+    if _v_pts < 2.5 and not is_moonshot and not volume_explosion:
+        _rej(f"verdict_weak({_v_pts:.1f})"); return
+
     # Append fractal lines to signal — each tag on its own indented line
     if _fra and _fra["detail"]:
         _fra_line = f"\n📐 *Fractal*: {_fra['verdict']}"
@@ -3233,6 +3273,14 @@ def _check(sym, ticker, interval, sector_boost=False):
         for _tag in _cq_result["tags"]:
             _cq_line += f"\n   {_tag}"
         msg += _cq_line
+    # Entry verdict footer — the clear go/no-go line subscribers read first
+    if _v_pts >= 5.0:
+        _v_label = "🟢 *قوية — صالحة للدخول*"
+    elif _v_pts >= 2.5:
+        _v_label = "🟡 *متوسطة — دخول حذر*"
+    else:
+        _v_label = "🟠 *مخاطرة عالية — مضاربة سريعة فقط*"   # moonshot/vol-explosion bypass only
+    msg += f"\n━━━━━━━━━━━━━━━━━━━━\n🚦 *تقييم الدخول*: {_v_label}"
     keyboard = _trade_keyboard(sym, exchange)   # signal has no orig link yet
     ok, sig_msg_id = send_ex(msg, keyboard)
     if not ok:
