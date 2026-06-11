@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.34"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.35"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4397,20 +4397,15 @@ def scan_alpha_explosion(all_t: dict):
                 vol_surge = vol / prev_vol
         _alpha_vol_cache[sym] = (vol, now)
 
-        # Signal condition:
-        # Primary: volume surging NOW + early in the move (not already +50%)
-        # Fallback: no previous vol data (first scan) → strong move + high vol qualifies alone
-        _no_prev = vol_surge == 0.0
-        _explosion = (
-            (vol_surge >= 2.0 and chg >= 5.0 and chg <= 50.0 and vol >= 50_000)
-            or (_no_prev and chg >= 15.0 and vol >= 300_000)
-        )
+        # Signal condition: volume surging NOW + early in the move (not already +40%)
+        # Requires vol_surge baseline — first scan gets no signal, waits 5 min for next cycle
+        _explosion = (vol_surge >= 2.0 and chg >= 5.0 and chg <= 40.0 and vol >= 50_000)
 
         if not _explosion:
             continue
 
         # Build and send simplified Alpha signal
-        _surge_txt = f"⚡ Vol surge: {vol_surge:.1f}x\n" if vol_surge >= 2.0 else "⚡ Vol surge: first scan (no baseline)\n" if _no_prev else ""
+        _surge_txt = f"⚡ Vol surge: {vol_surge:.1f}x\n" if vol_surge >= 2.0 else ""
         _msg = (
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"🆕 *#{sym_base}* 🔥 Alpha On-Chain · Signal\n"
