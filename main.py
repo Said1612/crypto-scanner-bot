@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.37"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.38"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1320,6 +1320,9 @@ def build_signal(sym, price, change, buy_v, sell_v,
     base     = sym[:-4]
     net      = buy_v - sell_v
     ratio    = buy_v / sell_v if sell_v > 0 else 99.0
+    _total_v = buy_v + sell_v
+    in_pct   = int(buy_v  / _total_v * 100) if _total_v > 0 else 50
+    out_pct  = int(sell_v / _total_v * 100) if _total_v > 0 else 50
     ex_icon  = "🟡"
     # Market type label shown next to coin name
     if is_alpha:
@@ -1393,7 +1396,8 @@ def build_signal(sym, price, change, buy_v, sell_v,
         + f"💰 `${_fp(price)}`  📈 `+{move:.2f}%`  📍 `{pos_from_bottom}%` {pos_icon}\n"
         + (f"{score_label}\n" if score_label else "")
         + f"\n"
-        + f"⚡ `{spike:.1f}x`  ·  📊 Ratio `{ratio:.1f}x` {int_icon}  ·  💹 Net `+{_fv(net)}`\n"
+        + f"⚡ `{spike:.1f}x`  ·  📊 Ratio `{ratio:.1f}x` {int_icon}  ·  📥 `{in_pct}%` 📤 `{out_pct}%`\n"
+        + f"💹 Net `+{_fv(net)}`\n"
         + f"📗 {ob_label} `{ob_pct}%` bids  ·  📌 {funding_label}\n"
         + (f"📊 {oi_label}\n" if oi_label else "")
         + f"{_tp_sl_block}"
