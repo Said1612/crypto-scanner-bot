@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.27"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.28"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1050,12 +1050,8 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         model       = r.get("model", exchange)
         brain_str   = r.get("brain_str", "")
         similar_str = r.get("similar_str", "")
-        warn_str    = f"\n   ⚠️ _{warns[0]}_" if warns else ""
-        reasoning   = _build_reasoning(ratio, ob_spot, pos24, spike, net_usd, move_pct, funding, prob, score)
-        reason_str  = f"\n   {reasoning}" if reasoning else ""
-        brain_line  = f"\n   💡 _{brain_str}_" if brain_str else ""
-        similar_line = f"\n   🔍 Similar: _{similar_str}_" if similar_str else ""
-        text = f"\n🤖 *AI [{model}]:* {emoji} `{prob}%` · {verdict}{warn_str}{brain_line}{similar_line}{reason_str}\n{'━'*20}"
+        similar_line = f"\n🔍 _{similar_str}_" if similar_str else ""
+        text = f"\n🤖 `{prob}%` {emoji}{similar_line}"
         # Block condition 1: AI clearly says avoid (< 35%) — extreme case only
         extreme_avoid = prob < 35
         # Block condition 2: clear dump pattern — sellers dominate + AI bearish
@@ -1326,7 +1322,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50,
                  score=0.0, moonshot=False, momentum=False, vol_explosion=False,
                  interval="1h", is_flash=False, signal_type=None, is_alpha=False,
-                 fractal_score=None, oi_label="", counter_trend=False):
+                 fractal_score=None, oi_label="", counter_trend=False, verdict=""):
     global signal_count
     signal_count += 1
 
@@ -1364,24 +1360,16 @@ def build_signal(sym, price, change, buy_v, sell_v,
 
     pos_icon = "✅" if pos_ok else "⚠️"
 
-    # Score label
+    # Signal type badge — only for special event types, not regular signals
+    # (verdict at header already communicates quality to subscribers)
     if moonshot:
-        score_label = f"🚀 *MOONSHOT* · Score: `{score}/10`"
+        score_label = "🚀 *MOONSHOT*"
     elif vol_explosion:
-        score_label = f"🌋 *VOLUME EXPLOSION* · Score: `{score}/10`"
-    elif momentum:
-        score_label = f"⚡ *MOMENTUM BYPASS* · Score: `{score}/10`"
+        score_label = "🌋 *VOLUME EXPLOSION*"
     elif score >= 8.5:
-        score_label = f"🚀 Whale Action · Score: `{score}/10`"
-    elif score >= 7.0:
-        score_label = f"🟡 Scalp · Score: `{score}/10`"
+        score_label = "🐋 *Whale Action*"
     else:
-        score_label = f"🔵 Score: `{score}/10`"
-
-    # Fractal score suffix
-    if fractal_score is not None:
-        _fs_icon = "🟢" if fractal_score >= 7.0 else ("🟡" if fractal_score >= 5.0 else "🔴")
-        score_label += f"\n🔬 Fractal Score: `{fractal_score}/10` {_fs_icon}"
+        score_label = ""
 
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
@@ -1402,32 +1390,24 @@ def build_signal(sym, price, change, buy_v, sell_v,
     )
 
     return (
-        f"{'━' * 20}\n"
+        f"{'━'*20}\n"
         f"💀 *MAFIO SNIPER* 📡\n"
-        f"{_type_line}"
-        f"{_flash_tag}"
-        f"{_counter_tag}"
-        f"\n"
-        f"🆕 *#{base}* 💀 · {_mkt_label} · Signal #{signal_count} {badge}\n"
-        f"💰 Price: `${_fp(price)}`\n"
-        f"📈 {_tf} Move: `+{move:.2f}%` ⚡\n"
-        f"📍 Position: `%{pos_from_bottom} from Bottom` {pos_icon}\n"
-        f"\n"
-        f"⚡ Volume: `{spike:.1f}x` above avg\n"
-        f"{int_icon} Interest: {interest}\n"
-        f"📊 Ratio: `{ratio:.1f}x` 🔥\n"
-        f"💹 {_tf} Flow:\n"
-        f"  📥 In:  `{_fv(buy_v)}`\n"
-        f"  📤 Out: `{_fv(sell_v)}`\n"
-        f"  ▲ Net: `+{_fv(net)}` ✅\n"
-        f"📗 Order Book: {ob_label} `{ob_pct}%` bids\n"
-        f"📌 Funding: {funding_label}\n"
-        + (f"📊 Derivatives: {oi_label}\n" if oi_label else "")
-        + f"🎯 {score_label}\n"
-        f"{_tp_sl_block}"
-        f"{ex_icon} Exchange: `{exchange}`\n"
-        f"🕐 {_ts()} UTC\n"
-        f"{'━' * 20}"
+        + (f"{'━'*20}\n{verdict}\n" if verdict else "")
+        + f"{'━'*20}\n"
+        + (f"{_type_line}" if _type_line else "")
+        + (f"{_flash_tag}" if _flash_tag else "")
+        + (f"{_counter_tag}" if _counter_tag else "")
+        + f"\n"
+        + f"🆕 *#{base}* 💀 · {_mkt_label} · Signal #{signal_count} {badge}\n"
+        + f"💰 `${_fp(price)}`  📈 `+{move:.2f}%`  📍 `{pos_from_bottom}%` {pos_icon}\n"
+        + (f"{score_label}\n" if score_label else "")
+        + f"\n"
+        + f"⚡ `{spike:.1f}x`  ·  📊 Ratio `{ratio:.1f}x` {int_icon}  ·  💹 Net `+{_fv(net)}`\n"
+        + f"📗 {ob_label} `{ob_pct}%` bids  ·  📌 {funding_label}\n"
+        + (f"📊 {oi_label}\n" if oi_label else "")
+        + f"{_tp_sl_block}"
+        + f"{ex_icon} `{exchange}`  🕐 {_ts()} UTC\n"
+        + f"{'━'*20}"
     )
 
 # ══════════════════════════════════════════════════════
@@ -3163,6 +3143,32 @@ def _check(sym, ticker, interval, sector_boost=False):
         elif _oi["expanding"]:
             score = min(10.0, round(score + 0.3, 1))
 
+    # ── FVA + CQ display (all gates passed — no score change, display only) ──
+    if _fva_show is not None and _fva_result is None:
+        try:
+            _fva_result = _fva_show.evaluate_fractal_confluence(candles, price)
+        except Exception as _fve_disp:
+            log.debug("FVA display error: %s", _fve_disp)
+    if _cq_show_ok and _cq_result is None:
+        try:
+            _cq_result = _cq_integrate(candles, price, score, is_moonshot)
+        except Exception as _cqe_disp:
+            log.debug("CQ display error: %s", _cqe_disp)
+
+    # ── Entry Verdict — computed before building signal so it shows at top ──
+    _v_pts = _entry_verdict(score, ratio, ob_spot, pos24,
+                            (_cq_result["H"] if _cq_result else None),
+                            (_fva_result["fcf"] if _fva_result else None),
+                            bool(_oi and _oi.get("long_crowded")), net, net_min)
+    if _v_pts < 2.5 and not is_moonshot and not volume_explosion:
+        _rej(f"verdict_weak({_v_pts:.1f})"); return
+    if _v_pts >= 5.0:
+        _v_label = "🟢 *إشارة قوية* ✅"
+    elif _v_pts >= 2.5:
+        _v_label = "🟡 *إشارة متوسطة* ⚠️"
+    else:
+        _v_label = "🟠 *مضاربة — مخاطرة عالية*"
+
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
                        high24=ticker["high24"], low24=ticker["low24"],
@@ -3176,7 +3182,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                        is_alpha=(ticker.get("futures_only", False) or ticker.get("binance_alpha", False)),
                        fractal_score=_fractal_score,
                        oi_label=(_oi["label"] if _oi and _oi.get("label") else ""),
-                       counter_trend=_counter_trend_main)
+                       counter_trend=_counter_trend_main,
+                       verdict=_v_label)
     ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "main",
                                     score, ob_spot, ratio, pos24, spike, net, move, funding_label,
                                     fractal_score=_fractal_score,
@@ -3186,7 +3193,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         _rej("ai_block"); return
     msg += ai_str
 
-    # ── Claude API Review ─────────────────────────────────────────────────
+    # ── Claude API Review (blocking only — text not shown, verdict covers it) ─
     _cl = claude_review(
         sym, score, spike, ratio, ob_spot, pos24, net,
         fractal_score=_fractal_score,
@@ -3197,92 +3204,39 @@ def _check(sym, ticker, interval, sector_boost=False):
     )
     if _cl["block"]:
         _rej(f"claude_avoid({_cl['confidence']}%)"); return
-    msg += _cl["text"]
 
     # ── Late Entry Hard Block ─────────────────────────────────────────────
-    # Position > 80% from daily low = chasing — high exhaustion risk.
-    # Exceptions: moonshots, momentum_bypass (7d confirmed trend).
-    # _sector_mom NOT exempt: it only bypasses ratio/pos_limit — not the final quality gate.
-    # volume_explosion (spike ≥ 10x) + high score + Claude agrees = also allowed.
     if pos24 > 0.80 and not is_moonshot and not momentum_bypass:
         _claude_ok = (_cl.get("verdict") != "avoid")
         if volume_explosion and score >= 8.5 and _claude_ok:
-            pass   # allow: explosive + high quality + Claude agrees
+            pass
         else:
             _rej(f"late_entry_hard({pos24*100:.0f}%)"); return
 
-    # Claude AVOID (≥70%) + high position = double warning → block
-    # Even without hitting the 93% hard block, Claude+pos combo is too risky
-    # momentum_bypass exempt (7d confirmed trend) — _sector_mom NOT exempt (Claude stands firm)
+    # Claude AVOID (≥70%) + high position
     if (not is_moonshot and not volume_explosion and not momentum_bypass
             and _cl.get("verdict") == "avoid"
             and _cl.get("confidence", 0) >= 70
             and pos24 > 0.70):
         _rej(f"claude_avoid_highpos(conf={_cl['confidence']}%,pos={int(pos24*100)}%)"); return
 
-    # Weak order book + high position = no buyer support to sustain the move
+    # Weak order book + high position
     if ob_spot < 0.52 and pos24 > 0.70 and not is_moonshot and not volume_explosion and not momentum_bypass and not _sector_mom:
         _rej(f"weak_ob_highpos(ob={ob_spot:.0%},pos={int(pos24*100)}%)"); return
 
-    # Compute FVA + CQ display data — all gates already passed, display-only (no score modification)
-    if _fva_show is not None and _fva_result is None:
-        try:
-            _fva_result = _fva_show.evaluate_fractal_confluence(candles, price)
-        except Exception as _fve_disp:
-            log.debug("FVA display error: %s", _fve_disp)
-    if _cq_show_ok and _cq_result is None:
-        try:
-            _cq_result = _cq_integrate(candles, price, score, is_moonshot)
-        except Exception as _cqe_disp:
-            log.debug("CQ display error: %s", _cqe_disp)
-
-    # ── Entry Verdict — final 3-tier rating for subscribers ──────────────
-    # Weak tier (< 2.5 pts) is not sent at all; moonshot/vol-explosion bypass the block.
-    _v_pts = _entry_verdict(score, ratio, ob_spot, pos24,
-                            (_cq_result["H"] if _cq_result else None),
-                            (_fva_result["fcf"] if _fva_result else None),
-                            bool(_oi and _oi.get("long_crowded")), net, net_min)
-    if _v_pts < 2.5 and not is_moonshot and not volume_explosion:
-        _rej(f"verdict_weak({_v_pts:.1f})"); return
-
-    # Append fractal lines to signal — each tag on its own indented line
-    if _fra and _fra["detail"]:
-        _fra_line = f"\n📐 *Fractal*: {_fra['verdict']}"
-        for _part in _fra["detail"].split(" · "):
-            if _part.strip():
-                _fra_line += f"\n   {_part.strip()}"
-        if _fra.get("warning"):
-            _fra_line += f"\n   ⚠️ {_fra['warning']}"
-        msg += _fra_line
-    # FCF line: only show when it meaningfully adjusted the score
+    # ── Compact Analysis Footer ───────────────────────────────────────────
+    _cq_icons = {"persistent": "🟢", "weak_persistent": "🟡", "random": "⚪", "anti_persistent": "🔴"}
+    _aparts = []
+    if _cq_result:
+        _aparts.append(f"H={_cq_result['H']:.2f} {_cq_icons.get(_cq_result['regime'], '⚪')}")
     if _fva_result and _fva_result["fcf"] != 1.0:
-        _fcf_icon = "⬆️" if _fva_result["fcf"] > 1.0 else "⬇️"
-        _fra_line2 = f"\n🔬 *FCF*: x{_fva_result['fcf']:.2f} {_fcf_icon}"
-        for _part in _fva_result["detail"].split(" · "):
-            if _part.strip():
-                _fra_line2 += f"\n   {_part.strip()}"
-        msg += _fra_line2
-    # Chaos-Quant: Hurst regime + symmetry + Noah tags
-    if _cq_result and _cq_result.get("tags"):
-        _cq_regime_icons = {
-            "persistent": "🟢", "weak_persistent": "🟡",
-            "random": "⚪", "anti_persistent": "🔴"
-        }
-        _cq_icon = _cq_regime_icons.get(_cq_result["regime"], "⚪")
-        _cq_line = (f"\n🧬 *Chaos-Quant*: H={_cq_result['H']:.3f} "
-                    f"{_cq_icon} {_cq_result['regime'].replace('_', ' ').title()}")
-        for _tag in _cq_result["tags"]:
-            _cq_line += f"\n   {_tag}"
-        msg += _cq_line
-    # Entry verdict footer — the clear go/no-go line subscribers read first
-    if _v_pts >= 5.0:
-        _v_label = "🟢 *قوية — صالحة للدخول*"
-    elif _v_pts >= 2.5:
-        _v_label = "🟡 *متوسطة — دخول حذر*"
-    else:
-        _v_label = "🟠 *مخاطرة عالية — مضاربة سريعة فقط*"   # moonshot/vol-explosion bypass only
-    msg += f"\n━━━━━━━━━━━━━━━━━━━━\n🚦 *تقييم الدخول*: {_v_label}"
-    keyboard = _trade_keyboard(sym, exchange)   # signal has no orig link yet
+        _aparts.append(f"FCF x{_fva_result['fcf']:.2f} {'⬆️' if _fva_result['fcf'] > 1.0 else '⬇️'}")
+    if _fra and _fra.get("warning"):
+        _aparts.append(f"⚠️ {_fra['warning']}")
+    if _aparts:
+        msg += f"\n{'━'*20}\n📊 {'  ·  '.join(_aparts)}"
+
+    keyboard = _trade_keyboard(sym, exchange)
     ok, sig_msg_id = send_ex(msg, keyboard)
     if not ok:
         log.error("SIGNAL SEND FAILED for %s — not tracking to avoid ghost signals", sym)
