@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.28"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.29"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3163,11 +3163,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     if _v_pts < 2.5 and not is_moonshot and not volume_explosion:
         _rej(f"verdict_weak({_v_pts:.1f})"); return
     if _v_pts >= 5.0:
-        _v_label = "🟢 *إشارة قوية* ✅"
+        _v_label = "🟢 *Strong Signal* ✅"
     elif _v_pts >= 2.5:
-        _v_label = "🟡 *إشارة متوسطة* ⚠️"
+        _v_label = "🟡 *Moderate Signal* ⚠️"
     else:
-        _v_label = "🟠 *مضاربة — مخاطرة عالية*"
+        _v_label = "🟠 *High Risk — Speculation Only*"
 
     msg = build_signal(sym, price, change, buy_v, sell_v,
                        spike, move, exchange, tier["name"], ema_bull,
