@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.30"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.31"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4353,7 +4353,7 @@ def scan_alpha_explosion(all_t: dict):
     Separate from _check() — simplified signal with on-chain risk warning.
     """
     global _alpha_vol_cache
-    MAX_SIGNALS = 2
+    MAX_SIGNALS = 3
     sent = 0
     now  = time.time()
 
@@ -4393,15 +4393,20 @@ def scan_alpha_explosion(all_t: dict):
                 vol_surge = vol / prev_vol
         _alpha_vol_cache[sym] = (vol, now)
 
-        # Signal condition: volume surging NOW + early in the move (not already +30%)
-        # _big_move removed — chg>=40% means the move is over, not an entry signal
-        _explosion = vol_surge >= 2.0 and chg >= 5.0 and chg <= 30.0 and vol >= 100_000
+        # Signal condition:
+        # Primary: volume surging NOW + early in the move (not already +50%)
+        # Fallback: no previous vol data (first scan) → strong move + high vol qualifies alone
+        _no_prev = vol_surge == 0.0
+        _explosion = (
+            (vol_surge >= 2.0 and chg >= 5.0 and chg <= 50.0 and vol >= 50_000)
+            or (_no_prev and chg >= 15.0 and vol >= 300_000)
+        )
 
         if not _explosion:
             continue
 
         # Build and send simplified Alpha signal
-        _surge_txt = f"⚡ Vol surge: {vol_surge:.1f}x\n" if vol_surge >= 2.0 else ""
+        _surge_txt = f"⚡ Vol surge: {vol_surge:.1f}x\n" if vol_surge >= 2.0 else "⚡ Vol surge: first scan (no baseline)\n" if _no_prev else ""
         _msg = (
             f"💀 *MAFIO SNIPER* 📡\n\n"
             f"🆕 *#{sym_base}* 🔥 Alpha On-Chain · Signal\n"
@@ -4682,8 +4687,9 @@ def scan_sector_liquidity(all_t):
                 # BNB Alpha: scan ALL futures_only coins — no manual list needed
                 in_sector = ((_t.get("futures_only") or _t.get("binance_alpha")) if sector == "BNB Alpha"
                              else SECTOR_REGISTRY.get(_base) == sector)
-                # HOT scan: include sector leaders (up to 25%) — _check() handles late-entry
-                if (in_sector and _t["vol"] >= 100_000 and _t["change"] < 25.0):
+                # HOT scan: Alpha tokens allow up to 50% (listing-day pumps need wider range)
+                _hot_limit = 50.0 if (_t.get("futures_only") or _t.get("binance_alpha")) else 25.0
+                if (in_sector and _t["vol"] >= 100_000 and _t["change"] < _hot_limit):
                     _check(_sym, _t, "5m", sector_boost=True)
                     time.sleep(0.08)
 
