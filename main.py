@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.46"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.47"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3095,17 +3095,19 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # L/S crowded longs = liquidation cascade risk, but only when BOTH conditions true:
     # weak score AND high position (one alone is not enough to block).
-    _ls_block = score < 9.0 and pos24 > 0.80
+    # Exception: spike ≥ 5x — crowded longs are a RESULT of the explosion, not squeeze risk.
+    _ls_block = score < 9.0 and pos24 > 0.80 and spike < 5.0
     if (_oi and _oi["long_crowded"] and not is_moonshot and _ls_block):
         _rej(f"ls_crowded_longs({_oi['ls_ratio']:.2f},pos={pos24*100:.0f}%)"); return
 
     # SL-hunt setup: crowded longs + OI exiting + price at top = stop-loss hunt risk.
-    # Exception: strong net flow (score ≥ 7.5) — real institutional buying overrides.
+    # Exception: strong net flow (score ≥ 7.5) or spike ≥ 5x — real buying overrides.
     if (_oi and not is_moonshot and not momentum_bypass
             and pos24 > 0.75
             and _oi["ls_ratio"] > 2.0
             and _oi["oi_delta_1h"] < 0.0
-            and score < 7.5):
+            and score < 7.5
+            and spike < 5.0):
         _rej(f"sl_hunt_risk(L/S={_oi['ls_ratio']:.2f},OI={_oi['oi_delta_1h']:.1f}%,pos={pos24*100:.0f}%)"); return
 
     # OI score boost: expanding OI = institutional confirmation of the move.
