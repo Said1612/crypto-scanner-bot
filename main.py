@@ -1204,38 +1204,40 @@ def _ts():
 
 def _entry_verdict(score, ratio, ob_spot, pos24, hurst, fcf, ls_crowded, net, net_min,
                    res_pct=999.0):
-    """3-tier entry verdict for subscribers — returns points 0-8+.
-    >= 5.0 strong | >= 3.5 moderate | < 3.5 blocked (clean signals only).
+    """3-tier entry verdict — returns (net_pts, pos_pts, neg_pts).
+    Pass condition: net >= 3.5 AND pos_pts > abs(neg_pts).
+    >= 5.0 strong | >= 3.5 moderate | < 3.5 or pos<=neg blocked.
     res_pct: distance % to nearest fractal resistance above price (999 = no resistance)."""
-    pts = 0.0
-    # Flow quality — the factors that actually predict wins (up to 6.0)
-    if score >= 7.0:   pts += 2.0
-    elif score >= 6.0: pts += 1.5
-    elif score >= 5.0: pts += 1.0
-    if ratio >= 4.0:      pts += 1.5
-    elif ratio >= 2.5:    pts += 1.0
-    elif ratio < 1.5:     pts -= 0.5
-    if ob_spot >= 0.62:   pts += 1.0
-    elif ob_spot >= 0.55: pts += 0.5
-    if net >= 2 * max(net_min, 1):   pts += 1.5
-    elif net >= max(net_min, 1):     pts += 1.0
-    # Pattern adjustments
+    pos = 0.0
+    neg = 0.0
+    # ── Flow quality (positives) ──────────────────────────────────────────
+    if score >= 7.0:        pos += 2.0
+    elif score >= 6.0:      pos += 1.5
+    elif score >= 5.0:      pos += 1.0
+    if ratio >= 4.0:        pos += 1.5
+    elif ratio >= 2.5:      pos += 1.0
+    elif ratio < 1.5:       neg += 0.5
+    if ob_spot >= 0.62:     pos += 1.0
+    elif ob_spot >= 0.55:   pos += 0.5
+    if net >= 2 * max(net_min, 1):   pos += 1.5
+    elif net >= max(net_min, 1):     pos += 1.0
+    # ── Pattern / context ────────────────────────────────────────────────
     if hurst is not None:
-        if hurst >= 0.55:  pts += 1.0
-        elif hurst < 0.45: pts -= 1.0
-        elif hurst < 0.49: pts -= 0.5
+        if hurst >= 0.55:   pos += 1.0
+        elif hurst < 0.45:  neg += 1.0
+        elif hurst < 0.49:  neg += 0.5
     if fcf is not None:
-        if fcf > 1.0:    pts += 0.5
-        elif fcf < 0.60: pts -= 2.0
-        elif fcf < 0.85: pts -= 1.0
-        elif fcf < 0.95: pts -= 0.5
-    if pos24 > 0.85:    pts -= 1.0
-    elif pos24 <= 0.45: pts += 0.5
-    if ls_crowded:      pts -= 1.0
-    # Fractal resistance too close = price will likely bounce off it
-    if res_pct < 1.0:   pts -= 2.0   # wall right above — very likely rejection
-    elif res_pct < 2.5: pts -= 1.0   # close resistance — risky entry
-    return round(pts, 1)
+        if fcf > 1.0:       pos += 0.5
+        elif fcf < 0.60:    neg += 2.0
+        elif fcf < 0.85:    neg += 1.0
+        elif fcf < 0.95:    neg += 0.5
+    if pos24 > 0.85:        neg += 1.0
+    elif pos24 <= 0.45:     pos += 0.5
+    if ls_crowded:          neg += 1.0
+    # ── Fractal resistance proximity ─────────────────────────────────────
+    if res_pct < 1.0:       neg += 2.0   # wall right above — likely rejection
+    elif res_pct < 2.5:     neg += 1.0   # close resistance — risky entry
+    return round(pos - neg, 1), round(pos, 1), round(neg, 1)
 
 
 def _calc_score(pos24, net, net_min, ob_spot, spike):
@@ -3114,13 +3116,14 @@ def _check(sym, ticker, interval, sector_boost=False):
     _fra_res = (_fra.get("resistance") if _fra else None)
     _fra_res_pct = ((_fra_res - price) / price * 100) if (_fra_res and _fra_res > price) else 999.0
 
-    _v_pts = _entry_verdict(score, ratio, ob_spot, pos24,
-                            (_cq_result["H"] if _cq_result else None),
-                            (_fva_result["fcf"] if _fva_result else None),
-                            bool(_oi and _oi.get("long_crowded")), net, net_min,
-                            res_pct=_fra_res_pct)
-    if _v_pts < 3.5 and not is_moonshot and not (volume_explosion and _v_pts >= 3.5):
-        _rej(f"verdict_weak({_v_pts:.1f})"); return
+    _v_pts, _v_pos, _v_neg = _entry_verdict(score, ratio, ob_spot, pos24,
+                                             (_cq_result["H"] if _cq_result else None),
+                                             (_fva_result["fcf"] if _fva_result else None),
+                                             bool(_oi and _oi.get("long_crowded")), net, net_min,
+                                             res_pct=_fra_res_pct)
+    _v_blocked = (_v_pts < 3.5) or (_v_pos <= _v_neg)
+    if _v_blocked and not is_moonshot and not (volume_explosion and _v_pts >= 3.5 and _v_pos > _v_neg):
+        _rej(f"verdict_weak({_v_pts:.1f},+{_v_pos:.1f}/-{_v_neg:.1f})"); return
     if _v_pts >= 5.0:
         _v_label = "🟢 *Strong Signal* ✅"
     elif _v_pts >= 3.5:
