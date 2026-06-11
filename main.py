@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.31"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.32"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -996,9 +996,10 @@ def send(text, reply_markup=None):
 def _ai_assess(sym, exchange, tier, scanner, score,
                ob_spot, ratio, pos24, spike, net_usd, move_pct, funding,
                fractal_score=None, h_value=None, oi_delta=None,
-               min_prob=0) -> tuple:
-    """Return (ai_text, blocked). blocked=True only when AI<40% + sellers dominate OB.
-    min_prob: if set, also blocks when AI probability is below this threshold."""
+               min_prob=0, crowded_longs=False) -> tuple:
+    """Return (ai_text, blocked). blocked=True when AI is bearish + confirming danger pattern.
+    min_prob: if set, also blocks when AI probability is below this threshold.
+    crowded_longs: if True, blocks when AI < 50% (long squeeze risk)."""
     if _ai_agent is None:
         return "", False
     try:
@@ -1032,14 +1033,18 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         weak_combined = (prob < 50 and score < 6.0 and spike < 2.0)
         # Block condition 4: per-scanner minimum prob (swing scanners require >= 50%)
         below_min     = (min_prob > 0 and prob < min_prob)
-        blocked = extreme_avoid or dump_pattern or weak_combined or below_min
+        # Block condition 5: bearish AI + crowded longs = long squeeze risk
+        crowd_risk    = (prob < 50 and crowded_longs)
+        blocked = extreme_avoid or dump_pattern or weak_combined or below_min or crowd_risk
         if blocked:
             if extreme_avoid:
                 reason = "AI<35%% avoid"
+            elif crowd_risk:
+                reason = f"AI<50%%({prob}%%) + crowded longs (L/S squeeze risk)"
             elif dump_pattern:
-                reason = "AI<50%% + sellers dominate"
+                reason = "AI<45%% + sellers dominate OB"
             else:
-                reason = "weak combined: AI<75%%+score<7.5+vol<5x"
+                reason = "weak combined: AI<50%%+score<6+spike<2x"
             log.info("AI_BLOCK %s prob=%.1f%% ob=%.0f%% score=%.1f spike=%.1fx (%s)",
                      sym, prob, ob_spot * 100, score, spike, reason)
         return text, blocked
@@ -1117,24 +1122,26 @@ def _entry_verdict(score, ratio, ob_spot, pos24, hurst, fcf, ls_crowded, net, ne
     if score >= 7.0:   pts += 2.0
     elif score >= 6.0: pts += 1.5
     elif score >= 5.0: pts += 1.0
-    if ratio >= 4.0:   pts += 1.5
-    elif ratio >= 2.5: pts += 1.0
+    if ratio >= 4.0:      pts += 1.5
+    elif ratio >= 2.5:    pts += 1.0
+    elif ratio < 1.5:     pts -= 0.5   # sellers slightly dominate
     if ob_spot >= 0.62:   pts += 1.0
     elif ob_spot >= 0.55: pts += 0.5
     if net >= 2 * max(net_min, 1):   pts += 1.5
     elif net >= max(net_min, 1):     pts += 1.0
-    # Pattern adjustments — advisory weight only (±2.0)
+    # Pattern adjustments — advisory weight only
     if hurst is not None:
         if hurst >= 0.55:  pts += 1.0
         elif hurst < 0.45: pts -= 1.0
         elif hurst < 0.49: pts -= 0.5
     if fcf is not None:
         if fcf > 1.0:    pts += 0.5
+        elif fcf < 0.60: pts -= 2.0   # extreme bearish fractal structure
         elif fcf < 0.85: pts -= 1.0
         elif fcf < 0.95: pts -= 0.5
     if pos24 > 0.85:   pts -= 1.0
     elif pos24 <= 0.45: pts += 0.5
-    if ls_crowded:     pts -= 0.5
+    if ls_crowded:     pts -= 1.0   # raised: long squeeze risk is significant
     return round(pts, 1)
 
 
@@ -3039,7 +3046,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                                     score, ob_spot, ratio, pos24, spike, net, move, funding_label,
                                     fractal_score=_fractal_score,
                                     h_value=(_cq_result["H"] if _cq_result else None),
-                                    oi_delta=(_oi["oi_delta_1h"] if _oi else None))
+                                    oi_delta=(_oi["oi_delta_1h"] if _oi else None),
+                                    crowded_longs=bool(_oi and _oi.get("long_crowded")))
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
