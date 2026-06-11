@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.44"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.45"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3135,9 +3135,13 @@ def _check(sym, ticker, interval, sector_boost=False):
                                              bool(_oi and _oi.get("long_crowded")), net, net_min,
                                              res_pct=_fra_res_pct)
     _v_blocked = (_v_pts < 3.5) or (_v_pos <= _v_neg)
-    if _v_blocked and not is_moonshot and not (volume_explosion and _v_pts >= 3.5 and _v_pos > _v_neg):
+    # Moonshot bypass: pos >= neg required (bare minimum quality floor)
+    _moonshot_ok = is_moonshot and _v_pos >= _v_neg
+    if _v_blocked and not _moonshot_ok and not (volume_explosion and _v_pts >= 3.5 and _v_pos > _v_neg):
         _rej(f"verdict_weak({_v_pts:.1f},+{_v_pos:.1f}/-{_v_neg:.1f})"); return
-    if _v_pts >= 5.0:
+    if is_moonshot:
+        _v_label = f"🚀 *Moonshot* — Spike {spike:.0f}x"
+    elif _v_pts >= 5.0:
         _v_label = "🟢 *Strong Signal* ✅"
     elif _v_pts >= 3.5:
         _v_label = "🟡 *Moderate Signal* ⚠️"
