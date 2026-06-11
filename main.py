@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.38"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.39"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3150,17 +3150,41 @@ def _check(sym, ticker, interval, sector_boost=False):
     if ob_spot < 0.52 and pos24 > 0.70 and not is_moonshot and not volume_explosion and not momentum_bypass and not _sector_mom:
         _rej(f"weak_ob_highpos(ob={ob_spot:.0%},pos={int(pos24*100)}%)"); return
 
-    # ── Compact Analysis Footer ───────────────────────────────────────────
+    # ── Fractal Analysis Footer ──────────────────────────────────────────────
     _cq_icons = {"persistent": "🟢", "weak_persistent": "🟡", "random": "⚪", "anti_persistent": "🔴"}
-    _aparts = []
+
+    # Line 1: Verdict + H + FCF
+    _line1 = []
+    if _fra and _fra.get("verdict"):
+        _line1.append(f"🌀 {_fra['verdict']}")
     if _cq_result:
-        _aparts.append(f"H={_cq_result['H']:.2f} {_cq_icons.get(_cq_result['regime'], '⚪')}")
+        _line1.append(f"H={_cq_result['H']:.2f} {_cq_icons.get(_cq_result['regime'], '⚪')}")
     if _fva_result and _fva_result["fcf"] != 1.0:
-        _aparts.append(f"FCF x{_fva_result['fcf']:.2f} {'⬆️' if _fva_result['fcf'] > 1.0 else '⬇️'}")
-    if _fra and _fra.get("warning"):
-        _aparts.append(f"⚠️ {_fra['warning']}")
-    if _aparts:
-        msg += f"\n{'━'*20}\n📊 {'  ·  '.join(_aparts)}"
+        _line1.append(f"FCF x{_fva_result['fcf']:.2f} {'⬆️' if _fva_result['fcf'] > 1.0 else '⬇️'}")
+
+    # Line 2: Key patterns from fractal agent (priority order)
+    _fra_tags = []
+    if _fra:
+        if _fra.get("bearish_end"):  _fra_tags.append("🔄 Bearish End")
+        if _fra.get("tornado"):      _fra_tags.append("🌪️ Tornado")
+        if _fra.get("quad_valid"):   _fra_tags.append("QUAD ✅")
+        # Jy flow
+        _jy = _fra.get("jy", 0.0)
+        if _jy > 0.04:               _fra_tags.append(f"〰️ Jy +{_jy:.2f} 🟢")
+        elif _jy < -0.04:            _fra_tags.append(f"〰️ Jy {_jy:.2f} 🔴")
+        # Support/Resistance proximity
+        if _fra.get("warning"):      _fra_tags.append(f"⚠️ {_fra['warning']}")
+        elif _fra.get("support"):
+            _sup = _fra["support"]
+            _sup_dist = (price - _sup) / price * 100
+            if _sup_dist < 5.0:      _fra_tags.append(f"🛡️ Support ${_fp(_sup)} ({_sup_dist:.1f}%↓)")
+
+    if _line1 or _fra_tags:
+        msg += f"\n{'━'*20}\n"
+        if _line1:
+            msg += f"📊 {'  ·  '.join(_line1)}\n"
+        if _fra_tags:
+            msg += f"{'  ·  '.join(_fra_tags[:4])}\n"  # max 4 tags
 
     keyboard = _trade_keyboard(sym, exchange)
     ok, sig_msg_id = send_ex(msg, keyboard)
