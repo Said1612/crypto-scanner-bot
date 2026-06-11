@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.33"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.34"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -95,7 +95,7 @@ REPORT_HOUR      = int(os.getenv("REPORT_HOUR", "23"))  # UTC hour — Morocco U
 MILESTONES  = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100,
                125, 150, 175, 200, 250, 300, 400, 500]
 TRACK_HOURS      = 240   # 10-day safety cap — signals close via SL, not timeout
-SIGNAL_TIMEOUT_H = 8      # expire signal if no +5% within 8h (weak/slow signals)
+SIGNAL_TIMEOUT_H = 24     # expire signal if no +5% within 24h — captures slow movers (AIO-type)
 SIGNAL_SL_PCT    = -5.0   # stop-loss: exit tracking if -5% below entry
 SIGNAL_DB        = "signal_history.json"  # ML training data — append only, never reset
 
