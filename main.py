@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.25"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.26"  # bump this with every push — verify after restart
 
 import os, time, json, logging, base64, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2740,10 +2740,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     _ratio_bypass   = 8.0
     # momentum_bypass already set at function start from ticker.get("momentum_signal")
 
-    # Volume Explosion: 10x+ spike + REAL net (> abs_floor already passed) = extraordinary event
-    # net > 0 replaced by net > _abs_net_floor (already enforced above — but redundant safety)
-    # Sleeping Giant bypass: pos24 is misleading for flat coins with tiny daily range
-    volume_explosion = (spike >= 10.0 and (pos24 < 0.75 or interval == "1m_sg") and net > _abs_net_floor)
+    # Volume Explosion: spike + REAL net = extraordinary event.
+    # Threshold lowered 10→7.5 based on 166-signal history: volume_explosion = 84% win rate / 36.8% avg gain.
+    # pos24 raised 0.75→0.80: even coins 75-80% into range can explode further with this volume.
+    # Sleeping Giant bypass: pos24 is misleading for flat coins with tiny daily range.
+    volume_explosion = (spike >= 7.5 and (pos24 < 0.80 or interval == "1m_sg") and net > _abs_net_floor)
 
     # ── Net Flow Intensity: net relative to coin size ────────────────────
     # Problem: same $20K net flow means nothing on QNT ($20M/day) but is huge on XNY ($650K/day)
@@ -5616,7 +5617,7 @@ def main():
             global last_accum
             if now - last_accum >= ACCUM_SCAN_S:
                 last_accum = now
-                scan_quiet_accum(all_t)
+                # scan_quiet_accum disabled: 25% win rate / 6.8% avg gain (166-signal history)
                 scan_whale_flow(all_t)
 
             global last_alpha
@@ -5634,10 +5635,7 @@ def main():
                 last_sector = now
                 scan_sector_liquidity(all_t)
 
-            # Trend follow: catches gradual uptrends (STG/ZEC type) — re-enabled with momentum_bypass
-            if now - last_trend >= TREND_FOLLOW_S:
-                last_trend = now
-                scan_trend_follow(all_t)
+            # scan_trend_follow disabled: 38% win rate / 2.2% avg gain (166-signal history) — negative edge
 
             # Swing: weekly high breakout with volume build-up (Wolf Flow style)
             if now - last_weekly_swing >= WEEKLY_SWING_S:
