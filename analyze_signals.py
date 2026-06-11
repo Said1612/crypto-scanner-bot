@@ -86,10 +86,13 @@ def main():
         res_pct = r.get("fra_res_pct")
         if res_pct is not None:     tags.append(f"Res+{res_pct:.1f}%")
 
-        print(f"  {r.get('sym','?'):<10} {r.get('date','?')[:16]:<18} "
-              f"{r.get('outcome','?'):<15} {r.get('max_gain_pct',0):>7.1f}%  "
-              f"{r.get('h_value') or '─':>6}  "
-              f"{r.get('fractal_score') or '─':>7}  "
+        _date = (r.get('date') or '?')[:16]
+        _h    = r.get('h_value')
+        _fs   = r.get('fractal_score')
+        print(f"  {r.get('sym') or '?':<10} {_date:<18} "
+              f"{r.get('outcome') or '?':<15} {r.get('max_gain_pct') or 0:>7.1f}%  "
+              f"{_h if _h is not None else '─':>6}  "
+              f"{_fs if _fs is not None else '─':>7}  "
               f"{', '.join(tags) or '─'}")
     print()
 
