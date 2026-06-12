@@ -3,9 +3,11 @@
 fix_history.py — إصلاح max_gain_pct للإشارات التي أُغلقت قبل الوصول للقمة الحقيقية.
 
 المشكل: SIGNAL_TIMEOUT_H كان 8h → إشارات تُغلق قبل القمة الفعلية.
-الحل: جلب klines من Binance/MEXC للـ 24h بعد كل إشارة وتحديث max_gain_pct.
+بعض العملات تنفجر بعد 3-10 أيام وليس 24 ساعة.
 
-تشغيل: python3 fix_history.py [--dry-run] [--sym BANANAS31]
+الحل: جلب klines من Binance/MEXC لـ 7 أيام (168h) بعد كل إشارة وتحديث max_gain_pct.
+
+تشغيل: python3 fix_history.py [--dry-run] [--sym BANANAS31] [--days 7]
 """
 import json, os, time, argparse, requests
 from datetime import datetime, timezone
@@ -13,7 +15,7 @@ from datetime import datetime, timezone
 DB_PATH  = os.path.join(os.path.dirname(__file__), "signal_history.json")
 BINANCE  = "https://api.binance.com/api/v3"
 MEXC     = "https://api.mexc.com/api/v3"
-LOOK_AHEAD_H = 24   # نافذة البحث عن القمة بعد الإشارة
+LOOK_AHEAD_H = 168   # 7 أيام — يغطي الانفجارات المتأخرة
 
 
 def load_db():
@@ -35,10 +37,11 @@ def fetch_peak(sym, entry_ts, entry_price, exchange="Binance"):
     """جلب أعلى سعر وصله السهم خلال LOOK_AHEAD_H ساعة من entry_ts."""
     start_ms = int(entry_ts * 1000)
     end_ms   = int((entry_ts + LOOK_AHEAD_H * 3600) * 1000)
+    limit    = min(LOOK_AHEAD_H, 1000)   # Binance max 1000 per request
 
     urls = [
-        f"{BINANCE}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit=48",
-        f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit=48",
+        f"{BINANCE}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}",
+        f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}",
     ]
     for url in urls:
         try:
@@ -58,11 +61,15 @@ def fetch_peak(sym, entry_ts, entry_price, exchange="Binance"):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true", help="عرض فقط بدون تعديل")
-    parser.add_argument("--sym",     type=str, default=None, help="صحح عملة محددة فقط")
+    parser.add_argument("--dry-run",  action="store_true", help="عرض فقط بدون تعديل")
+    parser.add_argument("--sym",      type=str, default=None, help="صحح عملة محددة فقط")
+    parser.add_argument("--days",     type=int, default=7,
+                        help="نافذة البحث بالأيام (افتراضي: 7)")
     parser.add_argument("--min-gain", type=float, default=0.0,
-                        help="صحح فقط الإشارات التي max_gain_pct الحقيقي > هذه القيمة")
+                        help="صحح فقط إذا القمة الحقيقية > هذه القيمة")
     args = parser.parse_args()
+    global LOOK_AHEAD_H
+    LOOK_AHEAD_H = args.days * 24
 
     db    = load_db()
     now   = time.time()
@@ -99,7 +106,7 @@ def main():
         print(f"  [{i}] {sym:<14} old={old_gain:+.1f}%  outcome={outcome}  ", end="", flush=True)
 
         real_gain = fetch_peak(sym, entry_ts, entry_price)
-        time.sleep(0.12)   # rate limit
+        time.sleep(0.25)   # rate limit — أبطأ قليلاً لنافذة 7 أيام
 
         if real_gain is None:
             print("⚠️ لا بيانات")
