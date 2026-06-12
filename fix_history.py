@@ -3,11 +3,13 @@
 fix_history.py — إصلاح max_gain_pct للإشارات التي أُغلقت قبل الوصول للقمة الحقيقية.
 
 المشكل: SIGNAL_TIMEOUT_H كان 8h → إشارات تُغلق قبل القمة الفعلية.
-بعض العملات تنفجر بعد 3-10 أيام وليس 24 ساعة.
+العملات تختلف في توقيت الانفجار: 1 يوم، 10 أيام، 15، 20، 25 يوم.
+لا يوجد توقيت ثابت — لذلك نستخدم 30 يوماً كحد أقصى (720h).
 
-الحل: جلب klines من Binance/MEXC لـ 7 أيام (168h) بعد كل إشارة وتحديث max_gain_pct.
+الحل: جلب klines من Binance/MEXC لـ 30 يوم بعد كل إشارة وتحديث max_gain_pct.
+30 يوم = 720 ساعة — ضمن حد Binance (1000 kline) في طلب واحد.
 
-تشغيل: python3 fix_history.py [--dry-run] [--sym BANANAS31] [--days 7]
+تشغيل: python3 fix_history.py [--dry-run] [--sym BANANAS31] [--days 30]
 """
 import json, os, time, argparse, requests
 from datetime import datetime, timezone
@@ -15,7 +17,7 @@ from datetime import datetime, timezone
 DB_PATH  = os.path.join(os.path.dirname(__file__), "signal_history.json")
 BINANCE  = "https://api.binance.com/api/v3"
 MEXC     = "https://api.mexc.com/api/v3"
-LOOK_AHEAD_H = 168   # 7 أيام — يغطي الانفجارات المتأخرة
+LOOK_AHEAD_H = 720   # 30 يوماً — يغطي جميع الانفجارات المتأخرة
 
 
 def load_db():
@@ -63,8 +65,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run",  action="store_true", help="عرض فقط بدون تعديل")
     parser.add_argument("--sym",      type=str, default=None, help="صحح عملة محددة فقط")
-    parser.add_argument("--days",     type=int, default=7,
-                        help="نافذة البحث بالأيام (افتراضي: 7)")
+    parser.add_argument("--days",     type=int, default=30,
+                        help="نافذة البحث بالأيام (افتراضي: 30 — يغطي جميع الانفجارات المتأخرة)")
     parser.add_argument("--min-gain", type=float, default=0.0,
                         help="صحح فقط إذا القمة الحقيقية > هذه القيمة")
     args = parser.parse_args()
