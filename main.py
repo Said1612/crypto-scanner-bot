@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.47"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.48"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1244,7 +1244,7 @@ def _entry_verdict(score, ratio, ob_spot, pos24, hurst, fcf, ls_crowded, net, ne
         elif fcf < 0.60:    neg += 2.0
         elif fcf < 0.85:    neg += 1.0
         elif fcf < 0.95:    neg += 0.5
-    if pos24 > 0.85:        neg += 1.0
+    if pos24 > 0.90:        neg += 1.0   # raised 0.85→0.90: bull market coins naturally at 85-90%
     elif pos24 <= 0.45:     pos += 0.5
     if ls_crowded:          neg += 1.0
     # ── Fractal resistance proximity ─────────────────────────────────────
@@ -2613,8 +2613,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     # MOVE pattern: Large cap spike of 2.5x = tens of millions in absolute $ — real breakout.
     _breakout_spike_min = 2.5 if tier["name"] == "Large" else 3.0
     # For extreme spikes, order book hasn't adjusted yet — relax ob_quick threshold
-    # spike 10x+: 42% | spike 5-10x: 50% | normal: 55%
-    _breakout_ob_thr = 0.42 if spike >= 10.0 else (0.50 if spike >= 5.0 else 0.55)
+    # spike 10x+: 42% | spike 5-10x: 50% | bull + normal spike: 48% | normal: 55%
+    _breakout_ob_thr = 0.42 if spike >= 10.0 else (0.50 if spike >= 5.0 else (0.48 if market_bias >= 60 else 0.55))
     if ticker["high24"] > 0 and ticker["low24"] > 0:
         pump_size = (ticker["high24"] - ticker["low24"]) / ticker["low24"] * 100
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
@@ -3678,13 +3678,13 @@ def get_market_ctx(bias: int) -> dict:
     Coins explode in any market condition when real liquidity enters.
     """
     if bias >= 60:
-        return {"pos_limit": 0.82, "crash_limit": 30.0,
+        return {"pos_limit": 0.90, "crash_limit": 30.0,
                 "spike_mult": 0.55, "ratio_mult": 0.75, "ob_min": 0.35,
-                "move_min": 0.0,  "late_pct": 0.95}  # Strong Bull — Sniper Mode
+                "move_min": 0.0,  "late_pct": 0.95}  # Strong Bull — pos_limit 0.82→0.90
     if bias >= 25:
-        return {"pos_limit": 0.78, "crash_limit": 22.0,
+        return {"pos_limit": 0.85, "crash_limit": 22.0,
                 "spike_mult": 0.65, "ratio_mult": 0.75, "ob_min": 0.37,
-                "move_min": 0.0,  "late_pct": 0.93}  # Bullish — Sniper Mode
+                "move_min": 0.0,  "late_pct": 0.93}  # Bullish — pos_limit 0.78→0.85
     if bias >= 5:
         return {"pos_limit": 0.78, "crash_limit": 18.0,
                 "spike_mult": 0.80, "ratio_mult": 0.88, "ob_min": 0.38,
