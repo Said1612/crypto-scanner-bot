@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.49"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.50"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1103,10 +1103,12 @@ def send(text, reply_markup=None):
 def _ai_assess(sym, exchange, tier, scanner, score,
                ob_spot, ratio, pos24, spike, net_usd, move_pct, funding,
                fractal_score=None, h_value=None, oi_delta=None,
-               min_prob=0, crowded_longs=False) -> tuple:
+               min_prob=0, crowded_longs=False,
+               is_moonshot=False, fra_verdict=None, fra_res_pct=999.0) -> tuple:
     """Return (ai_text, blocked). blocked=True when AI is bearish + confirming danger pattern.
     min_prob: if set, also blocks when AI probability is below this threshold.
-    crowded_longs: if True, blocks when AI < 50% (long squeeze risk)."""
+    crowded_longs: if True, blocks when AI < 50% (long squeeze risk).
+    Moonshot quality gate: blocks if Weak Fractal + AI<50% + resistance<2% — all three."""
     if _ai_agent is None:
         return "", False
     try:
@@ -1140,9 +1142,18 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         weak_combined = (prob < 50 and score < 6.0 and spike < 2.0)
         # Block condition 4: per-scanner minimum prob (swing scanners require >= 50%)
         below_min     = (min_prob > 0 and prob < min_prob)
-        blocked = extreme_avoid or dump_pattern or weak_combined or below_min
+        # Block condition 5: Moonshot quality gate — extreme spike bypasses verdict but must
+        # still pass minimum quality: Weak Fractal + AI<50% + close resistance = bad entry
+        # Subscribers enter blindly on Moonshot signals — all three flags together = block.
+        moonshot_gate = (is_moonshot
+                         and "Weak" in (fra_verdict or "")
+                         and prob < 50
+                         and fra_res_pct < 2.0)
+        blocked = extreme_avoid or dump_pattern or weak_combined or below_min or moonshot_gate
         if blocked:
-            if extreme_avoid:
+            if moonshot_gate:
+                reason = f"moonshot_gate(weak_fra+AI{prob:.0f}%+res{fra_res_pct:.1f}%)"
+            elif extreme_avoid:
                 reason = "AI<35%% avoid"
             elif dump_pattern:
                 reason = "AI<45%% + sellers dominate OB"
@@ -3175,7 +3186,10 @@ def _check(sym, ticker, interval, sector_boost=False):
                                     fractal_score=_fractal_score,
                                     h_value=(_cq_result["H"] if _cq_result else None),
                                     oi_delta=(_oi["oi_delta_1h"] if _oi else None),
-                                    crowded_longs=bool(_oi and _oi.get("long_crowded")))
+                                    crowded_longs=bool(_oi and _oi.get("long_crowded")),
+                                    is_moonshot=is_moonshot,
+                                    fra_verdict=(_fra.get("verdict") if _fra else None),
+                                    fra_res_pct=_fra_res_pct)
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
