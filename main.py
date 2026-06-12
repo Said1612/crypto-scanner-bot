@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.48"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.49"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2626,11 +2626,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Position guard — uses ctx.pos_limit (adaptive)
     # Sector momentum: use rise_from_low instead of pos24 (pos24=1.0 when at new highs)
     # Momentum bypass: scan_trend_follow confirmed 7d uptrend — pos24 inherently high
+    # Strong Bull bypass: in broad bull markets ALL coins sit at daily highs — pos24 is
+    # meaningless as a filter. Flow quality (spike/ratio/OB/net) is the only reliable guard.
     if _sector_mom:
         if _rise_from_low > 55.0:   # aligned with _sector_mom_pre threshold (was 50%)
             _rej("high_pos"); return
-    elif momentum_bypass:
-        pass   # trend-follow: pos24 misleadingly high for 7d trends; OB + spike filters protect
+    elif momentum_bypass or market_bias >= 60:
+        pass   # trend-follow OR strong bull: pos24 high for structural reasons, not late entry
     elif pos24 > ctx["pos_limit"]:
         # BLINKY pattern: very high ratio (≥20x) overrides position limit
         # Sleeping Giant: flat coin with tiny daily range — high pos24 is misleading
@@ -2642,16 +2644,16 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # High position + weak volume = false signal (我踏马来了 pattern)
     # Coin already moved up in range but without real volume explosion = chasing
-    # Exempt: momentum_bypass (7d trend) + _sector_mom (spike-confirmed rotation)
-    if pos24 > 0.65 and spike < 3.0 and not interval.endswith("_sg") and not momentum_bypass and not _sector_mom:
+    # Exempt: momentum_bypass, _sector_mom, Strong Bull (all coins at top in bull market)
+    if pos24 > 0.65 and spike < 3.0 and not interval.endswith("_sg") and not momentum_bypass and not _sector_mom and market_bias < 60:
         _rej("high_pos_low_vol"); return
 
     # Weak top filter: very high in range + flat move = exhaustion, not breakout
     # Raised from 0.62→0.75 to avoid blocking mid-range breakouts
     # Sleeping giant bypass: flat coins always show high pos24 due to tiny daily range
-    # Exempt: momentum_bypass (gradual trend: 1h move naturally small) + _sector_mom
+    # Exempt: momentum_bypass, _sector_mom, Strong Bull
     _weak_move_thr = 0.8 if exchange == "Binance" else 1.0
-    if pos24 > 0.75 and ratio_min > 0 and move < _weak_move_thr and not (interval == "1m_sg" and spike >= 10.0) and not momentum_bypass and not _sector_mom:
+    if pos24 > 0.75 and ratio_min > 0 and move < _weak_move_thr and not (interval == "1m_sg" and spike >= 10.0) and not momentum_bypass and not _sector_mom and market_bias < 60:
         _rej("weak_top"); return
 
     # ── Step 2: Real buy/sell from aggTrades (reuse pre-fetched data) ───
