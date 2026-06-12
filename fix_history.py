@@ -35,37 +35,54 @@ def save_db(db):
         json.dump(db, f, ensure_ascii=False, indent=2)
 
 
+def _parse_klines(klines):
+    """استخرج قائمة الـ highs من أي تنسيق klines (Binance أو MEXC)."""
+    if not klines or not isinstance(klines, list):
+        return []
+    # تنسيق قائمة: [[openTime, open, high, ...], ...]
+    if isinstance(klines[0], list):
+        return [float(k[2]) for k in klines if len(k) > 2]
+    # تنسيق dict: [{"o": ..., "h": ..., ...}, ...]
+    if isinstance(klines[0], dict):
+        for hkey in ("h", "high", "highPrice"):
+            vals = [float(k[hkey]) for k in klines if hkey in k]
+            if vals:
+                return vals
+    return []
+
+
 def fetch_peak(sym, entry_ts, entry_price, exchange="Binance"):
-    """جلب أعلى سعر وصله السهم خلال LOOK_AHEAD_H ساعة من entry_ts.
-    يبدأ بالمنصة الأصلية للإشارة ثم يجرب الأخرى كـ fallback."""
+    """جلب أعلى سعر وصله السهم خلال LOOK_AHEAD_H ساعة من entry_ts."""
     start_ms = int(entry_ts * 1000)
     end_ms   = int((entry_ts + LOOK_AHEAD_H * 3600) * 1000)
-    limit    = min(LOOK_AHEAD_H, 1000)   # Binance/MEXC max 1000 per request
+    limit    = min(LOOK_AHEAD_H, 1000)
 
-    binance_url = f"{BINANCE}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}"
-    mexc_url    = f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}"
+    is_mexc  = "mexc" in (exchange or "").lower()
 
-    # إشارات MEXC: جرّب MEXC أولاً ثم Binance
-    # إشارات Binance: جرّب Binance أولاً ثم MEXC (للعملات المزدوجة)
-    is_mexc = "mexc" in (exchange or "").lower() or "MEXC" in (exchange or "")
-    urls = [mexc_url, binance_url] if is_mexc else [binance_url, mexc_url]
+    # قائمة الـ endpoints المرتبة حسب الأولوية
+    candidates = []
+    if is_mexc:
+        # MEXC spot — endpoint رسمي
+        candidates.append(f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}")
+        # MEXC بدون startTime (بعض الإصدارات لا تدعمه)
+        candidates.append(f"{MEXC}/klines?symbol={sym}&interval=1h&limit={limit}")
+    # Binance دائماً كـ fallback (بعض MEXC coins موجودة على Binance أيضاً)
+    candidates.append(f"{BINANCE}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}")
+    if not is_mexc:
+        # MEXC كـ fallback لـ Binance coins
+        candidates.append(f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}")
 
-    for url in urls:
+    for url in candidates:
         try:
             r = requests.get(url, timeout=12)
             if r.status_code == 200:
-                klines = r.json()
-                if klines and isinstance(klines, list) and len(klines) > 0:
-                    # تحقق أن البيانات بالتنسيق الصحيح (list of lists)
-                    if not isinstance(klines[0], list):
-                        continue
-                    highs = [float(k[2]) for k in klines if isinstance(k, list) and len(k) > 2]
-                    if highs:
-                        peak = max(highs)
-                        gain = (peak - entry_price) / entry_price * 100
-                        return round(gain, 2)
-        except Exception as e:
-            pass   # جرب الرابط التالي بصمت
+                highs = _parse_klines(r.json())
+                if highs:
+                    peak = max(highs)
+                    gain = (peak - entry_price) / entry_price * 100
+                    return round(gain, 2)
+        except Exception:
+            pass
     return None
 
 
@@ -114,7 +131,8 @@ def main():
             continue
 
         total += 1
-        print(f"  [{i}] {sym:<14} old={old_gain:+.1f}%  outcome={outcome}  ", end="", flush=True)
+        exch_tag = "M" if ("mexc" in (exchange or "").lower()) else "B"
+        print(f"  [{i}][{exch_tag}] {sym:<14} old={old_gain:+.1f}%  outcome={outcome}  ", end="", flush=True)
 
         real_gain = fetch_peak(sym, entry_ts, entry_price, exchange=exchange)
         time.sleep(0.25)   # rate limit — أبطأ قليلاً لنافذة 7 أيام
