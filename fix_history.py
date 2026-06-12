@@ -91,23 +91,29 @@ def main():
     parser.add_argument("--dry-run",  action="store_true", help="عرض فقط بدون تعديل")
     parser.add_argument("--sym",      type=str, default=None, help="صحح عملة محددة فقط")
     parser.add_argument("--days",     type=int, default=30,
-                        help="نافذة البحث بالأيام (افتراضي: 30 — يغطي جميع الانفجارات المتأخرة)")
+                        help="نافذة البحث بالأيام (افتراضي: 30)")
     parser.add_argument("--min-gain", type=float, default=0.0,
                         help="صحح فقط إذا القمة الحقيقية > هذه القيمة")
+    parser.add_argument("--clean",    action="store_true",
+                        help="احذف السجلات التي لا بيانات لها + max_gain=0 (عملات محذوفة أو MEXC قديمة)")
     args = parser.parse_args()
     global LOOK_AHEAD_H
     LOOK_AHEAD_H = args.days * 24
 
     db    = load_db()
     now   = time.time()
-    fixed = 0
-    total = 0
+    fixed   = 0
+    deleted = 0
+    total   = 0
+    # نسخة نظيفة تُبنى تدريجياً عند --clean
+    clean_db = []
 
     print(f"\n{'═'*60}")
     print(f"  fix_history.py — إصلاح max_gain_pct")
     print(f"  إجمالي السجلات: {len(db)}")
     print(f"  نافذة البحث: {LOOK_AHEAD_H}h بعد كل إشارة")
     if args.dry_run: print("  ⚠️  DRY RUN — لن يتم التعديل")
+    if args.clean:   print("  🧹 --clean: حذف السجلات بلا بيانات و max_gain=0")
     print(f"{'═'*60}\n")
 
     for i, rec in enumerate(db):
@@ -118,16 +124,18 @@ def main():
         outcome     = rec.get("outcome", "")
         exchange    = rec.get("exchange", "Binance")
 
-        # فلترة: فقط الإشارات القديمة المكتملة (أو المنتهية بـ timeout)
         if not entry_ts or not entry_price:
+            if args.clean: continue   # لا بيانات أساسية → احذف
             continue
         if args.sym and sym.replace("USDT","") != args.sym.replace("USDT",""):
+            if args.clean: clean_db.append(rec)
             continue
-        # تجاهل الإشارات النشطة أو الحديثة (أقل من 24h)
         if outcome == "active":
+            if args.clean: clean_db.append(rec)
             continue
         age_h = (now - entry_ts) / 3600
         if age_h < LOOK_AHEAD_H + 1:
+            if args.clean: clean_db.append(rec)
             continue
 
         total += 1
@@ -135,29 +143,44 @@ def main():
         print(f"  [{i}][{exch_tag}] {sym:<14} old={old_gain:+.1f}%  outcome={outcome}  ", end="", flush=True)
 
         real_gain = fetch_peak(sym, entry_ts, entry_price, exchange=exchange)
-        time.sleep(0.25)   # rate limit — أبطأ قليلاً لنافذة 7 أيام
+        time.sleep(0.25)
 
         if real_gain is None:
-            print("⚠️ لا بيانات")
+            # لا بيانات: إذا max_gain=0 أيضاً → هذا السجل عديم الفائدة
+            if args.clean and old_gain <= 0.0:
+                print("🗑️  حُذف (لا بيانات + gain=0)")
+                deleted += 1
+                # لا نضيف للـ clean_db
+            else:
+                print("⚠️ لا بيانات — محتفظ به")
+                if args.clean: clean_db.append(rec)
             continue
 
+        # بيانات متاحة: حدّث إذا لزم
         if real_gain > old_gain + 0.5 and real_gain >= args.min_gain:
             print(f"→ FIX {real_gain:+.1f}%  (كان {old_gain:+.1f}%)")
             fixed += 1
             if not args.dry_run:
-                db[i]["max_gain_pct"] = real_gain
-                # لو كان timeout وفاز → غير الـ outcome
+                rec["max_gain_pct"] = real_gain
                 if outcome == "timeout" and real_gain >= 5.0:
-                    db[i]["outcome"] = "win"
+                    rec["outcome"] = "win"
         else:
             print(f"ok ({real_gain:+.1f}% حقيقي)")
 
+        if args.clean: clean_db.append(rec)
+
     print(f"\n{'─'*60}")
-    print(f"  فحص: {total}  |  إصلاح: {fixed}")
-    if not args.dry_run and fixed > 0:
-        save_db(db)
-        print(f"  ✅ signal_history.json محدَّث ({fixed} سجل)")
-    elif args.dry_run:
+    print(f"  فحص: {total}  |  إصلاح: {fixed}  |  محذوف: {deleted}")
+
+    if not args.dry_run:
+        final_db = clean_db if args.clean else db
+        if fixed > 0 or (args.clean and deleted > 0):
+            save_db(final_db)
+            if args.clean:
+                print(f"  ✅ signal_history.json — بقي {len(final_db)} سجل (حُذف {deleted})")
+            else:
+                print(f"  ✅ signal_history.json محدَّث ({fixed} سجل)")
+    else:
         print(f"  ℹ️  DRY RUN — شغّل بدون --dry-run للتعديل الفعلي")
     print(f"{'═'*60}\n")
 
