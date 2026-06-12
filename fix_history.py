@@ -36,28 +36,36 @@ def save_db(db):
 
 
 def fetch_peak(sym, entry_ts, entry_price, exchange="Binance"):
-    """جلب أعلى سعر وصله السهم خلال LOOK_AHEAD_H ساعة من entry_ts."""
+    """جلب أعلى سعر وصله السهم خلال LOOK_AHEAD_H ساعة من entry_ts.
+    يبدأ بالمنصة الأصلية للإشارة ثم يجرب الأخرى كـ fallback."""
     start_ms = int(entry_ts * 1000)
     end_ms   = int((entry_ts + LOOK_AHEAD_H * 3600) * 1000)
-    limit    = min(LOOK_AHEAD_H, 1000)   # Binance max 1000 per request
+    limit    = min(LOOK_AHEAD_H, 1000)   # Binance/MEXC max 1000 per request
 
-    urls = [
-        f"{BINANCE}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}",
-        f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}",
-    ]
+    binance_url = f"{BINANCE}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}"
+    mexc_url    = f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}"
+
+    # إشارات MEXC: جرّب MEXC أولاً ثم Binance
+    # إشارات Binance: جرّب Binance أولاً ثم MEXC (للعملات المزدوجة)
+    is_mexc = "mexc" in (exchange or "").lower() or "MEXC" in (exchange or "")
+    urls = [mexc_url, binance_url] if is_mexc else [binance_url, mexc_url]
+
     for url in urls:
         try:
-            r = requests.get(url, timeout=10)
+            r = requests.get(url, timeout=12)
             if r.status_code == 200:
                 klines = r.json()
-                if klines and isinstance(klines, list):
-                    highs = [float(k[2]) for k in klines if isinstance(k, list)]
+                if klines and isinstance(klines, list) and len(klines) > 0:
+                    # تحقق أن البيانات بالتنسيق الصحيح (list of lists)
+                    if not isinstance(klines[0], list):
+                        continue
+                    highs = [float(k[2]) for k in klines if isinstance(k, list) and len(k) > 2]
                     if highs:
                         peak = max(highs)
                         gain = (peak - entry_price) / entry_price * 100
                         return round(gain, 2)
         except Exception as e:
-            print(f"  ⚠️ {sym} fetch error: {e}")
+            pass   # جرب الرابط التالي بصمت
     return None
 
 
@@ -86,11 +94,12 @@ def main():
     print(f"{'═'*60}\n")
 
     for i, rec in enumerate(db):
-        sym        = rec.get("sym", "?")
-        entry_ts   = rec.get("timestamp")
+        sym         = rec.get("sym", "?")
+        entry_ts    = rec.get("timestamp")
         entry_price = rec.get("price_entry") or rec.get("price")
-        old_gain   = rec.get("max_gain_pct") or 0.0
-        outcome    = rec.get("outcome", "")
+        old_gain    = rec.get("max_gain_pct") or 0.0
+        outcome     = rec.get("outcome", "")
+        exchange    = rec.get("exchange", "Binance")
 
         # فلترة: فقط الإشارات القديمة المكتملة (أو المنتهية بـ timeout)
         if not entry_ts or not entry_price:
@@ -107,7 +116,7 @@ def main():
         total += 1
         print(f"  [{i}] {sym:<14} old={old_gain:+.1f}%  outcome={outcome}  ", end="", flush=True)
 
-        real_gain = fetch_peak(sym, entry_ts, entry_price)
+        real_gain = fetch_peak(sym, entry_ts, entry_price, exchange=exchange)
         time.sleep(0.25)   # rate limit — أبطأ قليلاً لنافذة 7 أيام
 
         if real_gain is None:
