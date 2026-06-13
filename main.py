@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.50"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.51"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1104,11 +1104,13 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                ob_spot, ratio, pos24, spike, net_usd, move_pct, funding,
                fractal_score=None, h_value=None, oi_delta=None,
                min_prob=0, crowded_longs=False,
-               is_moonshot=False, fra_verdict=None, fra_res_pct=999.0) -> tuple:
+               is_moonshot=False, fra_verdict=None, fra_res_pct=999.0,
+               verdict_pts=None) -> tuple:
     """Return (ai_text, blocked). blocked=True when AI is bearish + confirming danger pattern.
     min_prob: if set, also blocks when AI probability is below this threshold.
     crowded_longs: if True, blocks when AI < 50% (long squeeze risk).
-    Moonshot quality gate: blocks if Weak Fractal + AI<50% + resistance<2% — all three."""
+    Moonshot quality gate: blocks if Weak Fractal + AI<50% + resistance<2% — all three.
+    verdict_pts: Moderate signals (<5.0 pts) require AI >= 50% — no doubtful moderate entries."""
     if _ai_agent is None:
         return "", False
     try:
@@ -1149,9 +1151,19 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                          and "Weak" in (fra_verdict or "")
                          and prob < 50
                          and fra_res_pct < 2.0)
-        blocked = extreme_avoid or dump_pattern or weak_combined or below_min or moonshot_gate
+        # Block condition 6: Moderate Signal + AI < 50% — doubtful signals must not reach subscribers.
+        # Strong Signals (≥5.0 pts) have sufficient flow quality to override AI uncertainty.
+        # Moonshots bypass (spike is the quality signal). Only Moderate blocked when AI disagrees.
+        moderate_ai_weak = (not is_moonshot
+                            and verdict_pts is not None
+                            and verdict_pts < 5.0
+                            and prob < 50)
+        blocked = (extreme_avoid or dump_pattern or weak_combined or below_min
+                   or moonshot_gate or moderate_ai_weak)
         if blocked:
-            if moonshot_gate:
+            if moderate_ai_weak:
+                reason = f"moderate_ai_weak(pts={verdict_pts:.1f},AI{prob:.0f}%)"
+            elif moonshot_gate:
                 reason = f"moonshot_gate(weak_fra+AI{prob:.0f}%+res{fra_res_pct:.1f}%)"
             elif extreme_avoid:
                 reason = "AI<35%% avoid"
@@ -3189,7 +3201,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                                     crowded_longs=bool(_oi and _oi.get("long_crowded")),
                                     is_moonshot=is_moonshot,
                                     fra_verdict=(_fra.get("verdict") if _fra else None),
-                                    fra_res_pct=_fra_res_pct)
+                                    fra_res_pct=_fra_res_pct,
+                                    verdict_pts=_v_pts)
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
