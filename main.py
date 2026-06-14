@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.51"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.52"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -243,10 +243,12 @@ _alpha_vol_cache: dict = {}  # sym → (vol24h, timestamp) for surge detection
 last_sector   = 0.0
 last_weekly_swing = 0.0
 last_deep_value   = 0.0
+last_trend_gainer = 0.0
 last_bias_log = 0.0
 ACCUM_SCAN_S      = 300    # every 5 min
 WEEKLY_SWING_S    = 300    # every 5 min
 DEEP_VALUE_S      = 300    # every 5 min
+TREND_GAINER_S    = 600    # every 10 min
 last_report        = 0.0   # last daily report sent (unix ts)
 last_report_date   = ""    # "YYYY-MM-DD" — ensures exactly one report per calendar day
 _last_report_time  = 0.0   # cooldown: prevents duplicate /report within 120s
@@ -321,6 +323,7 @@ def _is_primary_process() -> bool:
         return True  # if file missing, assume primary
 _trend_dedup         : Dict[str, float] = {}  # {sym: last_trend_signal_ts} 12h cooldown
 _weekly_swing_dedup  : Dict[str, float] = {}  # {sym: last_weekly_swing_ts} 24h cooldown
+_trend_gainer_dedup  : Dict[str, float] = {}  # {sym: last_trend_gainer_ts} 6h cooldown
 _dominance_hist      : List[Tuple[float, dict]] = []  # [(ts, {btcd, usdtd, usdcd, others})]
 
 # ── Circuit Breaker ──────────────────────────────────────────────────────────
@@ -5383,6 +5386,113 @@ def scan_deep_value(all_t):
         log.info("scan_deep_value: fired=%d", fired)
 
 
+def scan_trend_gainer(all_t: dict):
+    """
+    Top-Gainer Momentum Scanner — catches sustained 24h uptrends (+10%+) missed
+    by spike-based scanners (TAO +26%, SYN +39%, FET +13%).
+
+    These coins don't spike on 5m/1m; they grind up over hours. By the time
+    the bot sees them they're "high_pos" and get rejected. Setting
+    momentum_signal=True bypasses pos24/late_entry_hard while still applying
+    all quality gates: verdict, AI, fractal, OB.
+
+    Conditions (pre-filter, then _check() applies full quality logic):
+      - Binance spot, vol >= $5M (enough for real momentum, not thin noise)
+      - 24h change >= 10% (meaningful sustained move)
+      - Not near the BOTTOM of the daily range: pos24 > 0.50
+        (confirms uptrend is alive, not already reversed)
+      - Not crashed from peak: (high24 - price) / high24 < 20%
+        (still within 20% of intraday high — not a dead-cat situation)
+      - 4h volume elevated: last 4 1h-candle volumes >= 110% of 24h hourly avg
+        (confirms sustained buying, not old pump now fading)
+      - At least 2 of last 3 1h candles are bullish (close > open)
+      - 6h cooldown per coin (via _trend_gainer_dedup)
+      - Not already in tracking, not in 2h alerted cooldown
+    """
+    global _trend_gainer_dedup
+    now = time.time()
+    COOLDOWN_TG = 21600  # 6h per coin
+
+    candidates = [
+        (sym, t) for sym, t in all_t.items()
+        if t.get("exchange") == "Binance"
+        and t.get("vol", 0) >= 5_000_000
+        and t.get("change", 0) >= 10.0
+        and sym not in tracking
+        and now - _trend_gainer_dedup.get(sym, 0) >= COOLDOWN_TG
+        and now - alerted.get(sym, 0) >= COOLDOWN
+        and sym.replace("USDT", "") not in BLACKLIST
+    ]
+
+    # Sort by 24h change descending — strongest trends first
+    candidates.sort(key=lambda x: x[1].get("change", 0), reverse=True)
+    # Cap at 15 to avoid scanning entire top-gainer list every 10 min
+    candidates = candidates[:15]
+
+    fired = 0
+    for sym, ticker in candidates:
+        try:
+            price  = ticker.get("price", 0.0)
+            high24 = ticker.get("high24", 0.0)
+            low24  = ticker.get("low24",  0.0)
+            if price <= 0 or high24 <= 0 or low24 >= high24:
+                continue
+
+            # pos24: must still be in upper half of daily range (trend alive)
+            pos24 = (price - low24) / (high24 - low24)
+            if pos24 < 0.50:
+                continue  # reversed — trend is over
+
+            # Not crashed from intraday high (< 20% from peak)
+            crash_from_high = (high24 - price) / high24 * 100
+            if crash_from_high >= 20.0:
+                continue  # dead cat or distribution — skip
+
+            # Fetch last 24 1h candles to verify sustained volume & bullish candles
+            base_url = ticker.get("base_url", "https://api.binance.com/api/v3")
+            klines = fetch_klines(sym, base_url, interval="1h", limit=26)
+            if not klines or len(klines) < 10:
+                continue
+
+            # 24h hourly average volume (exclude last candle which may be partial)
+            vols = [_qvol(k) for k in klines[:-1]]
+            avg_vol_1h = sum(vols[-24:]) / min(len(vols), 24) if vols else 0
+            if avg_vol_1h <= 0:
+                continue
+
+            # Last 4 complete 1h candles volume >= 110% of hourly avg
+            recent_vols = vols[-4:]
+            avg_recent = sum(recent_vols) / len(recent_vols) if recent_vols else 0
+            if avg_recent < avg_vol_1h * 1.10:
+                continue  # volume fading — trend weakening
+
+            # At least 2 of last 3 1h candles are bullish (close > open)
+            last3 = klines[-4:-1]  # 3 completed candles before current
+            bullish = sum(1 for k in last3 if float(k[4]) > float(k[1]))
+            if bullish < 2:
+                continue  # bearish reversal — skip
+
+            # All checks passed — set momentum_signal so _check() bypasses pos24 filters
+            _trend_gainer_dedup[sym] = now
+            ticker_copy = dict(ticker)
+            ticker_copy["momentum_signal"] = True
+
+            log.info("TREND_GAINER candidate %s chg=%.1f%% pos24=%.0f%% crash=%.1f%% vol_ratio=%.1fx bulls=%d/%d",
+                     sym, ticker.get("change", 0), pos24 * 100, crash_from_high,
+                     avg_recent / max(avg_vol_1h, 1), bullish, len(last3))
+
+            result = _check(sym, ticker_copy, "1h")
+            if result is not None:
+                fired += 1
+            time.sleep(0.15)
+
+        except Exception as e:
+            log.debug("trend_gainer %s: %s", sym, e)
+
+    if fired:
+        log.info("scan_trend_gainer: fired=%d", fired)
+
+
 # ══════════════════════════════════════════════════════
 #  REPORT DEDUP — file-based lock prevents duplicate sends
 #  across multiple bot instances (nohup + systemd race)
@@ -5414,7 +5524,7 @@ def _mark_report_sent(key: str, report_type: str):
 # ══════════════════════════════════════════════════════
 
 def main():
-    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_weekly_swing, last_deep_value, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
+    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_weekly_swing, last_deep_value, last_trend_gainer, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
     # Error tracking — alert Telegram on repeated loop errors
     _loop_err_count = [0]    # [count] — mutable so inner scope can modify
     _loop_last_err  = [""]   # [last_error_str]
@@ -5589,6 +5699,11 @@ def main():
             if now - last_deep_value >= DEEP_VALUE_S:
                 last_deep_value = now
                 scan_deep_value(all_t)
+
+            # Top-Gainer Momentum: sustained 24h uptrend coins missed by spike scanners
+            if now - last_trend_gainer >= TREND_GAINER_S:
+                last_trend_gainer = now
+                scan_trend_gainer(all_t)
 
         except KeyboardInterrupt:
             log.info("Stopped."); break
