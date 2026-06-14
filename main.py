@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.53"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.54"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3084,12 +3084,26 @@ def _check(sym, ticker, interval, sector_boost=False):
     # < 0.5%: hard block — price is essentially AT resistance, no score exception.
     #          score=9.0 + 8x volume (DIS) still failed → close resistance always loses.
     # 0.5-1.0%: only score ≥ 9.5 can override (genuine breakout momentum from extreme flow).
+    # Non-Strong fractal + resistance < 3%: block — weak structure cannot power through a wall.
+    # Data: ROBO (Moderate + Jy=-0.12 + res=+2.3%) → SL. Strong fractal can attempt breakout.
     if (_fra and _fra.get("resistance") and _fra["resistance"] > price):
         _res_dist_pct = (_fra["resistance"] - price) / price * 100
+        _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
         if _res_dist_pct < 0.3 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
         if _res_dist_pct < 0.5 and score < 8.0 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
+        if _res_dist_pct < 3.0 and not _fra_is_strong and not _is_explosive and score < 9.0:
+            _rej(f"fractal_resistance_close(+{_res_dist_pct:.1f}%,non_strong_fra)"); return
+
+    # Fractal Momentum Gate: negative Jy (bearish momentum) with Moderate/Weak fractal = doubt.
+    # Strong fractal structure can sustain a brief Jy dip. Moderate cannot.
+    # Data: ROBO (Moderate + Jy=-0.12 + res=+2.3%) → SL. Filtering saves subscribers from bad entry.
+    if (_fra and not _is_explosive):
+        _fra_jy = _fra.get("jy") or 0.0
+        _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
+        if _fra_jy < -0.05 and not _fra_is_strong:
+            _rej(f"fractal_jy_bearish(jy={_fra_jy:.3f})"); return
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
