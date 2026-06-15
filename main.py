@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.60"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.61"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -244,11 +244,13 @@ last_sector   = 0.0
 last_weekly_swing = 0.0
 last_deep_value   = 0.0
 last_trend_gainer = 0.0
+last_quiet_buildup = 0.0
 last_bias_log = 0.0
 ACCUM_SCAN_S      = 300    # every 5 min
 WEEKLY_SWING_S    = 300    # every 5 min
 DEEP_VALUE_S      = 300    # every 5 min
 TREND_GAINER_S    = 600    # every 10 min
+QUIET_BUILDUP_S   = 1200   # every 20 min
 last_report        = 0.0   # last daily report sent (unix ts)
 last_report_date   = ""    # "YYYY-MM-DD" — ensures exactly one report per calendar day
 _last_report_time  = 0.0   # cooldown: prevents duplicate /report within 120s
@@ -324,6 +326,7 @@ def _is_primary_process() -> bool:
 _trend_dedup         : Dict[str, float] = {}  # {sym: last_trend_signal_ts} 12h cooldown
 _weekly_swing_dedup  : Dict[str, float] = {}  # {sym: last_weekly_swing_ts} 24h cooldown
 _trend_gainer_dedup  : Dict[str, float] = {}  # {sym: last_trend_gainer_ts} 6h cooldown
+_quiet_buildup_dedup : Dict[str, float] = {}  # {sym: last_quiet_buildup_ts} 3h cooldown
 _dominance_hist      : List[Tuple[float, dict]] = []  # [(ts, {btcd, usdtd, usdcd, others})]
 
 # ── Circuit Breaker ──────────────────────────────────────────────────────────
@@ -5524,6 +5527,129 @@ def scan_trend_gainer(all_t: dict):
         log.info("scan_trend_gainer: fired=%d", fired)
 
 
+def scan_quiet_buildup(all_t: dict):
+    """
+    Gradual Volume Escalation — catches JTO/XLM/ZEC/WLD type moves BEFORE explosion.
+    No single volume spike; volume builds steadily hour by hour over 3-4h.
+    Early entry: 24h change still -3% to +12%, not yet noticed by spike scanners.
+
+    Conditions:
+      - Binance, vol >= $3M (enough liquidity for meaningful signal)
+      - 24h change: -3% to +12% (early stage, not already extended)
+      - pos24 <= 0.70 (not at daily extreme — room to run)
+      - Volume escalation: last 3h avg >= 135% of prior 3h avg
+        OR each of last 3 hours >= 105% of the one before (consecutive)
+      - Price progress >= 0.5% gain over last 4h (price confirming volume)
+      - At least 3 of last 4 completed 1h candles are bullish (close > open)
+      - 2h net flow positive with ratio >= 1.5 (real buying, not noise)
+      - Net flow >= 30% of tier minimum (enough dollar flow for the tier)
+      - 3h cooldown per coin (_quiet_buildup_dedup)
+      - Sets momentum_signal=True → _check() for full quality gating
+    """
+    global _quiet_buildup_dedup
+    now = time.time()
+    COOLDOWN_QB = 10800  # 3h per coin
+
+    candidates = [
+        (sym, t) for sym, t in all_t.items()
+        if t.get("exchange") == "Binance"
+        and t.get("vol", 0) >= 3_000_000
+        and -3.0 <= t.get("change", 0) <= 12.0
+        and sym not in tracking
+        and now - _quiet_buildup_dedup.get(sym, 0) >= COOLDOWN_QB
+        and now - alerted.get(sym, 0) >= COOLDOWN
+        and sym.replace("USDT", "") not in BLACKLIST
+    ]
+    candidates.sort(key=lambda x: x[1].get("change", 0), reverse=True)
+    candidates = candidates[:20]
+
+    fired = 0
+    for sym, ticker in candidates:
+        try:
+            price  = ticker.get("price", 0.0)
+            high24 = ticker.get("high24", 0.0)
+            low24  = ticker.get("low24",  0.0)
+            if price <= 0 or high24 <= low24:
+                continue
+
+            rng = high24 - low24
+            pos24 = (price - low24) / rng if rng > 0 else 0.5
+            if pos24 > 0.70:
+                continue
+
+            base_url = ticker.get("base_url", "https://api.binance.com/api/v3")
+            klines = fetch_klines(sym, base_url, interval="1h", limit=9)
+            if not klines or len(klines) < 7:
+                continue
+
+            completed = klines[:-1]  # exclude current (partial) candle
+            vols   = [_qvol(k) for k in completed]
+            opens  = [float(k[1]) for k in completed]
+            closes = [float(k[4]) for k in completed]
+
+            if len(vols) < 6:
+                continue
+
+            # Volume escalation: last 3h avg >= 135% of prior 3h avg
+            last3_avg  = sum(vols[-3:]) / 3
+            prior3_avg = sum(vols[-6:-3]) / 3
+            if prior3_avg <= 0:
+                continue
+            vol_ratio = last3_avg / prior3_avg
+
+            # OR consecutive: each of last 3 hours >= 105% of the prior hour
+            consec = all(vols[-3 + i] >= vols[-4 + i] * 1.05 for i in range(3))
+
+            if vol_ratio < 1.35 and not consec:
+                continue
+
+            # Price progress >= 0.5% over last 4 completed candles
+            if len(closes) < 5:
+                continue
+            price_4h_ago = closes[-5]
+            price_progress = (closes[-1] - price_4h_ago) / price_4h_ago * 100 if price_4h_ago > 0 else 0
+            if price_progress < 0.5:
+                continue
+
+            # At least 3 of last 4 completed candles bullish
+            bulls = sum(1 for o, c in zip(opens[-4:], closes[-4:]) if c > o)
+            if bulls < 3:
+                continue
+
+            # 2h net flow: positive with ratio >= 1.5
+            buy_v, sell_v = fetch_agg_trades(sym, base_url, minutes=120)
+            if sell_v <= 0 or buy_v <= sell_v:
+                continue
+            net = buy_v - sell_v
+            if buy_v / sell_v < 1.5:
+                continue
+
+            # Net >= 30% of tier minimum
+            tier_info = get_tier(ticker.get("vol", 0))
+            if net < tier_info.get("net", 5000) * 0.3:
+                continue
+
+            _quiet_buildup_dedup[sym] = now
+            ticker_copy = dict(ticker)
+            ticker_copy["momentum_signal"] = True
+
+            log.info(
+                "QUIET_BUILDUP candidate %s chg=%.1f%% vol_ratio=%.2fx consec=%s bulls=%d pos24=%.0f%% net=%s",
+                sym, ticker.get("change", 0), vol_ratio, consec, bulls, pos24 * 100, _fv(net)
+            )
+
+            result = _check(sym, ticker_copy, "1h")
+            if result is not None:
+                fired += 1
+            time.sleep(0.2)
+
+        except Exception as e:
+            log.debug("quiet_buildup %s: %s", sym, e)
+
+    if fired:
+        log.info("scan_quiet_buildup: fired=%d", fired)
+
+
 # ══════════════════════════════════════════════════════
 #  REPORT DEDUP — file-based lock prevents duplicate sends
 #  across multiple bot instances (nohup + systemd race)
@@ -5555,7 +5681,7 @@ def _mark_report_sent(key: str, report_type: str):
 # ══════════════════════════════════════════════════════
 
 def main():
-    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_weekly_swing, last_deep_value, last_trend_gainer, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
+    global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_weekly_swing, last_deep_value, last_trend_gainer, last_quiet_buildup, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
     # Error tracking — alert Telegram on repeated loop errors
     _loop_err_count = [0]    # [count] — mutable so inner scope can modify
     _loop_last_err  = [""]   # [last_error_str]
@@ -5735,6 +5861,11 @@ def main():
             if now - last_trend_gainer >= TREND_GAINER_S:
                 last_trend_gainer = now
                 scan_trend_gainer(all_t)
+
+            # Gradual Volume Buildup: JTO/XLM/ZEC type steady accumulation before explosion
+            if now - last_quiet_buildup >= QUIET_BUILDUP_S:
+                last_quiet_buildup = now
+                scan_quiet_buildup(all_t)
 
         except KeyboardInterrupt:
             log.info("Stopped."); break
