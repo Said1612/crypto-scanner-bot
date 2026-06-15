@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.57"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.58"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3101,8 +3101,11 @@ def _check(sym, ticker, interval, sector_boost=False):
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
         if _res_dist_pct < 0.5 and score < 8.0 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
-        if _res_dist_pct < 3.0 and not _fra_is_strong and not _is_explosive and not is_moonshot and score < 9.0:
-            _rej(f"fractal_resistance_close(+{_res_dist_pct:.1f}%,non_strong_fra)"); return
+        # Positive Jy can break through nearby resistance (STX: Jy=+0.14, res=+0.3% → +10%).
+        # Only block when Jy <= 0: negative/neutral momentum cannot overcome a resistance wall.
+        _fra_jy_res = (_fra.get("jy") or 0.0)
+        if _res_dist_pct < 3.0 and not _fra_is_strong and not _is_explosive and not is_moonshot and score < 9.0 and _fra_jy_res <= 0.0:
+            _rej(f"fractal_resistance_close(+{_res_dist_pct:.1f}%,jy={_fra_jy_res:.3f})"); return
 
     # Fractal Momentum Gate: negative Jy (bearish momentum) with Moderate/Weak fractal = doubt.
     # Strong fractal structure can sustain a brief Jy dip. Moderate cannot.
