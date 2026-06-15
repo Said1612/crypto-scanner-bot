@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.54"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.55"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3086,6 +3086,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # 0.5-1.0%: only score ≥ 9.5 can override (genuine breakout momentum from extreme flow).
     # Non-Strong fractal + resistance < 3%: block — weak structure cannot power through a wall.
     # Data: ROBO (Moderate + Jy=-0.12 + res=+2.3%) → SL. Strong fractal can attempt breakout.
+    # Moonshot bypass: spike >= 10x IS the quality signal — FIGHT (15.8x, res=+0.9%) won +25%.
     if (_fra and _fra.get("resistance") and _fra["resistance"] > price):
         _res_dist_pct = (_fra["resistance"] - price) / price * 100
         _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
@@ -3093,13 +3094,14 @@ def _check(sym, ticker, interval, sector_boost=False):
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
         if _res_dist_pct < 0.5 and score < 8.0 and not _is_explosive:
             _rej(f"fractal_resistance_near(+{_res_dist_pct:.1f}%)"); return
-        if _res_dist_pct < 3.0 and not _fra_is_strong and not _is_explosive and score < 9.0:
+        if _res_dist_pct < 3.0 and not _fra_is_strong and not _is_explosive and not is_moonshot and score < 9.0:
             _rej(f"fractal_resistance_close(+{_res_dist_pct:.1f}%,non_strong_fra)"); return
 
     # Fractal Momentum Gate: negative Jy (bearish momentum) with Moderate/Weak fractal = doubt.
     # Strong fractal structure can sustain a brief Jy dip. Moderate cannot.
     # Data: ROBO (Moderate + Jy=-0.12 + res=+2.3%) → SL. Filtering saves subscribers from bad entry.
-    if (_fra and not _is_explosive):
+    # Moonshot bypass: extreme spike overrides Jy — momentum driven by volume, not fractal flow.
+    if (_fra and not _is_explosive and not is_moonshot):
         _fra_jy = _fra.get("jy") or 0.0
         _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
         if _fra_jy < -0.05 and not _fra_is_strong:
