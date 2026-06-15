@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.58"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.59"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1157,10 +1157,13 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         # Block condition 6: Moderate Signal + AI < 50% — doubtful signals must not reach subscribers.
         # Strong Signals (≥5.0 pts) have sufficient flow quality to override AI uncertainty.
         # Moonshots bypass (spike is the quality signal). Only Moderate blocked when AI disagrees.
+        # Ratio bypass: ratio >= 3.5x = 78%+ buying pressure = real demand overrides AI doubt.
+        # Data: ALCH (ratio=3.9x, AI=45%, Moderate) → +15%. IN (ratio=2.7x, AI=45%) → SL.
         moderate_ai_weak = (not is_moonshot
                             and verdict_pts is not None
                             and verdict_pts < 5.0
-                            and prob < 50)
+                            and prob < 50
+                            and ratio < 3.5)
         # Block condition 7: Moonshot + OB weak + Crowded Longs → long squeeze SL risk.
         # Spike drives entry but OB must confirm buyer depth. Crowded longs cascade on any reversal.
         # Data: NAORIS (OB=55%, L/S=1.93) → SL -10%. FIGHT (OB=73%, L/S=2.89) → +25%.
@@ -1172,7 +1175,7 @@ def _ai_assess(sym, exchange, tier, scanner, score,
             if moonshot_ob_crowded:
                 reason = f"moonshot_ob_crowded(OB={ob_spot*100:.0f}%,crowded_longs)"
             elif moderate_ai_weak:
-                reason = f"moderate_ai_weak(pts={verdict_pts:.1f},AI{prob:.0f}%)"
+                reason = f"moderate_ai_weak(pts={verdict_pts:.1f},AI{prob:.0f}%,ratio={ratio:.1f}x)"
             elif moonshot_gate:
                 reason = f"moonshot_gate(weak_fra+AI{prob:.0f}%+res{fra_res_pct:.1f}%)"
             elif extreme_avoid:
