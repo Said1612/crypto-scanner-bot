@@ -197,6 +197,7 @@ class MafioAgent:
             s for s in self._history
             if s.get("outcome", "active") != "active"
             and s.get("max_gain_pct") is not None
+            and abs(s.get("max_gain_pct", 0)) >= 1.0   # exclude flat/zero-gain records
             and s.get("sym") != sig.get("sym")   # exclude same coin
         ]
         if not candidates:
