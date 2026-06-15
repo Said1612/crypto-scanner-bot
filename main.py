@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.55"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.56"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1161,10 +1161,17 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                             and verdict_pts is not None
                             and verdict_pts < 5.0
                             and prob < 50)
+        # Block condition 7: Moonshot + OB weak + Crowded Longs → long squeeze SL risk.
+        # Spike drives entry but OB must confirm buyer depth. Crowded longs cascade on any reversal.
+        # Data: NAORIS (OB=55%, L/S=1.93) → SL -10%. FIGHT (OB=73%, L/S=2.89) → +25%.
+        # OB < 0.65 = not enough buyer depth to sustain spike; crowded longs magnify downside.
+        moonshot_ob_crowded = (is_moonshot and ob_spot < 0.65 and crowded_longs)
         blocked = (extreme_avoid or dump_pattern or weak_combined or below_min
-                   or moonshot_gate or moderate_ai_weak)
+                   or moonshot_gate or moderate_ai_weak or moonshot_ob_crowded)
         if blocked:
-            if moderate_ai_weak:
+            if moonshot_ob_crowded:
+                reason = f"moonshot_ob_crowded(OB={ob_spot*100:.0f}%,crowded_longs)"
+            elif moderate_ai_weak:
                 reason = f"moderate_ai_weak(pts={verdict_pts:.1f},AI{prob:.0f}%)"
             elif moonshot_gate:
                 reason = f"moonshot_gate(weak_fra+AI{prob:.0f}%+res{fra_res_pct:.1f}%)"
