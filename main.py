@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.2.56"  # bump this with every push — verify after restart
+BOT_VERSION = "3.2.57"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -5483,11 +5483,13 @@ def scan_trend_gainer(all_t: dict):
             if avg_vol_1h <= 0:
                 continue
 
-            # Last 4 complete 1h candles volume >= 110% of hourly avg
+            # Last 4 complete 1h candles volume >= 80% of hourly avg (not collapsing)
+            # 110% was too strict — sustained trends consolidate volume after initial spike.
+            # 80% ensures volume is still present (not reversing), without requiring elevation.
             recent_vols = vols[-4:]
             avg_recent = sum(recent_vols) / len(recent_vols) if recent_vols else 0
-            if avg_recent < avg_vol_1h * 1.10:
-                continue  # volume fading — trend weakening
+            if avg_recent < avg_vol_1h * 0.80:
+                continue  # volume collapsed — trend exhausted
 
             # At least 2 of last 3 1h candles are bullish (close > open)
             last3 = klines[-4:-1]  # 3 completed candles before current
