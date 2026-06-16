@@ -194,7 +194,8 @@ class MafioAgent:
 
     def _find_similar(self, sig: dict, n: int = 3) -> List[dict]:
         """Return n completed signals most similar to sig by feature distance.
-        Prefers same exchange — Binance signals only match Binance history."""
+        Prefers same exchange — Binance signals only match Binance history.
+        Deduplicates by sym — only the closest signal per coin is kept."""
         sig_exchange = sig.get("exchange")
 
         def _base_filter(s):
@@ -205,17 +206,30 @@ class MafioAgent:
                 and s.get("sym") != sig.get("sym")
             )
 
+        def _dedup_by_sym(ranked: list) -> list:
+            """Keep only the closest (first) entry per sym."""
+            seen = set()
+            result = []
+            for s in ranked:
+                sym = s.get("sym")
+                if sym not in seen:
+                    seen.add(sym)
+                    result.append(s)
+            return result
+
         # Try same-exchange pool first
         if sig_exchange:
             same_ex = [s for s in self._history if _base_filter(s) and s.get("exchange") == sig_exchange]
             if len(same_ex) >= 1:
-                return sorted(same_ex, key=lambda s: self._distance(sig, s))[:n]
+                ranked = sorted(same_ex, key=lambda s: self._distance(sig, s))
+                return _dedup_by_sym(ranked)[:n]
 
         # Fallback: all exchanges (e.g. MEXC signal or empty same-exchange history)
         candidates = [s for s in self._history if _base_filter(s)]
         if not candidates:
             return []
-        return sorted(candidates, key=lambda s: self._distance(sig, s))[:n]
+        ranked = sorted(candidates, key=lambda s: self._distance(sig, s))
+        return _dedup_by_sym(ranked)[:n]
 
     def _similar_summary(self, similar: List[dict]) -> Tuple[float, str]:
         """
