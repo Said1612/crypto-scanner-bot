@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.62"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.63"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -412,73 +412,77 @@ def _redis(method, path, body=None):
     except Exception as e:
         log.debug("Redis: %s", e); return None
 
+def _tracking_payload() -> dict:
+    """Serialize tracking + alerted for save (handles set → list for JSON)."""
+    return {
+        "alerted":      dict(alerted),
+        "tracking":     {k: {**v, "hit": list(v["hit"])} for k, v in tracking.items()},
+        "signal_count": signal_count,
+    }
+
 def save_state():
-    # Save tracking state to Redis if available
+    payload = _tracking_payload()
+    # Always save to local file — primary backup that survives Redis outages
+    try:
+        with open(TRACKING_FILE, "w") as f:
+            json.dump(payload, f)
+    except Exception as e:
+        log.debug("tracking_state local save: %s", e)
+    # Also push to Redis if configured (for multi-instance sync)
     if REDIS_URL:
-        _redis("POST", f"/set/{REDIS_KEY}", {"value": json.dumps({
-            "alerted":       dict(alerted),
-            "tracking":      {k: {**v, "hit": list(v["hit"])} for k, v in tracking.items()},
-            "signal_count":  signal_count,
-        })})
-    # Always persist daily_results to local JSON (survives restarts)
+        _redis("POST", f"/set/{REDIS_KEY}", {"value": json.dumps(payload)})
+    # Always persist daily_results to local JSON
     try:
         with open(DAILY_LOG, "w") as f:
             json.dump(daily_results, f)
     except Exception as e:
         log.debug("daily_log save: %s", e)
-    # Local fallback: save tracking state when Redis not configured
-    if not REDIS_URL:
-        try:
-            with open(TRACKING_FILE, "w") as f:
-                json.dump({
-                    "alerted":      dict(alerted),
-                    "tracking":     {k: {**v, "hit": list(v["hit"])} for k, v in tracking.items()},
-                    "signal_count": signal_count,
-                }, f)
-        except Exception as e:
-            log.debug("tracking_state save: %s", e)
+
+def _load_tracking_from(s: dict):
+    """Apply a saved state dict into global alerted/tracking/signal_count."""
+    global signal_count
+    alerted.update(s.get("alerted", {}))
+    signal_count = int(s.get("signal_count", signal_count))
+    now = time.time()
+    for k, v in s.get("tracking", {}).items():
+        v["hit"] = set(v.get("hit", []))
+        if not v.get("sl_alerted") or now - v.get("t0", 0) < TRACK_HOURS * 3600:
+            tracking[k] = v
 
 def load_state():
     global alerted, tracking, signal_count, daily_results
-    # Load daily results from local file first (always available)
+    # Always load daily results from local file
     try:
         with open(DAILY_LOG) as f:
             daily_results = json.load(f)
         log.info("daily_log loaded: %d entries", len(daily_results))
     except Exception:
         pass
-    # Local fallback: restore tracking state when Redis not configured
-    if not REDIS_URL:
-        try:
-            with open(TRACKING_FILE) as f:
-                s = json.load(f)
-            alerted.update(s.get("alerted", {}))
-            signal_count = s.get("signal_count", signal_count)
-            now = time.time()
-            for k, v in s.get("tracking", {}).items():
-                v["hit"] = set(v.get("hit", []))
-                # Restore all signals not yet closed by SL (no time limit — TRACK_HOURS is safety cap)
-                if not v.get("sl_alerted") or now - v.get("t0", 0) < TRACK_HOURS * 3600:
-                    tracking[k] = v
-            log.info("tracking_state loaded: %d active signals", len(tracking))
-        except Exception:
-            pass
-        return
-    # Load tracking state from Redis
-    if not REDIS_URL: return
-    resp = _redis("GET", f"/get/{REDIS_KEY}")
-    if not resp or not resp.get("result"): return
+    # Try Redis first (most up-to-date when running multi-instance)
+    redis_ok = False
+    if REDIS_URL:
+        resp = _redis("GET", f"/get/{REDIS_KEY}")
+        if resp and resp.get("result"):
+            try:
+                s = json.loads(resp["result"])
+                _load_tracking_from(s)
+                log.info("State (Redis): alerted=%d tracking=%d signals=%d",
+                         len(alerted), len(tracking), signal_count)
+                redis_ok = True
+            except Exception as e:
+                log.warning("State load (Redis): %s", e)
+    # Always merge local file — catches signals saved between Redis failures
     try:
-        s = json.loads(resp["result"])
-        alerted.update(s.get("alerted", {}))
-        signal_count = int(s.get("signal_count", 0))
-        for k, v in s.get("tracking", {}).items():
-            v["hit"] = set(v.get("hit", []))
-            tracking[k] = v
-        log.info("State: alerted=%d tracking=%d signals=%d",
-                 len(alerted), len(tracking), signal_count)
-    except Exception as e:
-        log.warning("State load: %s", e)
+        with open(TRACKING_FILE) as f:
+            s = json.load(f)
+        before = len(tracking)
+        _load_tracking_from(s)
+        added = len(tracking) - before
+        if added or not redis_ok:
+            log.info("State (local): alerted=%d tracking=%d (+%d from file)",
+                     len(alerted), len(tracking), added)
+    except Exception:
+        pass
 
 # ══════════════════════════════════════════════════════
 #  SIGNAL DATABASE  (ML training data)
