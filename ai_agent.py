@@ -192,18 +192,29 @@ class MafioAgent:
         return math.sqrt(total / count) if count > 0 else 1.0
 
     def _find_similar(self, sig: dict, n: int = 3) -> List[dict]:
-        """Return n completed signals most similar to sig by feature distance."""
-        candidates = [
-            s for s in self._history
-            if s.get("outcome", "active") != "active"
-            and s.get("max_gain_pct") is not None
-            and abs(s.get("max_gain_pct", 0)) >= 1.0   # exclude flat/zero-gain records
-            and s.get("sym") != sig.get("sym")   # exclude same coin
-        ]
+        """Return n completed signals most similar to sig by feature distance.
+        Prefers same exchange — Binance signals only match Binance history."""
+        sig_exchange = sig.get("exchange")
+
+        def _base_filter(s):
+            return (
+                s.get("outcome", "active") != "active"
+                and s.get("max_gain_pct") is not None
+                and abs(s.get("max_gain_pct", 0)) >= 1.0
+                and s.get("sym") != sig.get("sym")
+            )
+
+        # Try same-exchange pool first
+        if sig_exchange:
+            same_ex = [s for s in self._history if _base_filter(s) and s.get("exchange") == sig_exchange]
+            if len(same_ex) >= 1:
+                return sorted(same_ex, key=lambda s: self._distance(sig, s))[:n]
+
+        # Fallback: all exchanges (e.g. MEXC signal or empty same-exchange history)
+        candidates = [s for s in self._history if _base_filter(s)]
         if not candidates:
             return []
-        scored = sorted(candidates, key=lambda s: self._distance(sig, s))
-        return scored[:n]
+        return sorted(candidates, key=lambda s: self._distance(sig, s))[:n]
 
     def _similar_summary(self, similar: List[dict]) -> Tuple[float, str]:
         """
