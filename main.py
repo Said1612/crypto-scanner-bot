@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.64"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.65"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3164,6 +3164,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     _ls_block = score < 9.0 and pos24 > 0.80 and spike < 5.0
     if (_oi and _oi["long_crowded"] and not is_moonshot and _ls_block):
         _rej(f"ls_crowded_longs({_oi['ls_ratio']:.2f},pos={pos24*100:.0f}%)"); return
+
+    # Moonshot + Extreme Crowded Longs (L/S ≥ 4.0) → block regardless of OB.
+    # moonshot_ob_crowded catches OB<65% + crowded. This catches extreme L/S even with decent OB.
+    # Data: FIGHT max L/S=2.89 → +25% (highest winning). L/S≥4.0 is ~38% more crowded than FIGHT.
+    # At 4x longs vs shorts, any reversal triggers cascading liquidations — net/spike irrelevant.
+    if (_oi and is_moonshot and _oi.get("ls_ratio", 0) >= 4.0):
+        _rej(f"moonshot_extreme_ls(L/S={_oi['ls_ratio']:.2f})"); return
 
     # SL-hunt setup: crowded longs + OI exiting + price at top = stop-loss hunt risk.
     # Exception: strong net flow (score ≥ 7.5) or spike ≥ 5x — real buying overrides.
