@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.63"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.64"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2754,8 +2754,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     net_intensity = _net_1h / _hourly_vol if _hourly_vol > 0 else 0
 
     # Block signals where net flow is negligible vs coin size — won't explode fast
-    # Exempt: volume_explosion (spike≥10x always real) and moonshots (already strong)
-    if net_intensity < 0.05 and not volume_explosion and not is_moonshot:
+    # Exempt: volume_explosion (spike≥10x always real), moonshots, and momentum signals
+    # (momentum_bypass = coin already up 10%+ on 24h — trend is the signal, not 1h flow)
+    if net_intensity < 0.05 and not volume_explosion and not is_moonshot and not momentum_bypass:
         log.info("LOW_INTENSITY %s intensity=%.3fx net1h=%.0f$ vol_24h=%.0f$",
                  sym, net_intensity, _net_1h, vol_24h)
         _rej("low_intensity"); return
