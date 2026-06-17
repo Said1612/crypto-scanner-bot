@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.66"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.67"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -5847,7 +5847,8 @@ def main():
             global last_alpha
             if now - last_alpha >= ACCUM_SCAN_S:
                 last_alpha = now
-                scan_alpha_explosion(all_t)
+                # scan_alpha_explosion disabled — bot focuses on spot only
+                # scan_alpha_explosion(all_t)
                 _retroactive_peak_update()   # fix timeout records with true historical peak
 
             global last_sg
