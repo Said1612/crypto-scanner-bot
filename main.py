@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.65"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.66"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2754,9 +2754,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     net_intensity = _net_1h / _hourly_vol if _hourly_vol > 0 else 0
 
     # Block signals where net flow is negligible vs coin size — won't explode fast
-    # Exempt: volume_explosion (spike≥10x always real), moonshots, and momentum signals
-    # (momentum_bypass = coin already up 10%+ on 24h — trend is the signal, not 1h flow)
-    if net_intensity < 0.05 and not volume_explosion and not is_moonshot and not momentum_bypass:
+    # Exempt: volume_explosion (spike≥10x always real), moonshots, momentum signals,
+    # and sustained 24h trends (change>=10%) — distributed buying expected over many hours
+    _sustained_trend = ticker.get("change", 0) >= 10.0
+    if net_intensity < 0.05 and not volume_explosion and not is_moonshot and not momentum_bypass and not _sustained_trend:
         log.info("LOW_INTENSITY %s intensity=%.3fx net1h=%.0f$ vol_24h=%.0f$",
                  sym, net_intensity, _net_1h, vol_24h)
         _rej("low_intensity"); return
@@ -5470,8 +5471,9 @@ def scan_trend_gainer(all_t: dict):
 
     # Sort by 24h change descending — strongest trends first
     candidates.sort(key=lambda x: x[1].get("change", 0), reverse=True)
-    # Cap at 15 to avoid scanning entire top-gainer list every 10 min
-    candidates = candidates[:15]
+    # Cap at 25 — increased from 15 to catch large-cap sustained movers (ASTER/XPL type)
+    # that rank lower by % change but represent significant dollar moves
+    candidates = candidates[:25]
 
     fired = 0
     for sym, ticker in candidates:
