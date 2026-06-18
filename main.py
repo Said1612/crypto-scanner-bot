@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.68"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.69"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2401,6 +2401,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Sleeping giant (1m_sg): explosion from multi-week low → allow up to 300%
     # Regular Spot: raised 80%→150% — OPN-type moves (depressed coin explodes) are valid signals
     _is_alpha_coin = ticker.get("binance_alpha") or ticker.get("futures_only")
+    # Spot-only mode: block all Alpha and futures-only coins
+    if _is_alpha_coin:
+        _rej("alpha_blocked"); return
     _max_pump = 400.0 if _is_alpha_coin else (300.0 if interval == "1m_sg" else 150.0)
     h24, l24 = ticker["high24"], ticker["low24"]
     range_pump = (h24 - l24) / l24 * 100 if l24 > 0 else 0
