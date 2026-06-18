@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.67"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.68"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3022,10 +3022,12 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Data: DYM pos=64%, MTF bearish, Score=9.0 → SL in 37 minutes (no room + bearish structure).
     # Exception: net ≥ $500K (institutional flow can shift exhausted market structure).
     # Exception: moonshot (parabolic momentum operates differently).
+    # Exception: momentum_bypass (trend-gainer signals are DEFINED by high pos24 — that's the setup).
     if (_fva_result and pos24 > 0.60
             and _fva_result.get("macro_trend") == "bearish"
             and net < 500_000
-            and not is_moonshot):
+            and not is_moonshot
+            and not momentum_bypass):
         _rej(f"high_pos_bearish_mtf(pos={int(pos24*100)}%)"); return
     # 3-wave correction (corrective bounce ≠ impulse), or MTF bearish.
     # Combined with a post-adjustment score < 7.5, the risk/reward is poor.
