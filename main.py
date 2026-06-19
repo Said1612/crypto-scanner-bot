@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.70"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.71"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3220,10 +3220,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     _v_blocked = (_v_pts < 3.5) or (_v_pos <= _v_neg)
     # Moonshot bypass: pos >= neg required (bare minimum quality floor)
     _moonshot_ok = is_moonshot and _v_pos >= _v_neg
-    # volume_explosion bypass: spike ≥ 5x IS the quality evidence — lower pts threshold to 2.0
-    # ATM +5.42% in 3min barely passed at pts=3.5; real explosive moves should not be blocked here.
-    _vol_exp_ok = volume_explosion and _v_pts >= 2.0 and _v_pos > _v_neg
-    if _v_blocked and not _moonshot_ok and not _vol_exp_ok:
+    # volume_explosion bypass: spike ≥ 5x — still requires pts ≥ 3.5 (Moderate minimum).
+    # "High Risk" (pts < 3.5) signals are never sent regardless of volume.
+    if _v_blocked and not _moonshot_ok and not (volume_explosion and _v_pts >= 3.5 and _v_pos > _v_neg):
         _rej(f"verdict_weak({_v_pts:.1f},+{_v_pos:.1f}/-{_v_neg:.1f})"); return
     if is_moonshot:
         _v_label = f"🚀 *Moonshot* — Spike {spike:.0f}x"
