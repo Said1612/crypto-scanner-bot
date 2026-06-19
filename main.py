@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.69"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.70"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3035,8 +3035,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     # 3-wave correction (corrective bounce ≠ impulse), or MTF bearish.
     # Combined with a post-adjustment score < 7.5, the risk/reward is poor.
     #
-    # Moonshots bypass — they operate on different dynamics (parabolic momentum).
-    if _fva_result and not is_moonshot:
+    # Moonshots and volume_explosion bypass — spike IS the quality signal; fractal lags the move.
+    if _fva_result and not is_moonshot and not volume_explosion:
         _fcf_val = _fva_result["fcf"]
         if _fcf_val <= 0.75 and score < 7.5:
             _rej(f"fcf_structure({_fcf_val:.2f})"); return
@@ -3127,8 +3127,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Fractal Momentum Gate: negative Jy (bearish momentum) with Moderate/Weak fractal = doubt.
     # Strong fractal structure can sustain a brief Jy dip. Moderate cannot.
     # Data: ROBO (Moderate + Jy=-0.12 + res=+2.3%) → SL. Filtering saves subscribers from bad entry.
-    # Moonshot bypass: extreme spike overrides Jy — momentum driven by volume, not fractal flow.
-    if (_fra and not _is_explosive and not is_moonshot):
+    # Moonshot/volume_explosion bypass: spike IS the momentum signal — Jy lags explosive moves.
+    if (_fra and not _is_explosive and not is_moonshot and not volume_explosion):
         _fra_jy = _fra.get("jy") or 0.0
         _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
         if _fra_jy < -0.05 and not _fra_is_strong:
@@ -3220,7 +3220,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     _v_blocked = (_v_pts < 3.5) or (_v_pos <= _v_neg)
     # Moonshot bypass: pos >= neg required (bare minimum quality floor)
     _moonshot_ok = is_moonshot and _v_pos >= _v_neg
-    if _v_blocked and not _moonshot_ok and not (volume_explosion and _v_pts >= 3.5 and _v_pos > _v_neg):
+    # volume_explosion bypass: spike ≥ 5x IS the quality evidence — lower pts threshold to 2.0
+    # ATM +5.42% in 3min barely passed at pts=3.5; real explosive moves should not be blocked here.
+    _vol_exp_ok = volume_explosion and _v_pts >= 2.0 and _v_pos > _v_neg
+    if _v_blocked and not _moonshot_ok and not _vol_exp_ok:
         _rej(f"verdict_weak({_v_pts:.1f},+{_v_pos:.1f}/-{_v_neg:.1f})"); return
     if is_moonshot:
         _v_label = f"🚀 *Moonshot* — Spike {spike:.0f}x"
