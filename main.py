@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.74"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.75"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1164,15 +1164,17 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                          and "Weak" in (fra_verdict or "")
                          and prob < 50
                          and fra_res_pct < 2.0)
-        # Block condition 6: Moderate Signal + AI < 50% — doubtful signals must not reach subscribers.
+        # Block condition 6: Moderate Signal + AI weak — doubtful signals must not reach subscribers.
         # Strong Signals (≥5.0 pts) have sufficient flow quality to override AI uncertainty.
         # Moonshots bypass (spike is the quality signal). Only Moderate blocked when AI disagrees.
-        # Ratio bypass: ratio >= 3.5x = 78%+ buying pressure = real demand overrides AI doubt.
-        # Data: ALCH (ratio=3.9x, AI=45%, Moderate) → +15%. IN (ratio=2.7x, AI=45%) → SL.
+        # Ratio bypass: ratio >= 3.5x = real demand overrides AI doubt.
+        # Data: ALCH (ratio=3.9x, AI=45%, Moderate) → +15% (ratio≥3.5 = bypass → correct).
+        #        IN  (ratio=2.7x, AI=45%) → SL (ratio<3.5 → blocked → correct).
+        # Tightened: prob 50→52 (catches borderline signals with marginal AI confidence)
         moderate_ai_weak = (not is_moonshot
                             and verdict_pts is not None
                             and verdict_pts < 5.0
-                            and prob < 50
+                            and prob < 52
                             and ratio < 3.5)
         # Block condition 7: Moonshot + OB weak + Crowded Longs → long squeeze SL risk.
         # Spike drives entry but OB must confirm buyer depth. Crowded longs cascade on any reversal.
@@ -2618,14 +2620,29 @@ def _check(sym, ticker, interval, sector_boost=False):
     # because by the time _check() runs, [-1] is the next candle (just started = misleading)
     _wick_candle = candles[-2] if (interval == "1m_sg" and len(candles) >= 2) else candles[-1]
     try:
-        sc_rng = float(_wick_candle[2]) - float(_wick_candle[3])
-        sc_close_pct = (float(_wick_candle[4]) - float(_wick_candle[3])) / sc_rng if sc_rng > 0 else 0.5
+        _wc_o  = float(_wick_candle[1])
+        _wc_h  = float(_wick_candle[2])
+        _wc_l  = float(_wick_candle[3])
+        _wc_cl = float(_wick_candle[4])
+        sc_rng = _wc_h - _wc_l
+        sc_close_pct = (_wc_cl - _wc_l) / sc_rng if sc_rng > 0 else 0.5
+        _upper_wick_ratio = (_wc_h - max(_wc_o, _wc_cl)) / sc_rng if sc_rng > 0 else 0.0
     except Exception:
         sc_close_pct = 0.5
+        _upper_wick_ratio = 0.0
     # Bypass when price is actively rising — wick is temporary profit-taking, not distribution
     # SENT/MOVE pattern: previous candle bearish (downtrend), new candle exploding = real reversal
     if sc_close_pct < 0.50 and move < 2.0:
         _rej("dump_wick"); return
+    # Shooting star / upper wick rejection: spike happened but sellers immediately overwhelmed buyers.
+    # Upper wick > 60% of candle range = Shooting Star / Gravestone Doji = bearish reversal.
+    # Flash pump manipulation: price spikes on volume then closes near open = distribution into retail.
+    # Exempt: moonshots (spike IS the quality signal) + vol_explosion with strong close (real breakout)
+    if (_upper_wick_ratio > 0.60 and spike >= 5.0
+            and not is_moonshot
+            and not (volume_explosion and move >= 3.0)
+            and not momentum_bypass):
+        _rej(f"upper_wick_reject({_upper_wick_ratio:.0%})"); return
 
     # Wick distribution: 3+ candles with long upper wicks in last 5 = sellers distributing
     # (ROLL pattern: huge upper wicks = smart money offloading on retail buyers)
@@ -3195,6 +3212,14 @@ def _check(sym, ticker, interval, sector_boost=False):
             and spike < 5.0):
         _rej(f"sl_hunt_risk(L/S={_oi['ls_ratio']:.2f},OI={_oi['oi_delta_1h']:.1f}%,pos={pos24*100:.0f}%)"); return
 
+    # OI sharp exit: OI dropped > 8% in last hour while price in upper range = longs closing at peak.
+    # Smart money exits quietly via futures while price still looks good = distribution top.
+    # Exempt: moonshots (spike can override OI exit) + volume_explosion + momentum_bypass
+    if (_oi and not is_moonshot and not volume_explosion and not momentum_bypass
+            and _oi["oi_delta_1h"] < -8.0
+            and pos24 > 0.60):
+        _rej(f"oi_sharp_exit({_oi['oi_delta_1h']:.1f}%,pos={int(pos24*100)}%)"); return
+
     # OI score boost: expanding OI = institutional confirmation of the move.
     # Short squeeze setup = strongest configuration → extra boost.
     if _oi:
@@ -3231,6 +3256,12 @@ def _check(sym, ticker, interval, sector_boost=False):
     # "High Risk" (pts < 3.5) signals are never sent regardless of volume.
     if _v_blocked and not _moonshot_ok and not (volume_explosion and _v_pts >= 3.5 and _v_pos > _v_neg):
         _rej(f"verdict_weak({_v_pts:.1f},+{_v_pos:.1f}/-{_v_neg:.1f})"); return
+    # Double-mediocre gate: verdict barely passing + flow score mediocre = too much uncertainty.
+    # A signal that is "just enough" on every dimension is worse than one that excels on at least one.
+    # Exempt: volume_explosion (spike quality overrides), moonshots, momentum_bypass
+    if (_v_pts < 4.5 and score < 5.0
+            and not is_moonshot and not volume_explosion and not momentum_bypass):
+        _rej(f"verdict_score_weak(pts={_v_pts:.1f},score={score:.1f})"); return
     if is_moonshot:
         _v_label = f"🚀 *Moonshot* — Spike {spike:.0f}x"
     elif _v_pts >= 5.0:
