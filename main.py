@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.75"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.76"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3239,6 +3239,21 @@ def _check(sym, ticker, interval, sector_boost=False):
             _cq_result = _cq_integrate(candles, price, score, is_moonshot)
         except Exception as _cqe_disp:
             log.debug("CQ display error: %s", _cqe_disp)
+
+    # ── Late FCF Gate (post-display-path) ────────────────────────────────────
+    # _fva gate agent is disabled (_fva=None) to prevent score-silencing during explosive moves.
+    # But extreme FCF values from _fva_show (display) still indicate near-certain loss.
+    # These gates fire AFTER display path so FCF is available without re-enabling score changes.
+    #
+    # Moonshot: FCF ≤ 0.60 = always SL — data: WCT(0.57), HUMA(0.50), NAORIS(0.40) all lost.
+    # Volume explosion: FCF ≤ 0.42 = extreme structural breakdown — spike cannot save it.
+    if _fva_result:
+        _post_fcf = _fva_result.get("fcf", 1.0)
+        if is_moonshot and _post_fcf <= 0.60:
+            _rej(f"moonshot_fib_exhaust({_post_fcf:.2f})"); return
+        if (not is_moonshot and volume_explosion
+                and _post_fcf <= 0.42 and not momentum_bypass):
+            _rej(f"vol_explosion_fcf_extreme({_post_fcf:.2f})"); return
 
     # ── Entry Verdict — computed before building signal so it shows at top ──
     _fra_res = (_fra.get("resistance") if _fra else None)
