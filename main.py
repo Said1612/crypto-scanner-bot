@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.76"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.77"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -80,9 +80,10 @@ FAST_TICKER_MOVE = 0.3   # 5s price delta trigger — lowered 0.5→0.3 to catch
 # Mid cap    $15-80M: larger moves
 # Large cap  > $80M : hardest to move
 TIERS = [
-    # Micro: tiny liquidity — high ratio required (VINE 2.2x failed; 3.0 base → ~2.64 neutral)
-    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.8, "ratio": 2.5, "net": 5_000},
-    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.5, "ratio": 2.2, "net": 15_000},
+    # Micro: small liquidity — VINE 2.2x failed at pos69% but quality gates (OB/score/verdict) still protect.
+    # Wolf Flow sends at ~1.5x — we require 2.2x to keep quality floor while catching more moves.
+    {"name": "Micro",  "vol_max": 2_000_000,  "vol_min": 50_000,    "spike": 2.2, "ratio": 2.0, "net": 5_000},
+    {"name": "Small",  "vol_max": 15_000_000, "vol_min": 300_000,   "spike": 2.0, "ratio": 1.8, "net": 15_000},
     {"name": "Mid",    "vol_max": 80_000_000, "vol_min": 3_000_000, "spike": 2.2, "ratio": 2.0, "net": 60_000},
     {"name": "Large",  "vol_max": 9e99,        "vol_min": 15_000_000,"spike": 1.8, "ratio": 1.8, "net": 250_000},
 ]
@@ -3246,10 +3247,14 @@ def _check(sym, ticker, interval, sector_boost=False):
     # These gates fire AFTER display path so FCF is available without re-enabling score changes.
     #
     # Moonshot: FCF ≤ 0.60 = always SL — data: WCT(0.57), HUMA(0.50), NAORIS(0.40) all lost.
+    # Exception: extreme short squeeze (L/S < 0.45 = 2x more shorts) + spike ≥ 30x.
+    #   Forced short covering creates buying pressure that can overcome fractal weakness.
+    #   KITE example: L/S=0.34 + spike=104x + AI=87% = squeeze-driven moonshot.
     # Volume explosion: FCF ≤ 0.42 = extreme structural breakdown — spike cannot save it.
     if _fva_result:
         _post_fcf = _fva_result.get("fcf", 1.0)
-        if is_moonshot and _post_fcf <= 0.60:
+        _short_squeeze_moon = (_oi and _oi.get("ls_ratio", 1.0) < 0.45 and spike >= 30.0)
+        if is_moonshot and _post_fcf <= 0.60 and not _short_squeeze_moon:
             _rej(f"moonshot_fib_exhaust({_post_fcf:.2f})"); return
         if (not is_moonshot and volume_explosion
                 and _post_fcf <= 0.42 and not momentum_bypass):
@@ -3271,12 +3276,6 @@ def _check(sym, ticker, interval, sector_boost=False):
     # "High Risk" (pts < 3.5) signals are never sent regardless of volume.
     if _v_blocked and not _moonshot_ok and not (volume_explosion and _v_pts >= 3.5 and _v_pos > _v_neg):
         _rej(f"verdict_weak({_v_pts:.1f},+{_v_pos:.1f}/-{_v_neg:.1f})"); return
-    # Double-mediocre gate: verdict barely passing + flow score mediocre = too much uncertainty.
-    # A signal that is "just enough" on every dimension is worse than one that excels on at least one.
-    # Exempt: volume_explosion (spike quality overrides), moonshots, momentum_bypass
-    if (_v_pts < 4.5 and score < 5.0
-            and not is_moonshot and not volume_explosion and not momentum_bypass):
-        _rej(f"verdict_score_weak(pts={_v_pts:.1f},score={score:.1f})"); return
     if is_moonshot:
         _v_label = f"🚀 *Moonshot* — Spike {spike:.0f}x"
     elif _v_pts >= 5.0:
@@ -3894,7 +3893,7 @@ def fast_scan(all_t):
     prev_prices = {sym: t["price"] for sym, t in all_t.items()}
     if not movers: return
     movers.sort(key=lambda x: -x[1])
-    for sym, _, ticker in movers[:50]:
+    for sym, _, ticker in movers[:100]:
         _check(sym, ticker, "1m")   # 1m klines: candle completes every 60s → spike visible immediately
         time.sleep(0.05)
 
@@ -3961,8 +3960,8 @@ def slow_scan(all_t):
                     or t.get("binance_alpha")   # Alpha tokens bypass pump_limit — listing-day pumps reach 200-400%
                     or t.get("futures_only")    # Pre-listing futures-only also bypass
                 )]
-        by_vol = sorted(elig, key=lambda x: -x[1]["vol"])[:200]
-        by_chg = sorted(elig, key=lambda x: -x[1]["change"])[:200]
+        by_vol = sorted(elig, key=lambda x: -x[1]["vol"])[:400]
+        by_chg = sorted(elig, key=lambda x: -x[1]["change"])[:300]
         seen, out = set(), []
         for item in by_vol + by_chg:
             if item[0] not in seen:
