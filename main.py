@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.73"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.74"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2584,7 +2584,8 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Alpha coins accumulate with subtler spikes (1.2x) vs regular coins (1.5x)
     _sector_mom_spike_thr = 1.2 if _is_alpha_coin else 1.5
     _sector_mom = _sector_mom_pre and spike >= _sector_mom_spike_thr
-    if move < move_min and not _sector_mom: _rej(f"low_move({move:.1f}%)"); return
+    # momentum_bypass: 1h candle may be small (0.3-0.8%) while 24h trend is +20-30%
+    if move < move_min and not _sector_mom and not momentum_bypass: _rej(f"low_move({move:.1f}%)"); return
 
     # ── Volume-adjusted ratio: ILV pattern — big spike + lower ratio at breakout start ──
     # High spike (≥5x) = institutional volume → accept lower ratio (early accumulation)
@@ -2605,8 +2606,10 @@ def _check(sym, ticker, interval, sector_boost=False):
                                             minutes=60 if interval in ("60m", "1h") else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
     super_ratio = _pre_ratio >= 20.0
-    # momentum_bypass (trend_follow): accept 1.3x spike — sustained trend, not explosive
-    effective_spike_min = 1.3 if momentum_bypass else (1.5 if super_ratio else spike_min)
+    # momentum_bypass (trend_follow): scan_trend_gainer validates volume its own way
+    # (vol_ratio over 3h) — no additional spike requirement needed.
+    # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
+    effective_spike_min = 0.0 if momentum_bypass else (1.5 if super_ratio else spike_min)
     if spike < effective_spike_min:
         _rej("low_spike"); return
 
