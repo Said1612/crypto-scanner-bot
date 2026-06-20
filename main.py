@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.78"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.79"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2635,15 +2635,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # SENT/MOVE pattern: previous candle bearish (downtrend), new candle exploding = real reversal
     if sc_close_pct < 0.50 and move < 2.0:
         _rej("dump_wick"); return
-    # Shooting star / upper wick rejection: spike happened but sellers immediately overwhelmed buyers.
-    # Upper wick > 60% of candle range = Shooting Star / Gravestone Doji = bearish reversal.
-    # Flash pump manipulation: price spikes on volume then closes near open = distribution into retail.
-    # Exempt: moonshots (spike IS the quality signal) + vol_explosion with strong close (real breakout)
-    if (_upper_wick_ratio > 0.60 and spike >= 5.0
-            and not is_moonshot
-            and not (volume_explosion and move >= 3.0)
-            and not momentum_bypass):
-        _rej(f"upper_wick_reject({_upper_wick_ratio:.0%})"); return
+    # upper_wick_reject check is deferred below (after is_moonshot and volume_explosion are defined)
 
     # Wick distribution: 3+ candles with long upper wicks in last 5 = sellers distributing
     # (ROLL pattern: huge upper wicks = smart money offloading on retail buyers)
@@ -2771,6 +2763,16 @@ def _check(sym, ticker, interval, sector_boost=False):
     # that have real volume but fail strict ob/quality gates. Most winning signals are 2-6x spike.
     # Sleeping Giant bypass: pos24 is misleading for flat coins with tiny daily range.
     volume_explosion = (spike >= 5.0 and (pos24 < 0.82 or interval == "1m_sg") and net > _abs_net_floor)
+
+    # Shooting star / upper wick rejection (deferred: needs is_moonshot + volume_explosion)
+    # Upper wick > 60% of candle range = Shooting Star / Gravestone Doji = bearish reversal.
+    # Flash pump manipulation: price spikes on volume then closes near open = distribution into retail.
+    # Exempt: moonshots (spike IS the quality signal) + vol_explosion with strong close (real breakout)
+    if (_upper_wick_ratio > 0.60 and spike >= 5.0
+            and not is_moonshot
+            and not (volume_explosion and move >= 3.0)
+            and not momentum_bypass):
+        _rej(f"upper_wick_reject({_upper_wick_ratio:.0%})"); return
 
     # ── Net Flow Intensity: net relative to coin size ────────────────────
     # Problem: same $20K net flow means nothing on QNT ($20M/day) but is huge on XNY ($650K/day)
