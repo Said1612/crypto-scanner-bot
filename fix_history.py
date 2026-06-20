@@ -3,13 +3,19 @@
 fix_history.py — إصلاح max_gain_pct للإشارات التي أُغلقت قبل الوصول للقمة الحقيقية.
 
 المشكل: SIGNAL_TIMEOUT_H كان 8h → إشارات تُغلق قبل القمة الفعلية.
-العملات تختلف في توقيت الانفجار: 1 يوم، 10 أيام، 15، 20، 25 يوم.
-لا يوجد توقيت ثابت — لذلك نستخدم 30 يوماً كحد أقصى (720h).
+كذلك: إشارات stoploss تُسجَّل بـ max_gain منخفض (لحظة الضغط)
+        لكن الكوين يواصل الصعود بعد الـ SL.
 
 الحل: جلب klines من Binance/MEXC لـ 30 يوم بعد كل إشارة وتحديث max_gain_pct.
-30 يوم = 720 ساعة — ضمن حد Binance (1000 kline) في طلب واحد.
+      إذا كان max_gain >= 5% نحوّل outcome من stoploss → stoploss_recovered.
 
-تشغيل: python3 fix_history.py [--dry-run] [--sym BANANAS31] [--days 30]
+تشغيل:
+  python3 fix_history.py                          # فحص وإصلاح كل الإشارات
+  python3 fix_history.py BANANAS31USDT            # إشارات عملة محددة (positional)
+  python3 fix_history.py --sym BANANAS31USDT      # نفس الشيء بـ flag
+  python3 fix_history.py --dry-run                # عرض فقط بدون تعديل
+  python3 fix_history.py --days 7                 # تغيير نافذة البحث
+  python3 fix_history.py --clean                  # حذف السجلات بلا بيانات
 """
 import json, os, time, argparse, requests
 from datetime import datetime, timezone
@@ -39,10 +45,8 @@ def _parse_klines(klines):
     """استخرج قائمة الـ highs من أي تنسيق klines (Binance أو MEXC)."""
     if not klines or not isinstance(klines, list):
         return []
-    # تنسيق قائمة: [[openTime, open, high, ...], ...]
     if isinstance(klines[0], list):
         return [float(k[2]) for k in klines if len(k) > 2]
-    # تنسيق dict: [{"o": ..., "h": ..., ...}, ...]
     if isinstance(klines[0], dict):
         for hkey in ("h", "high", "highPrice"):
             vals = [float(k[hkey]) for k in klines if hkey in k]
@@ -59,17 +63,12 @@ def fetch_peak(sym, entry_ts, entry_price, exchange="Binance"):
 
     is_mexc  = "mexc" in (exchange or "").lower()
 
-    # قائمة الـ endpoints المرتبة حسب الأولوية
     candidates = []
     if is_mexc:
-        # MEXC spot — endpoint رسمي
         candidates.append(f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}")
-        # MEXC بدون startTime (بعض الإصدارات لا تدعمه)
         candidates.append(f"{MEXC}/klines?symbol={sym}&interval=1h&limit={limit}")
-    # Binance دائماً كـ fallback (بعض MEXC coins موجودة على Binance أيضاً)
     candidates.append(f"{BINANCE}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}")
     if not is_mexc:
-        # MEXC كـ fallback لـ Binance coins
         candidates.append(f"{MEXC}/klines?symbol={sym}&interval=1h&startTime={start_ms}&endTime={end_ms}&limit={limit}")
 
     for url in candidates:
@@ -87,31 +86,42 @@ def fetch_peak(sym, entry_ts, entry_price, exchange="Binance"):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="إصلاح max_gain_pct في signal_history.json",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    # قبول اسم العملة كـ positional argument أو كـ --sym
+    parser.add_argument("sym_positional", nargs="?", default=None,
+                        metavar="SYM", help="اسم العملة (مثال: BANANAS31USDT أو BANANAS31)")
+    parser.add_argument("--sym",      type=str, default=None, help="اسم العملة (بديل)")
     parser.add_argument("--dry-run",  action="store_true", help="عرض فقط بدون تعديل")
-    parser.add_argument("--sym",      type=str, default=None, help="صحح عملة محددة فقط")
     parser.add_argument("--days",     type=int, default=30,
                         help="نافذة البحث بالأيام (افتراضي: 30)")
     parser.add_argument("--min-gain", type=float, default=0.0,
                         help="صحح فقط إذا القمة الحقيقية > هذه القيمة")
     parser.add_argument("--clean",    action="store_true",
-                        help="احذف السجلات التي لا بيانات لها + max_gain=0 (عملات محذوفة أو MEXC قديمة)")
+                        help="احذف السجلات التي لا بيانات لها + max_gain=0")
     args = parser.parse_args()
+
+    # دعم positional أو --sym (positional له الأولوية)
+    sym_filter = args.sym_positional or args.sym
+
     global LOOK_AHEAD_H
     LOOK_AHEAD_H = args.days * 24
 
     db    = load_db()
     now   = time.time()
     fixed   = 0
+    sl_recovered = 0
     deleted = 0
     total   = 0
-    # نسخة نظيفة تُبنى تدريجياً عند --clean
     clean_db = []
 
     print(f"\n{'═'*60}")
-    print(f"  fix_history.py — إصلاح max_gain_pct")
+    print(f"  fix_history.py — إصلاح max_gain_pct + stoploss_recovered")
     print(f"  إجمالي السجلات: {len(db)}")
-    print(f"  نافذة البحث: {LOOK_AHEAD_H}h بعد كل إشارة")
+    print(f"  نافذة البحث: {LOOK_AHEAD_H}h ({args.days} يوم) بعد كل إشارة")
+    if sym_filter:   print(f"  فلتر العملة: {sym_filter}")
     if args.dry_run: print("  ⚠️  DRY RUN — لن يتم التعديل")
     if args.clean:   print("  🧹 --clean: حذف السجلات بلا بيانات و max_gain=0")
     print(f"{'═'*60}\n")
@@ -125,14 +135,21 @@ def main():
         exchange    = rec.get("exchange", "Binance")
 
         if not entry_ts or not entry_price:
-            if args.clean: continue   # لا بيانات أساسية → احذف
+            if args.clean: continue
             continue
-        if args.sym and sym.replace("USDT","") != args.sym.replace("USDT",""):
-            if args.clean: clean_db.append(rec)
-            continue
+
+        # فلتر العملة — يقبل BANANAS31 أو BANANAS31USDT
+        if sym_filter:
+            sym_clean    = sym.upper().replace("USDT", "")
+            filter_clean = sym_filter.upper().replace("USDT", "")
+            if sym_clean != filter_clean:
+                if args.clean: clean_db.append(rec)
+                continue
+
         if outcome == "active":
             if args.clean: clean_db.append(rec)
             continue
+
         age_h = (now - entry_ts) / 3600
         if age_h < LOOK_AHEAD_H + 1:
             if args.clean: clean_db.append(rec)
@@ -140,46 +157,66 @@ def main():
 
         total += 1
         exch_tag = "M" if ("mexc" in (exchange or "").lower()) else "B"
-        print(f"  [{i}][{exch_tag}] {sym:<14} old={old_gain:+.1f}%  outcome={outcome}  ", end="", flush=True)
+        print(f"  [{i}][{exch_tag}] {sym:<16} old={old_gain:+.1f}%  outcome={outcome:<18}", end="", flush=True)
 
         real_gain = fetch_peak(sym, entry_ts, entry_price, exchange=exchange)
         time.sleep(0.25)
 
         if real_gain is None:
-            # لا بيانات: إذا max_gain=0 أيضاً → هذا السجل عديم الفائدة
             if args.clean and old_gain <= 0.0:
                 print("🗑️  حُذف (لا بيانات + gain=0)")
                 deleted += 1
-                # لا نضيف للـ clean_db
             else:
                 print("⚠️ لا بيانات — محتفظ به")
                 if args.clean: clean_db.append(rec)
             continue
 
-        # بيانات متاحة: حدّث إذا لزم
+        updated = False
+
+        # ── تحديث max_gain_pct إذا كانت القمة الحقيقية أعلى ──────────────
         if real_gain > old_gain + 0.5 and real_gain >= args.min_gain:
-            print(f"→ FIX {real_gain:+.1f}%  (كان {old_gain:+.1f}%)")
-            fixed += 1
             if not args.dry_run:
                 rec["max_gain_pct"] = real_gain
-                if outcome == "timeout" and real_gain >= 5.0:
-                    rec["outcome"] = "win"
+            fixed += 1
+            updated = True
+
+        # ── تحديث outcome ─────────────────────────────────────────────────
+        new_outcome = outcome
+        if outcome == "timeout" and real_gain >= 5.0:
+            # timeout مع قمة حقيقية ≥ 5% → win
+            new_outcome = "win"
+        elif outcome == "stoploss" and real_gain >= 5.0:
+            # stoploss لكن الكوين صعد في النهاية → stoploss_recovered
+            # يعني الاتجاه كان صحيحاً لكن SL ضيق أو تذبذب مؤقت
+            new_outcome = "stoploss_recovered"
+            sl_recovered += 1
+
+        if new_outcome != outcome:
+            if not args.dry_run:
+                rec["outcome"] = new_outcome
+            updated = True
+
+        # ── طباعة النتيجة ─────────────────────────────────────────────────
+        if updated:
+            change_str = f"gain: {old_gain:+.1f}% → {real_gain:+.1f}%"
+            if new_outcome != outcome:
+                change_str += f"  |  outcome: {outcome} → {new_outcome}"
+            print(f"→ FIX  {change_str}")
         else:
-            print(f"ok ({real_gain:+.1f}% حقيقي)")
+            print(f"ok  ({real_gain:+.1f}% حقيقي — لا تغيير)")
 
         if args.clean: clean_db.append(rec)
 
     print(f"\n{'─'*60}")
-    print(f"  فحص: {total}  |  إصلاح: {fixed}  |  محذوف: {deleted}")
+    print(f"  فحص: {total}  |  gain محدَّث: {fixed}  |  stoploss_recovered: {sl_recovered}  |  محذوف: {deleted}")
 
     if not args.dry_run:
         final_db = clean_db if args.clean else db
-        if fixed > 0 or (args.clean and deleted > 0):
+        if fixed > 0 or sl_recovered > 0 or (args.clean and deleted > 0):
             save_db(final_db)
-            if args.clean:
-                print(f"  ✅ signal_history.json — بقي {len(final_db)} سجل (حُذف {deleted})")
-            else:
-                print(f"  ✅ signal_history.json محدَّث ({fixed} سجل)")
+            print(f"  ✅ signal_history.json محدَّث")
+        else:
+            print(f"  ℹ️  لا تغييرات")
     else:
         print(f"  ℹ️  DRY RUN — شغّل بدون --dry-run للتعديل الفعلي")
     print(f"{'═'*60}\n")
