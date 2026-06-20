@@ -182,12 +182,11 @@ def main():
 
         # ── تحديث outcome ─────────────────────────────────────────────────
         new_outcome = outcome
-        if outcome == "timeout" and real_gain >= 5.0:
-            # timeout مع قمة حقيقية ≥ 5% → win
+        if outcome in ("timeout", "unknown") and real_gain >= 5.0:
+            # timeout/unknown مع قمة حقيقية ≥ 5% → win
             new_outcome = "win"
         elif outcome == "stoploss" and real_gain >= 5.0:
             # stoploss لكن الكوين صعد في النهاية → stoploss_recovered
-            # يعني الاتجاه كان صحيحاً لكن SL ضيق أو تذبذب مؤقت
             new_outcome = "stoploss_recovered"
             sl_recovered += 1
 
