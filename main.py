@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.72"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.73"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -511,7 +511,8 @@ def _save_signal_db():
 
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding,
-            fractal_score=None, h_value=None, oi_delta=None, fra=None):
+            fractal_score=None, h_value=None, oi_delta=None, fra=None,
+            is_alpha=False):
     """Record a new signal with all parameters for future ML training."""
     _fra_d = fra or {}
     _signal_db.append({
@@ -523,6 +524,7 @@ def _db_add(sym, price, exchange, tier_name, scanner,
         "exchange":     exchange,
         "tier":         tier_name,
         "scanner":      scanner,        # main / supertrend / accum
+        "is_alpha":     is_alpha,       # True = Binance Alpha token (different dynamics)
         "market_bias":  market_bias,
         # Signal metrics (features for ML)
         "price_entry":  price,
@@ -1115,7 +1117,7 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                fractal_score=None, h_value=None, oi_delta=None,
                min_prob=0, crowded_longs=False,
                is_moonshot=False, fra_verdict=None, fra_res_pct=999.0,
-               verdict_pts=None) -> tuple:
+               verdict_pts=None, is_alpha=False) -> tuple:
     """Return (ai_text, blocked). blocked=True when AI is bearish + confirming danger pattern.
     min_prob: if set, also blocks when AI probability is below this threshold.
     crowded_longs: if True, blocks when AI < 50% (long squeeze risk).
@@ -1129,6 +1131,7 @@ def _ai_assess(sym, exchange, tier, scanner, score,
             "scanner": scanner, "score": score, "ob_spot": ob_spot,
             "ratio": ratio, "pos24": pos24, "spike": spike,
             "net_usd": net_usd, "move_pct": move_pct, "funding": funding,
+            "is_alpha": is_alpha,
         }
         if fractal_score is not None:
             sig["fractal_score"] = fractal_score
@@ -3258,7 +3261,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                                     is_moonshot=is_moonshot,
                                     fra_verdict=(_fra.get("verdict") if _fra else None),
                                     fra_res_pct=_fra_res_pct,
-                                    verdict_pts=_v_pts)
+                                    verdict_pts=_v_pts,
+                                    is_alpha=_is_alpha_coin)
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
@@ -3358,7 +3362,8 @@ def _check(sym, ticker, interval, sector_boost=False):
             fractal_score=_fractal_score,
             h_value=(_cq_result["H"] if _cq_result else None),
             oi_delta=(_oi["oi_delta_1h"] if _oi else None),
-            fra=_fra)
+            fra=_fra,
+            is_alpha=_is_alpha_coin)
     # Record fractal snapshot for self-learning
     if _fractal_agent is not None and _fra and _fra.get("_features"):
         _fractal_agent.record_signal(sym, _fra["_features"])

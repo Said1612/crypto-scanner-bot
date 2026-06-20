@@ -195,8 +195,10 @@ class MafioAgent:
     def _find_similar(self, sig: dict, n: int = 3) -> List[dict]:
         """Return n completed signals most similar to sig by feature distance.
         Prefers same exchange — Binance signals only match Binance history.
+        Separates Spot vs Alpha — Alpha history only matches Alpha signals.
         Deduplicates by sym — only the closest signal per coin is kept."""
         sig_exchange = sig.get("exchange")
+        sig_is_alpha = sig.get("is_alpha", False)
 
         def _base_filter(s):
             return (
@@ -205,6 +207,10 @@ class MafioAgent:
                 and abs(s.get("max_gain_pct", 0)) >= 1.0
                 and s.get("sym") != sig.get("sym")
             )
+
+        def _alpha_match(s):
+            """Spot signals compare only with Spot history, Alpha with Alpha."""
+            return s.get("is_alpha", False) == sig_is_alpha
 
         def _dedup_by_sym(ranked: list) -> list:
             """Keep only the closest (first) entry per sym."""
@@ -217,15 +223,18 @@ class MafioAgent:
                     result.append(s)
             return result
 
-        # Try same-exchange pool first
+        # Try same-exchange + same-type pool first
         if sig_exchange:
-            same_ex = [s for s in self._history if _base_filter(s) and s.get("exchange") == sig_exchange]
+            same_ex = [s for s in self._history if _base_filter(s) and s.get("exchange") == sig_exchange and _alpha_match(s)]
             if len(same_ex) >= 1:
                 ranked = sorted(same_ex, key=lambda s: self._distance(sig, s))
                 return _dedup_by_sym(ranked)[:n]
 
-        # Fallback: all exchanges (e.g. MEXC signal or empty same-exchange history)
-        candidates = [s for s in self._history if _base_filter(s)]
+        # Fallback: all exchanges, same type (e.g. MEXC signal or empty same-exchange history)
+        candidates = [s for s in self._history if _base_filter(s) and _alpha_match(s)]
+        if not candidates:
+            # Last resort: ignore type separation
+            candidates = [s for s in self._history if _base_filter(s)]
         if not candidates:
             return []
         ranked = sorted(candidates, key=lambda s: self._distance(sig, s))
