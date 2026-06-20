@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.77"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.78"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -250,8 +250,8 @@ last_bias_log = 0.0
 ACCUM_SCAN_S      = 300    # every 5 min
 WEEKLY_SWING_S    = 300    # every 5 min
 DEEP_VALUE_S      = 300    # every 5 min
-TREND_GAINER_S    = 600    # every 10 min
-QUIET_BUILDUP_S   = 1200   # every 20 min
+TREND_GAINER_S    = 300    # every 5 min — lowered from 10 to catch early movers faster
+QUIET_BUILDUP_S   = 600    # every 10 min — lowered from 20 to detect buildup earlier
 last_report        = 0.0   # last daily report sent (unix ts)
 last_report_date   = ""    # "YYYY-MM-DD" — ensures exactly one report per calendar day
 _last_report_time  = 0.0   # cooldown: prevents duplicate /report within 120s
@@ -5522,8 +5522,8 @@ def scan_trend_gainer(all_t: dict):
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t.get("exchange") == "Binance"
-        and t.get("vol", 0) >= 5_000_000
-        and t.get("change", 0) >= 10.0
+        and t.get("vol", 0) >= 2_000_000    # lowered 5M→2M: catch smaller coins (BICO type)
+        and t.get("change", 0) >= 5.0       # lowered 10%→5%: Wolf Flow sends at 4-6% change
         and sym not in tracking
         and now - _trend_gainer_dedup.get(sym, 0) >= COOLDOWN_TG
         and now - alerted.get(sym, 0) >= COOLDOWN
@@ -5532,9 +5532,8 @@ def scan_trend_gainer(all_t: dict):
 
     # Sort by 24h change descending — strongest trends first
     candidates.sort(key=lambda x: x[1].get("change", 0), reverse=True)
-    # Cap at 25 — increased from 15 to catch large-cap sustained movers (ASTER/XPL type)
-    # that rank lower by % change but represent significant dollar moves
-    candidates = candidates[:25]
+    # Increased 25→60: more coverage at lower change thresholds (5% brings many more candidates)
+    candidates = candidates[:60]
 
     fired = 0
     for sym, ticker in candidates:
@@ -5628,15 +5627,15 @@ def scan_quiet_buildup(all_t: dict):
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t.get("exchange") == "Binance"
-        and t.get("vol", 0) >= 3_000_000
-        and -3.0 <= t.get("change", 0) <= 12.0
+        and t.get("vol", 0) >= 1_500_000   # lowered 3M→1.5M: catch smaller coins before they explode
+        and -3.0 <= t.get("change", 0) <= 15.0  # extended upper 12%→15%: scan_trend_gainer overlaps here
         and sym not in tracking
         and now - _quiet_buildup_dedup.get(sym, 0) >= COOLDOWN_QB
         and now - alerted.get(sym, 0) >= COOLDOWN
         and sym.replace("USDT", "") not in BLACKLIST
     ]
     candidates.sort(key=lambda x: x[1].get("change", 0), reverse=True)
-    candidates = candidates[:20]
+    candidates = candidates[:50]  # increased 20→50 for broader early coverage
 
     fired = 0
     for sym, ticker in candidates:
