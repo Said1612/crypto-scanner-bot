@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.82"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.83"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2989,11 +2989,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     _sector_path   = (sector_boost and net > 0
                       and ob_spot >= 0.55 and ratio >= 1.5)
     # Absolute floor — only pure noise signals (score < 4.0) with no flow backup are blocked.
-    if score < 4.0 and not is_moonshot and not volume_explosion and not _strong_signal and not _huge_flow:
+    # momentum_bypass exempted: trend coins have score 3-4 at 3% change (spike 2-3x = low
+    # spike_pts). Quality is validated by scan_trend_gainer 1h candle analysis instead.
+    if score < 4.0 and not is_moonshot and not volume_explosion and not momentum_bypass and not _strong_signal and not _huge_flow:
         _rej("quality_fail"); return
     # Good score = 5.5+ on 0-8 scale (calibrated for pos24-neutral formula)
     _good_score = score >= 5.5
-    if not (_good_score or _strong_signal or _huge_flow or _sector_path):
+    if not (_good_score or _strong_signal or _huge_flow or _sector_path or momentum_bypass):
         if not is_moonshot and not volume_explosion:
             _rej("quality_fail"); return
 
@@ -3160,11 +3162,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Data: ROBO (Moderate + Jy=-0.12 + res=+2.3%) → SL. Filtering saves subscribers from bad entry.
     # Moonshot/_is_explosive (≥30x) bypass: spike IS the momentum signal — Jy lags explosive moves.
     # volume_explosion (5-30x): tolerate mild Jy dip (≥ -0.10). Strong reversal (< -0.10) blocks.
-    # Data: DOLO (Jy=-0.15, vol_exp=True, Moderate Fractal) → failed setup → tighter threshold.
+    # momentum_bypass (trend coins at 3-10% change): minor Jy dip (≥ -0.08) is normal consolidation.
+    #   scan_trend_gainer verifies 1h candles are bullish — Jy at -0.06 doesn't contradict that.
+    # Data: DOLO (Jy=-0.15, vol_exp=True) → blocked at -0.10 threshold ✅
     if (_fra and not _is_explosive and not is_moonshot):
         _fra_jy = _fra.get("jy") or 0.0
         _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
-        _jy_threshold = -0.10 if volume_explosion else -0.05
+        _jy_threshold = -0.10 if volume_explosion else (-0.08 if momentum_bypass else -0.05)
         if _fra_jy < _jy_threshold and not _fra_is_strong:
             _rej(f"fractal_jy_bearish(jy={_fra_jy:.3f})"); return
 
@@ -3188,14 +3192,20 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Tier 2 — Moderate Gate (FS 5.0-6.9): requires score ≥ 7.5 OR explosive spike.
     # 30x+ vol bypasses: a coin with 30x spike and FS=6 is a real move.
-    if _fractal_score < 7.0 and score < 7.5 and not _is_explosive:
+    # momentum_bypass exemption: scan_trend_gainer already verified 1h candle quality
+    # (2/3 bullish candles, volume sustained ≥ 80% avg, crash < 20% from high).
+    # At early 3% change, flow score is naturally low (spike 2-3x) — fractal Tier 2
+    # would block all early trend coins if momentum_bypass is not exempted.
+    if _fractal_score < 7.0 and score < 7.5 and not _is_explosive and not momentum_bypass:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     # ── Open Interest Gate ────────────────────────────────────────────────
     # OI contracting + price rising = short squeeze (shorts forced to close = bullish).
     # Only block weak signals — strong flow (score ≥ 6.5) overrides OI contraction.
+    # momentum_bypass: early trend coins often show mild OI contraction as early longs
+    # take profits at 3-5% — this is normal consolidation, not distribution top.
     if (_oi and _oi["contracting"] and not is_moonshot and not volume_explosion
-            and score < 6.5):
+            and not momentum_bypass and score < 6.5):
         _rej(f"oi_contracting({_oi['oi_delta_1h']:.1f}%)"); return
 
     # L/S crowded longs = liquidation cascade risk, but only when BOTH conditions true:
