@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.79"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.80"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3271,7 +3271,12 @@ def _check(sym, ticker, interval, sector_boost=False):
                                              (_fva_result["fcf"] if _fva_result else None),
                                              bool(_oi and _oi.get("long_crowded")), net, net_min,
                                              res_pct=_fra_res_pct)
-    _v_blocked = (_v_pts < 3.5) or (_v_pos <= _v_neg)
+    # Strong-only policy: only send signals with pts ≥ 5.0 (Strong).
+    # Exceptions: volume_explosion (spike ≥ 5x is quality confirmation) and
+    # momentum_bypass (trend quality confirmed by trend_gainer/quiet_buildup scanners).
+    # These two exceptions still require pts ≥ 3.5 to avoid garbage flow.
+    _v_min = 3.5 if (volume_explosion or momentum_bypass) else 5.0
+    _v_blocked = (_v_pts < _v_min) or (_v_pos <= _v_neg)
     # Moonshot bypass: pos >= neg required (bare minimum quality floor)
     _moonshot_ok = is_moonshot and _v_pos >= _v_neg
     # volume_explosion bypass: spike ≥ 5x — still requires pts ≥ 3.5 (Moderate minimum).
@@ -4704,18 +4709,13 @@ def scan_alpha_explosion(all_t: dict):
 
         # Signal condition: volume surging NOW + early in the move (not already +40%)
         # Requires vol_surge baseline — first scan gets no signal, waits 5 min for next cycle
-        _explosion = (vol_surge >= 2.5 and chg >= 5.0 and chg <= 40.0 and vol >= 50_000)
+        # Strong-only policy: vol_surge ≥ 5.0 required (Moderate/Early filtered out)
+        _explosion = (vol_surge >= 5.0 and chg >= 5.0 and chg <= 40.0 and vol >= 50_000)
 
         if not _explosion:
             continue
 
-        # Verdict based on surge strength
-        if vol_surge >= 5.0:
-            _alpha_verdict = "🟢 *Strong Signal* ✅"
-        elif vol_surge >= 3.0:
-            _alpha_verdict = "🟡 *Moderate Signal* ⚠️"
-        else:
-            _alpha_verdict = "🟡 *Early Move — Watch Closely* ⚠️"
+        _alpha_verdict = "🟢 *Strong Signal* ✅"
 
         # Simple TP/SL for Alpha (no klines, use fixed %%)
         _tp1 = price * 1.08
