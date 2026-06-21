@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.84"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.85"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3288,11 +3288,15 @@ def _check(sym, ticker, interval, sector_boost=False):
                                              (_fva_result["fcf"] if _fva_result else None),
                                              bool(_oi and _oi.get("long_crowded")), net, net_min,
                                              res_pct=_fra_res_pct)
-    # Strong-only policy: all signals need pts ≥ 5.0 (Strong label).
-    # Exception: volume_explosion (spike ≥ 5x is independent quality proof — pts ≥ 3.5 ok).
-    # momentum_bypass gets intermediate gate bypasses (fractal_tier2, oi_contracting, etc.)
-    # but the final verdict still requires pts ≥ 5.0. Bypass = fair evaluation, not free pass.
-    _v_min = 3.5 if volume_explosion else 5.0
+    # Strong-only policy: regular signals need pts ≥ 5.0 (Strong label).
+    # volume_explosion: spike ≥ 5x is quality proof → 3.5 minimum.
+    # momentum_bypass: intermediate gates bypassed (fractal_tier2, oi_contracting, etc.)
+    #   but spike ≥ 0.8x required. pts floor = 4.0:
+    #   - blocks IO-type (pts=3.5, spike=0.2x) ✅
+    #   - allows solid trend coin at 3% change (pts≈4.5, spike≈1.5x) ✅
+    #   - score ≥ 5.0 required for score contribution to pts; at 3% change score≈4.5
+    #     so pts builds from ratio+OB+net+H+fcf+pos24 alone (needs clean metrics)
+    _v_min = 3.5 if volume_explosion else (4.0 if momentum_bypass else 5.0)
     _v_blocked = (_v_pts < _v_min) or (_v_pos <= _v_neg)
     # Moonshot bypass: pos >= neg required (bare minimum quality floor)
     _moonshot_ok = is_moonshot and _v_pos >= _v_neg
