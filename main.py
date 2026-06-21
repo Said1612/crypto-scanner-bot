@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.80"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.81"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1165,30 +1165,28 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                          and "Weak" in (fra_verdict or "")
                          and prob < 50
                          and fra_res_pct < 2.0)
-        # Block condition 6: Moderate Signal + AI weak — doubtful signals must not reach subscribers.
-        # Strong Signals (≥5.0 pts) have sufficient flow quality to override AI uncertainty.
-        # Moonshots bypass (spike is the quality signal). Only Moderate blocked when AI disagrees.
-        # Ratio bypass: ratio >= 3.5x = real demand overrides AI doubt.
-        # Data: ALCH (ratio=3.9x, AI=45%, Moderate) → +15% (ratio≥3.5 = bypass → correct).
-        #        IN  (ratio=2.7x, AI=45%) → SL (ratio<3.5 → blocked → correct).
-        # Tightened: prob 50→52 (catches borderline signals with marginal AI confidence)
-        moderate_ai_weak = (not is_moonshot
-                            and verdict_pts is not None
-                            and verdict_pts < 5.0
-                            and prob < 52
-                            and ratio < 3.5)
+        # Block condition 6: Strong Signal + AI strongly disagrees (< 45%) = conflicting signals.
+        # With strong-only policy (pts ≥ 5.0), Moderate signals are blocked at verdict level.
+        # AI < 45% means historical data predicts ≥55% failure rate for this flow setup.
+        # Exception: moonshot (spike quality overrides AI uncertainty).
+        # Exception: ratio ≥ 4.0 (overwhelming real demand > AI's pattern-based doubt).
+        # Data: DOLO (AI=44%, Jy=-0.15, OI contracting, L/S=2.60) = failed setup.
+        strong_ai_dissent = (not is_moonshot
+                             and verdict_pts is not None
+                             and prob < 45
+                             and ratio < 4.0)
         # Block condition 7: Moonshot + OB weak + Crowded Longs → long squeeze SL risk.
         # Spike drives entry but OB must confirm buyer depth. Crowded longs cascade on any reversal.
         # Data: NAORIS (OB=55%, L/S=1.93) → SL -10%. FIGHT (OB=73%, L/S=2.89) → +25%.
         # OB < 0.65 = not enough buyer depth to sustain spike; crowded longs magnify downside.
         moonshot_ob_crowded = (is_moonshot and ob_spot < 0.65 and crowded_longs)
         blocked = (extreme_avoid or dump_pattern or weak_combined or below_min
-                   or moonshot_gate or moderate_ai_weak or moonshot_ob_crowded)
+                   or moonshot_gate or strong_ai_dissent or moonshot_ob_crowded)
         if blocked:
             if moonshot_ob_crowded:
                 reason = f"moonshot_ob_crowded(OB={ob_spot*100:.0f}%,crowded_longs)"
-            elif moderate_ai_weak:
-                reason = f"moderate_ai_weak(pts={verdict_pts:.1f},AI{prob:.0f}%,ratio={ratio:.1f}x)"
+            elif strong_ai_dissent:
+                reason = f"strong_ai_dissent(AI{prob:.0f}%,ratio={ratio:.1f}x)"
             elif moonshot_gate:
                 reason = f"moonshot_gate(weak_fra+AI{prob:.0f}%+res{fra_res_pct:.1f}%)"
             elif extreme_avoid:
@@ -3154,11 +3152,14 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Fractal Momentum Gate: negative Jy (bearish momentum) with Moderate/Weak fractal = doubt.
     # Strong fractal structure can sustain a brief Jy dip. Moderate cannot.
     # Data: ROBO (Moderate + Jy=-0.12 + res=+2.3%) → SL. Filtering saves subscribers from bad entry.
-    # Moonshot/volume_explosion bypass: spike IS the momentum signal — Jy lags explosive moves.
-    if (_fra and not _is_explosive and not is_moonshot and not volume_explosion):
+    # Moonshot/_is_explosive (≥30x) bypass: spike IS the momentum signal — Jy lags explosive moves.
+    # volume_explosion (5-30x): tolerate mild Jy dip (≥ -0.10). Strong reversal (< -0.10) blocks.
+    # Data: DOLO (Jy=-0.15, vol_exp=True, Moderate Fractal) → failed setup → tighter threshold.
+    if (_fra and not _is_explosive and not is_moonshot):
         _fra_jy = _fra.get("jy") or 0.0
         _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
-        if _fra_jy < -0.05 and not _fra_is_strong:
+        _jy_threshold = -0.10 if volume_explosion else -0.05
+        if _fra_jy < _jy_threshold and not _fra_is_strong:
             _rej(f"fractal_jy_bearish(jy={_fra_jy:.3f})"); return
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
