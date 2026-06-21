@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.81"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.82"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1165,13 +1165,19 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                          and "Weak" in (fra_verdict or "")
                          and prob < 50
                          and fra_res_pct < 2.0)
-        # Block condition 6: Strong Signal + AI strongly disagrees (< 45%) = conflicting signals.
-        # With strong-only policy (pts ≥ 5.0), Moderate signals are blocked at verdict level.
-        # AI < 45% means historical data predicts ≥55% failure rate for this flow setup.
-        # Exception: moonshot (spike quality overrides AI uncertainty).
-        # Exception: ratio ≥ 4.0 (overwhelming real demand > AI's pattern-based doubt).
-        # Data: DOLO (AI=44%, Jy=-0.15, OI contracting, L/S=2.60) = failed setup.
+        # Block condition 6: Regular strong signal + AI strongly disagrees (< 45%).
+        # Exceptions:
+        #   - moonshot: spike quality overrides AI uncertainty
+        #   - volume_explosion: already protected by Jy gate (< -0.10 blocks); AI lags explosive moves
+        #   - momentum_bypass: trend quality confirmed by scan_trend_gainer/quiet_buildup scanners;
+        #     early-trend coins (ALICE/RE/TNSR type) often have AI < 45% because AI has few pattern
+        #     matches at 3% change — the trend scanner itself is the quality signal
+        #   - ratio ≥ 4.0: overwhelming real demand overrides AI doubt
+        # Data: DOLO blocked by Jy gate (-0.15) regardless of AI. CHIP (1.1x spike) blocked by
+        # verdict pts < 5.0. This gate only targets regular signals with no quality bypass.
         strong_ai_dissent = (not is_moonshot
+                             and not volume_explosion
+                             and not momentum_bypass
                              and verdict_pts is not None
                              and prob < 45
                              and ratio < 4.0)
@@ -5525,8 +5531,8 @@ def scan_trend_gainer(all_t: dict):
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t.get("exchange") == "Binance"
-        and t.get("vol", 0) >= 2_000_000    # lowered 5M→2M: catch smaller coins (BICO type)
-        and t.get("change", 0) >= 5.0       # lowered 10%→5%: Wolf Flow sends at 4-6% change
+        and t.get("vol", 0) >= 1_500_000    # 1.5M: catch smaller coins, still filters micro noise
+        and t.get("change", 0) >= 3.0       # 3%: catch TNSR/RE/ALICE type moves early (was 5%)
         and sym not in tracking
         and now - _trend_gainer_dedup.get(sym, 0) >= COOLDOWN_TG
         and now - alerted.get(sym, 0) >= COOLDOWN
@@ -5535,8 +5541,8 @@ def scan_trend_gainer(all_t: dict):
 
     # Sort by 24h change descending — strongest trends first
     candidates.sort(key=lambda x: x[1].get("change", 0), reverse=True)
-    # Increased 25→60: more coverage at lower change thresholds (5% brings many more candidates)
-    candidates = candidates[:60]
+    # 80 candidates: 3% threshold brings more coins, need larger pool to cover market
+    candidates = candidates[:80]
 
     fired = 0
     for sym, ticker in candidates:
