@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.83"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.84"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2613,10 +2613,10 @@ def _check(sym, ticker, interval, sector_boost=False):
                                             minutes=60 if interval in ("60m", "1h") else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
     super_ratio = _pre_ratio >= 20.0
-    # momentum_bypass (trend_follow): scan_trend_gainer validates volume its own way
-    # (vol_ratio over 3h) — no additional spike requirement needed.
+    # momentum_bypass: scan_trend_gainer validates 1h volume trend separately.
+    # Still requires spike ≥ 0.8x — below-average volume (IO: 0.2x) is not a valid entry.
     # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
-    effective_spike_min = 0.0 if momentum_bypass else (1.5 if super_ratio else spike_min)
+    effective_spike_min = 0.8 if momentum_bypass else (1.5 if super_ratio else spike_min)
     if spike < effective_spike_min:
         _rej("low_spike"); return
 
@@ -3288,11 +3288,11 @@ def _check(sym, ticker, interval, sector_boost=False):
                                              (_fva_result["fcf"] if _fva_result else None),
                                              bool(_oi and _oi.get("long_crowded")), net, net_min,
                                              res_pct=_fra_res_pct)
-    # Strong-only policy: only send signals with pts ≥ 5.0 (Strong).
-    # Exceptions: volume_explosion (spike ≥ 5x is quality confirmation) and
-    # momentum_bypass (trend quality confirmed by trend_gainer/quiet_buildup scanners).
-    # These two exceptions still require pts ≥ 3.5 to avoid garbage flow.
-    _v_min = 3.5 if (volume_explosion or momentum_bypass) else 5.0
+    # Strong-only policy: all signals need pts ≥ 5.0 (Strong label).
+    # Exception: volume_explosion (spike ≥ 5x is independent quality proof — pts ≥ 3.5 ok).
+    # momentum_bypass gets intermediate gate bypasses (fractal_tier2, oi_contracting, etc.)
+    # but the final verdict still requires pts ≥ 5.0. Bypass = fair evaluation, not free pass.
+    _v_min = 3.5 if volume_explosion else 5.0
     _v_blocked = (_v_pts < _v_min) or (_v_pos <= _v_neg)
     # Moonshot bypass: pos >= neg required (bare minimum quality floor)
     _moonshot_ok = is_moonshot and _v_pos >= _v_neg
