@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.85"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.86"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3288,15 +3288,13 @@ def _check(sym, ticker, interval, sector_boost=False):
                                              (_fva_result["fcf"] if _fva_result else None),
                                              bool(_oi and _oi.get("long_crowded")), net, net_min,
                                              res_pct=_fra_res_pct)
-    # Strong-only policy: regular signals need pts ≥ 5.0 (Strong label).
-    # volume_explosion: spike ≥ 5x is quality proof → 3.5 minimum.
-    # momentum_bypass: intermediate gates bypassed (fractal_tier2, oi_contracting, etc.)
-    #   but spike ≥ 0.8x required. pts floor = 4.0:
-    #   - blocks IO-type (pts=3.5, spike=0.2x) ✅
-    #   - allows solid trend coin at 3% change (pts≈4.5, spike≈1.5x) ✅
-    #   - score ≥ 5.0 required for score contribution to pts; at 3% change score≈4.5
-    #     so pts builds from ratio+OB+net+H+fcf+pos24 alone (needs clean metrics)
-    _v_min = 3.5 if volume_explosion else (4.0 if momentum_bypass else 5.0)
+    # Verdict floor: 4.0 for all regular + momentum signals (allows early-stage movers),
+    # 3.5 for volume_explosion (spike ≥ 5x is independent quality proof).
+    # Root cause of missed signals: pts ≥ 5.0 was too strict for mid_scan/trend_gainer
+    # coins at 3-10% change — score≈4.5 gives 0 pts from _entry_verdict (score<5.0),
+    # leaving pts≈4.5 which blocks SYN/TNSR/ID-type early movers.
+    # Spike gates (spike_min per tier + 0.8x floor for momentum) still block CHIP/IO-type.
+    _v_min = 3.5 if volume_explosion else 4.0
     _v_blocked = (_v_pts < _v_min) or (_v_pos <= _v_neg)
     # Moonshot bypass: pos >= neg required (bare minimum quality floor)
     _moonshot_ok = is_moonshot and _v_pos >= _v_neg
@@ -5598,10 +5596,13 @@ def scan_trend_gainer(all_t: dict):
                 continue  # volume collapsed — trend exhausted
 
             # At least 2 of last 3 1h candles are bullish (close > open)
+            # Exception: change ≥ 10% — explosive breakout from base (SYN/TNSR type).
+            # These coins were flat/bearish before the pump → last 3 candles are bearish
+            # even though the coin IS moving now. The 10%+ 24h change IS the quality signal.
             last3 = klines[-4:-1]  # 3 completed candles before current
             bullish = sum(1 for k in last3 if float(k[4]) > float(k[1]))
-            if bullish < 2:
-                continue  # bearish reversal — skip
+            if bullish < 2 and change < 10.0:
+                continue  # bearish reversal — skip (only strict for early-stage 3-10%)
 
             # All checks passed — set momentum_signal so _check() bypasses pos24 filters
             _trend_gainer_dedup[sym] = now
