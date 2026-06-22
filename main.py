@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.89"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.90"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -239,6 +239,7 @@ last_slow     = 0.0
 last_super    = 0.0
 last_accum    = 0.0
 last_sg       = 0.0
+last_1m_flash = 0.0          # scan_1m_flash: moving coins 1m spike detection
 last_alpha    = 0.0          # scan_alpha_explosion interval
 _alpha_vol_cache: dict = {}  # sym → (vol24h, timestamp) for surge detection
 last_sector   = 0.0
@@ -4357,6 +4358,77 @@ def scan_sleeping_giant(all_t):
             break
 
 
+def scan_1m_flash(all_t):
+    """
+    Catches actively-moving coins (change 5-50%) exploding on 1m klines — fires
+    BEFORE 5m/1h scanners confirm. Complement to scan_sleeping_giant (flat coins).
+    Target: FIDA-type — coin already trending, then sudden 1m volume surge.
+    """
+    now = time.time()
+    candidates = [
+        (sym, t) for sym, t in all_t.items()
+        if t.get("exchange") == "Binance"
+        and 5.0 <= t.get("change", 0) <= 50.0   # moving coins (not sleeping giants)
+        and t.get("vol", 0) >= 500_000           # minimum real liquidity
+        and sym not in tracking
+        and now - _signal_dedup.get(sym, 0) >= 7200
+        and now - alerted.get(sym, 0) >= COOLDOWN
+        and t.get("price", 0) >= 0.000001
+        and sym.replace("USDT", "") not in BLACKLIST
+    ]
+    candidates.sort(key=lambda x: x[1].get("change", 0), reverse=True)
+    candidates = candidates[:40]   # top 40 movers by 24h change
+
+    fired = 0
+    for sym, ticker in candidates:
+        avg_1m_vol = ticker["vol"] / 1440.0
+        if avg_1m_vol <= 0:
+            continue
+
+        klines = fetch_klines(sym, ticker["base_url"], interval="1m", limit=6)
+        if not klines or len(klines) < 4:
+            continue
+
+        try:
+            last_vol = _qvol(klines[-2])   # last completed 1m candle
+            prev_vol = _qvol(klines[-3])
+
+            last_ratio = last_vol / max(avg_1m_vol, 1)
+            prev_ratio = prev_vol / max(avg_1m_vol, 1)
+
+            # 1m spike ≥ 6x: real explosion (lower than sleeping giant 8-10x
+            # because the 24h change confirms the coin is already in motion)
+            if last_ratio < 6.0 or prev_ratio < 0.8:
+                continue
+
+            # Price moving up in the 1m candle (not a wick or dump)
+            o  = float(klines[-2][1])
+            cl = float(klines[-2][4])
+            candle_move = (cl - o) / o * 100 if o > 0 else 0
+            if candle_move < 0.3:
+                continue
+
+        except Exception:
+            continue
+
+        log.info("1M_FLASH candidate %s chg=%.1f%% 1m_spike=%.0fx prev=%.0fx cm=%.2f%%",
+                 sym, ticker.get("change", 0), last_ratio, prev_ratio, candle_move)
+
+        ticker_copy = dict(ticker)
+        ticker_copy["momentum_signal"] = True   # bypass pos24 gates (high pos is structural)
+        ticker_copy["_sg_spike"] = last_ratio
+        ticker_copy["_sg_move"]  = candle_move
+        result = _check(sym, ticker_copy, "1m_sg")
+        if result is not None:
+            fired += 1
+        time.sleep(0.1)
+        if fired >= 2:   # conservative cap: max 2 flash signals per 30s cycle
+            break
+
+    if fired:
+        log.info("scan_1m_flash: fired=%d", fired)
+
+
 def scan_whale_flow(all_t):
     """
     Detects silent whale accumulation at multi-week lows.
@@ -5937,6 +6009,11 @@ def main():
             if now - last_sg >= SLEEP_GIANT_S:
                 last_sg = now
                 scan_sleeping_giant(all_t)
+
+            global last_1m_flash
+            if now - last_1m_flash >= 30:
+                last_1m_flash = now
+                scan_1m_flash(all_t)
 
             global last_sector
             if now - last_sector >= SECTOR_SCAN_S:
