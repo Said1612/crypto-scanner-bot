@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.87"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.88"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1187,7 +1187,7 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         # OB < 0.65 = not enough buyer depth to sustain spike; crowded longs magnify downside.
         moonshot_ob_crowded = (is_moonshot and ob_spot < 0.65 and crowded_longs)
         blocked = (extreme_avoid or dump_pattern or weak_combined or below_min
-                   or moonshot_gate or strong_ai_dissent or moonshot_ob_crowded)
+                   or moonshot_gate or moonshot_ob_crowded)
         if blocked:
             if moonshot_ob_crowded:
                 reason = f"moonshot_ob_crowded(OB={ob_spot*100:.0f}%,crowded_longs)"
@@ -3290,11 +3290,10 @@ def _check(sym, ticker, interval, sector_boost=False):
                                              res_pct=_fra_res_pct)
     # Verdict floor: 4.0 for all regular + momentum signals (allows early-stage movers),
     # 3.5 for volume_explosion (spike ≥ 5x is independent quality proof).
-    # Root cause of missed signals: pts ≥ 5.0 was too strict for mid_scan/trend_gainer
-    # coins at 3-10% change — score≈4.5 gives 0 pts from _entry_verdict (score<5.0),
-    # leaving pts≈4.5 which blocks SYN/TNSR/ID-type early movers.
-    # Spike gates (spike_min per tier + 0.8x floor for momentum) still block CHIP/IO-type.
-    _v_min = 3.5 if volume_explosion else 4.0
+    # Data-driven (281 signals, 112 success avg+52%): Moderate signals (pts≥3.5) were
+    # the historical winners. Raising to 4.0-5.0 blocked the CHIP/SIREN/ENJ-type movers
+    # that achieved +200-340%. Core quality gates (spike_min, ratio_min, ob, Jy) remain.
+    _v_min = 3.5
     _v_blocked = (_v_pts < _v_min) or (_v_pos <= _v_neg)
     # Moonshot bypass: pos >= neg required (bare minimum quality floor)
     _moonshot_ok = is_moonshot and _v_pos >= _v_neg
