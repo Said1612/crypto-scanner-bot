@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.91"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.92"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4786,23 +4786,32 @@ def scan_alpha_explosion(all_t: dict):
         if sym in _signal_dedup:
             continue
 
-        # Volume surge: compare vs previous scan
-        prev      = _alpha_vol_cache.get(sym)
-        vol_surge = 0.0
-        if prev:
-            prev_vol, prev_ts = prev
-            elapsed = now - prev_ts
-            if 60 < elapsed < 700 and prev_vol > 0:
-                vol_surge = vol / prev_vol
-        _alpha_vol_cache[sym] = (vol, now)
+        # 1m kline spike detection (same as sleeping_giant — reliable, real-time)
+        # Old method (24h vol_surge between scans) never triggered because 24h vol
+        # barely changes in 5 minutes even during explosive moves.
+        avg_1m_vol = vol / 1440.0
+        if avg_1m_vol <= 0:
+            continue
+        base_url = t.get("base_url", "")
+        klines_1m = fetch_klines(sym, base_url, interval="1m", limit=6) if base_url else []
+        if not klines_1m or len(klines_1m) < 4:
+            continue
+        try:
+            last_1m_vol = _qvol(klines_1m[-2])
+            prev_1m_vol = _qvol(klines_1m[-3])
+            spike_1m    = last_1m_vol / max(avg_1m_vol, 1)
+            prev_spike  = prev_1m_vol / max(avg_1m_vol, 1)
+        except Exception:
+            continue
 
-        # Signal condition: volume surging NOW + early in the move (not already +40%)
-        # Requires vol_surge baseline — first scan gets no signal, waits 5 min for next cycle
-        # Strong-only policy: vol_surge ≥ 5.0 required (Moderate/Early filtered out)
-        _explosion = (vol_surge >= 5.0 and chg >= 5.0 and chg <= 40.0 and vol >= 50_000)
+        # Alpha explosion: 1m candle ≥ 5x avg + coin moving + not already exhausted
+        _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8 and chg >= 3.0 and chg <= 60.0 and vol >= 50_000)
 
         if not _explosion:
             continue
+
+        log.info("ALPHA_EXPLOSION %s chg=%.1f%% 1m_spike=%.0fx prev=%.0fx vol=$%.0f",
+                 sym, chg, spike_1m, prev_spike, vol)
 
         _alpha_verdict = "🟢 *Strong Signal* ✅"
 
