@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.90"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.91"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2412,10 +2412,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Sleeping giant (1m_sg): explosion from multi-week low → allow up to 300%
     # Regular Spot: raised 80%→150% — OPN-type moves (depressed coin explodes) are valid signals
     _is_alpha_coin = ticker.get("binance_alpha") or ticker.get("futures_only")
-    # Block futures-only coins (no spot market anywhere) — user trades spot only.
-    # binance_alpha coins are allowed: available as spot on MEXC.
-    if ticker.get("futures_only"):
-        _rej("futures_only_blocked"); return
+    # futures_only coins use FAPI klines/OB (base_url=FAPI set in fetch_binance_futures_only).
+    # Gate removed: many spot coins (HEI, G type) have low vol → missed by fetch_binance()
+    # → incorrectly classified futures_only. Quality gates (spike/ratio/ob/verdict) filter weak signals.
     _max_pump = 400.0 if _is_alpha_coin else (300.0 if interval == "1m_sg" else 150.0)
     h24, l24 = ticker["high24"], ticker["low24"]
     range_pump = (h24 - l24) / l24 * 100 if l24 > 0 else 0
@@ -5897,7 +5896,8 @@ def main():
             # Futures-only: Binance Alpha / pre-listing coins (RAVE type)
             _bn_fut = fetch_binance_futures_only(set(_bn.keys()))
             for _sym, _td in _bn_fut.items():
-                all_t[_sym] = _td   # safe: spot_syms excluded upstream
+                if _sym not in all_t:   # never overwrite spot data with futures data
+                    all_t[_sym] = _td
                 # Register dynamically as BNB Alpha sector for sector scanner
                 _base = _sym[:-4] if _sym.endswith("USDT") else _sym.replace("USDT", "")
                 if _base not in SECTOR_REGISTRY:
