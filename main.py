@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.3.92"  # bump this with every push — verify after restart
+BOT_VERSION = "3.3.93"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1332,11 +1332,13 @@ def _calc_fractal_score(fra, fva_result, cq_result):
         elif fcf >= 0.75: pts += 2.0
         elif fcf >= 0.60: pts += 1.0
     # H: Hurst regime from Chaos-Quant
+    # Thresholds calibrated for crypto: structurally H=0.45-0.52 on short frames.
+    # Old thresholds (0.60/0.55/0.48) gave +0 or +1 to almost all coins → FS too low.
     if cq_result:
         h = cq_result.get("H", 0.5)
-        if   h >= 0.60: pts += 3.0
-        elif h >= 0.55: pts += 2.0
-        elif h >= 0.48: pts += 1.0
+        if   h >= 0.55: pts += 3.0
+        elif h >= 0.50: pts += 2.0
+        elif h >= 0.46: pts += 1.0
     # MTF alignment from fractal validator
     if fva_result:
         macro = fva_result.get("macro_trend", "neutral")
@@ -3071,21 +3073,23 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Moonshots and volume_explosion bypass — spike IS the quality signal; fractal lags the move.
     if _fva_result and not is_moonshot and not volume_explosion:
         _fcf_val = _fva_result["fcf"]
-        if _fcf_val <= 0.75 and score < 7.5:
+        # Threshold lowered: FCF ≤ 0.65 (was 0.75) — FCF=0.70-0.75 is mediocre but not exhausted.
+        # score < 6.0 (was 7.5) — account for FCF+CQ double compression on post-adj score.
+        if _fcf_val <= 0.65 and score < 6.0:
             _rej(f"fcf_structure({_fcf_val:.2f})"); return
         # Double-weak: FCF mediocre + H random/anti-persistent = no structural edge
-        # Raised thresholds: FCF < 0.90 (was 0.85), H < 0.52 (was 0.50), score < 7.5 (was 7.0)
-        if (_cq_result and _fcf_val < 0.90
-                and _cq_result["H"] < 0.52 and score < 7.5):
+        # Calibrated to crypto reality: FCF < 0.80 (was 0.90) + H < 0.48 (was 0.52) + score < 6.5
+        # FCF=0.80-0.90 combined with H=0.48-0.52 is the NORMAL crypto range, not "double weak".
+        if (_cq_result and _fcf_val < 0.80
+                and _cq_result["H"] < 0.48 and score < 6.5):
             _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
-    # Anti-Persistent Gate: H < 0.53 = random/anti-persistent market, no trending edge
-    # Data: PROM H=0.473 hit SL in 6 minutes, NAORIS H=0.453 in 76 minutes
-    # Raised: score exception 8.0→9.5 — H < 0.53 is structural randomness; score=9.0 is still
-    # not enough (DIS: H=0.513 + score=9.0 → resistance at +0.2% + Noah Effect = risky).
-    # score < 9.0 (was 8.0) did not close the gap — score=9.0 is "not < 9.0" so gate skipped.
+    # Anti-Persistent Gate: H is structurally low in crypto (0.45-0.52 on short frames).
+    # Data: PROM H=0.473 SL (6m), NAORIS H=0.453 SL (76m) — true anti-persistent losses.
+    # Threshold lowered: H < 0.47 (was < 0.49) — H=0.47-0.49 is borderline random, not anti-persistent.
+    # score < 8.0 (was 8.5) — post FCF+CQ compression score rarely reaches 8.5.
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.49 and score < 8.5
+            and _cq_result["H"] < 0.47 and score < 8.0
             and not _is_explosive):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
@@ -3168,15 +3172,16 @@ def _check(sym, ticker, interval, sector_boost=False):
     if (_fra and not _is_explosive and not is_moonshot):
         _fra_jy = _fra.get("jy") or 0.0
         _fra_is_strong = "Strong" in (_fra.get("verdict") or "")
-        _jy_threshold = -0.10 if volume_explosion else (-0.08 if momentum_bypass else -0.05)
+        # Regular threshold raised -0.05 → -0.07: Jy -0.05 is barely bearish (normal ranging)
+        _jy_threshold = -0.10 if volume_explosion else (-0.08 if momentum_bypass else -0.07)
         if _fra_jy < _jy_threshold and not _fra_is_strong:
             _rej(f"fractal_jy_bearish(jy={_fra_jy:.3f})"); return
 
     _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
 
-    # Volume Explosion Fractal Floor — raised to 5.5 (REN had FS=5.0 + 148x = still weak structure)
-    # FS < 5.5 means fractal quality is too poor even for explosive moves.
-    if volume_explosion and not is_moonshot and _fractal_score < 5.5:
+    # Volume Explosion Fractal Floor — recalibrated to 4.5 (H threshold fix raises typical FS ~1pt)
+    # FS < 4.5 means truly corrupted/manipulated fractal data — block even explosive moves.
+    if volume_explosion and not is_moonshot and _fractal_score < 4.5:
         _rej(f"vol_exp_weak_fractal(fs={_fractal_score})"); return
 
     # Explosive spike bypass — 30x+ vol = real institutional move regardless of fractal
@@ -3186,17 +3191,18 @@ def _check(sym, ticker, interval, sector_boost=False):
 
     # Fractal Quality Gate — Two-Tier
     #
-    # Tier 1 — Hard Floor (FS < 5.0): always blocks. No bypass.
-    if _fractal_score < 5.0:
+    # Tier 1 — Hard Floor (FS < 5.0): blocks everything except volume_explosion.
+    # volume_explosion (spike ≥ 5x) has its own floor at FS < 4.5 (above) — no need to re-block.
+    if _fractal_score < 5.0 and not volume_explosion:
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
-    # Tier 2 — Moderate Gate (FS 5.0-6.9): requires score ≥ 7.5 OR explosive spike.
-    # 30x+ vol bypasses: a coin with 30x spike and FS=6 is a real move.
-    # momentum_bypass exemption: scan_trend_gainer already verified 1h candle quality
-    # (2/3 bullish candles, volume sustained ≥ 80% avg, crash < 20% from high).
-    # At early 3% change, flow score is naturally low (spike 2-3x) — fractal Tier 2
-    # would block all early trend coins if momentum_bypass is not exempted.
-    if _fractal_score < 7.0 and score < 7.5 and not _is_explosive and not momentum_bypass:
+    # Tier 2 — Moderate Gate (FS 5.0-6.9): requires post-FCF+CQ score ≥ 4.5 OR bypass.
+    # Score threshold lowered 7.5 → 4.5: original 6.5 score × FCF=0.82 × CQ=0.90 = 4.8
+    # — requiring 7.5 was unreachable for any normal decent signal after double compression.
+    # Added volume_explosion bypass: spike ≥ 5x IS the quality proof; fractal supplements only.
+    # momentum_bypass: scan_trend_gainer already verified 1h candle quality.
+    if (_fractal_score < 7.0 and score < 4.5
+            and not _is_explosive and not momentum_bypass and not volume_explosion):
         _rej(f"weak_fractal_quality(fs={_fractal_score})"); return
 
     # ── Open Interest Gate ────────────────────────────────────────────────
@@ -4173,7 +4179,10 @@ def scan_supertrend(all_t):
             _rj("st_low_ratio"); continue
 
         # Position guard: block near-top entries
-        if pos24 > 0.78:
+        # Strong bull bypass: in broad uptrends all coins sit at daily highs — pos24 is misleading
+        if pos24 > 0.78 and market_bias < 60:
+            _rj("st_high_pos"); continue
+        if pos24 > 0.90:   # absolute cap even in bull market
             _rj("st_high_pos"); continue
 
         # Stale flip + high position = late entry into old trend
