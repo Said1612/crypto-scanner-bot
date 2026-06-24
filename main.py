@@ -4814,7 +4814,8 @@ def scan_alpha_explosion(all_t: dict):
             continue
 
         # Alpha explosion: 1m candle ≥ 5x avg + coin moving + not already exhausted
-        _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8 and chg >= 3.0 and chg <= 60.0 and vol >= 50_000)
+        # chg <= 8.0: catch early moves only — POPCAT was +14.5% before signal = near top
+        _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8 and chg >= 2.0 and chg <= 8.0 and vol >= 50_000)
 
         if not _explosion:
             continue
