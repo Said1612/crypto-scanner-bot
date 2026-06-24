@@ -4861,13 +4861,13 @@ def scan_alpha_explosion(all_t: dict):
         _chain_lq_pre = t.get("chain_lq", 0.0)   # pool depth (pre-computed)
         if _has_flow:
             if _ratio >= 5.0 and _net_v >= 100_000:
-                _liq_power = "🚀 *ضخمة — Massive Inflow*"
+                _liq_power = "🚀 *Massive Inflow*"
             elif _ratio >= 3.0 and _net_v >= 30_000:
-                _liq_power = "🟢 *كبيرة — Strong Inflow*"
+                _liq_power = "🟢 *Strong Inflow*"
             elif _ratio >= 1.5 and _net_v >= 5_000:
-                _liq_power = "🟡 *عادية — Normal Inflow*"
+                _liq_power = "🟡 *Normal Inflow*"
             else:
-                _liq_power = "🔴 *ضعيفة — Weak Inflow*"
+                _liq_power = "🔴 *Weak Inflow*"
             # Thin pool warning regardless of ratio
             if _chain_lq_pre > 0 and _chain_lq_pre < 500_000:
                 _liq_power += " ⚠️ _thin pool_"
