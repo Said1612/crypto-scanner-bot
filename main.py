@@ -793,8 +793,6 @@ def fetch_binance_alpha():
         return {}
     tokens = data.get("data") or []
     # Log raw keys of first token once — helps identify available fields
-    if tokens:
-        log.info("Binance Alpha raw fields: %s", list(tokens[0].keys()))
     out = {}
     for t in tokens:
         try:
@@ -809,15 +807,16 @@ def fetch_binance_alpha():
                 continue
             if 0.97 <= price <= 1.03 and abs(chg) < 0.5:
                 continue
-            # Add 5% buffer above current price — setting high=price makes pos24=1.0
-            # for all positive-change Alpha coins, blocking them with high_pos
-            high = price * 1.05 if chg >= 0 else price / (1 + abs(chg) / 100)
-            low  = price / (1 + chg / 100) if chg > 0 else price * (1 + abs(chg) / 100)
-            # Optional on-chain fields — try multiple known field names
-            mkt_cap  = float(t.get("marketCap") or t.get("mktCap") or t.get("market_cap") or 0)
-            chain_lq = float(t.get("liquidity") or t.get("chainLiquidity") or t.get("chainLiq") or t.get("chain_liquidity") or 0)
-            holders  = int(float(t.get("holders") or t.get("holderCount") or t.get("holdersCount") or t.get("holder_count") or 0))
-            fdv      = float(t.get("fdv") or t.get("fullDilutedValuation") or t.get("fullyDilutedValuation") or 0)
+            # Use real 24h high/low from API (priceHigh24h/priceLow24h confirmed field names)
+            high = float(t.get("priceHigh24h") or 0) or (price * 1.05 if chg >= 0 else price / (1 + abs(chg) / 100))
+            low  = float(t.get("priceLow24h")  or 0) or (price / (1 + chg / 100) if chg > 0 else price * (1 + abs(chg) / 100))
+            # On-chain fields (field names confirmed from API response)
+            mkt_cap   = float(t.get("marketCap")  or 0)
+            chain_lq  = float(t.get("liquidity")  or 0)
+            holders   = int(float(t.get("holders") or 0))
+            fdv       = float(t.get("fdv")         or 0)
+            bn_score  = float(t.get("score")       or 0)   # Binance's own Alpha quality score
+            trades24h = int(float(t.get("count24h") or 0)) # number of trades in 24h
             out[sym] = {
                 "price":         price,
                 "change":        chg,
@@ -832,6 +831,8 @@ def fetch_binance_alpha():
                 "chain_lq":      chain_lq,
                 "holders":       holders,
                 "fdv":           fdv,
+                "bn_score":      bn_score,
+                "trades24h":     trades24h,
             }
         except Exception:
             continue
@@ -4850,11 +4851,13 @@ def scan_alpha_explosion(all_t: dict):
         _pos24_pct = int((price - _low24) / _rng24 * 100) if _rng24 > 0 else 50
         _pos_icon  = "✅" if _pos24_pct <= 50 else ("⚠️" if _pos24_pct <= 70 else "🔴")
 
-        # On-chain liquidity fields (populated if API returns them)
-        _mkt_cap  = t.get("mkt_cap",  0.0)
-        _chain_lq = t.get("chain_lq", 0.0)
-        _holders  = t.get("holders",  0)
-        _fdv      = t.get("fdv",      0.0)
+        # On-chain fields (confirmed field names from API)
+        _mkt_cap   = t.get("mkt_cap",   0.0)
+        _chain_lq  = t.get("chain_lq",  0.0)
+        _holders   = t.get("holders",   0)
+        _fdv       = t.get("fdv",       0.0)
+        _bn_score  = t.get("bn_score",  0.0)
+        _trades24h = t.get("trades24h", 0)
 
         def _fmt_usd(v):
             if v >= 1e9:  return f"${v/1e9:.2f}B"
@@ -4871,17 +4874,22 @@ def scan_alpha_explosion(all_t: dict):
         global signal_count
         signal_count += 1
 
-        # Build on-chain info line (only show if data available)
+        # On-chain info block
         _onchain_lines = ""
         if _chain_lq > 0 or _mkt_cap > 0:
-            _parts = []
+            _l1, _l2 = [], []
             if _chain_lq > 0:
-                _parts.append(f"{_lq_icon} Chain.Lq: `{_fmt_usd(_chain_lq)}`")
+                _l1.append(f"{_lq_icon} Chain.Lq: `{_fmt_usd(_chain_lq)}`")
             if _mkt_cap > 0:
-                _parts.append(f"💎 Mkt Cap: `{_fmt_usd(_mkt_cap)}`")
+                _l1.append(f"💎 Mkt Cap: `{_fmt_usd(_mkt_cap)}`")
             if _holders > 0:
-                _parts.append(f"👥 Holders: `{_holders:,}`")
-            _onchain_lines = "  ·  ".join(_parts) + "\n"
+                _l2.append(f"👥 Holders: `{_holders:,}`")
+            if _trades24h > 0:
+                _l2.append(f"🔄 Trades: `{_trades24h:,}`")
+            if _bn_score > 0:
+                _l2.append(f"⭐ Score: `{_bn_score:.1f}`")
+            if _l1: _onchain_lines += "  ·  ".join(_l1) + "\n"
+            if _l2: _onchain_lines += "  ·  ".join(_l2) + "\n"
 
         _msg = (
             f"{'━'*20}\n"
