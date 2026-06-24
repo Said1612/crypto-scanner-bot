@@ -792,6 +792,9 @@ def fetch_binance_alpha():
         log.warning("Binance Alpha token list failed (resp: %s)", str(data)[:120] if data else "None")
         return {}
     tokens = data.get("data") or []
+    # Log raw keys of first token once — helps identify available fields
+    if tokens:
+        log.info("Binance Alpha raw fields: %s", list(tokens[0].keys()))
     out = {}
     for t in tokens:
         try:
@@ -810,6 +813,11 @@ def fetch_binance_alpha():
             # for all positive-change Alpha coins, blocking them with high_pos
             high = price * 1.05 if chg >= 0 else price / (1 + abs(chg) / 100)
             low  = price / (1 + chg / 100) if chg > 0 else price * (1 + abs(chg) / 100)
+            # Optional on-chain fields — try multiple known field names
+            mkt_cap  = float(t.get("marketCap") or t.get("mktCap") or t.get("market_cap") or 0)
+            chain_lq = float(t.get("liquidity") or t.get("chainLiquidity") or t.get("chainLiq") or t.get("chain_liquidity") or 0)
+            holders  = int(float(t.get("holders") or t.get("holderCount") or t.get("holdersCount") or t.get("holder_count") or 0))
+            fdv      = float(t.get("fdv") or t.get("fullDilutedValuation") or t.get("fullyDilutedValuation") or 0)
             out[sym] = {
                 "price":         price,
                 "change":        chg,
@@ -820,6 +828,10 @@ def fetch_binance_alpha():
                 "base_url":      BINANCE_BASE,
                 "binance_alpha": True,
                 "futures_only":  False,
+                "mkt_cap":       mkt_cap,
+                "chain_lq":      chain_lq,
+                "holders":       holders,
+                "fdv":           fdv,
             }
         except Exception:
             continue
@@ -4831,8 +4843,45 @@ def scan_alpha_explosion(all_t: dict):
         _tp3 = price * 1.40
         _sl  = price * 0.92
 
+        # Position in 24h range
+        _low24  = t.get("low24", price)
+        _high24 = t.get("high24", price)
+        _rng24  = _high24 - _low24
+        _pos24_pct = int((price - _low24) / _rng24 * 100) if _rng24 > 0 else 50
+        _pos_icon  = "✅" if _pos24_pct <= 50 else ("⚠️" if _pos24_pct <= 70 else "🔴")
+
+        # On-chain liquidity fields (populated if API returns them)
+        _mkt_cap  = t.get("mkt_cap",  0.0)
+        _chain_lq = t.get("chain_lq", 0.0)
+        _holders  = t.get("holders",  0)
+        _fdv      = t.get("fdv",      0.0)
+
+        def _fmt_usd(v):
+            if v >= 1e9:  return f"${v/1e9:.2f}B"
+            if v >= 1e6:  return f"${v/1e6:.2f}M"
+            if v >= 1e3:  return f"${v/1e3:.1f}K"
+            return f"${v:.0f}"
+
+        # Liquidity quality label
+        if _chain_lq >= 5_000_000:   _lq_icon = "🟢"
+        elif _chain_lq >= 1_000_000: _lq_icon = "🟡"
+        elif _chain_lq > 0:          _lq_icon = "🔴"
+        else:                        _lq_icon = ""
+
         global signal_count
         signal_count += 1
+
+        # Build on-chain info line (only show if data available)
+        _onchain_lines = ""
+        if _chain_lq > 0 or _mkt_cap > 0:
+            _parts = []
+            if _chain_lq > 0:
+                _parts.append(f"{_lq_icon} Chain.Lq: `{_fmt_usd(_chain_lq)}`")
+            if _mkt_cap > 0:
+                _parts.append(f"💎 Mkt Cap: `{_fmt_usd(_mkt_cap)}`")
+            if _holders > 0:
+                _parts.append(f"👥 Holders: `{_holders:,}`")
+            _onchain_lines = "  ·  ".join(_parts) + "\n"
 
         _msg = (
             f"{'━'*20}\n"
@@ -4842,16 +4891,16 @@ def scan_alpha_explosion(all_t: dict):
             f"{'━'*20}\n"
             f"\n"
             f"🆕 *#{sym_base}* 🔥 · Alpha BSC · Signal #{signal_count}\n"
-            f"💰 `${_fp(price)}`  📈 `+{chg:.1f}%` 24h\n"
+            f"💰 `${_fp(price)}`  📈 `+{chg:.1f}%` 24h  📍 `{_pos24_pct}%` from bottom {_pos_icon}\n"
             f"\n"
             f"⚡ Vol surge: `{spike_1m:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
-            f"\n"
+            + (f"{_onchain_lines}" if _onchain_lines else "")
+            + f"\n"
             f"🎯 TP1: `${_fp(_tp1)}` *(+8%)*\n"
             f"🎯 TP2: `${_fp(_tp2)}` *(+20%)*\n"
             f"🎯 TP3: `${_fp(_tp3)}` *(+40%)*\n"
             f"🛑 SL:  `${_fp(_sl)}` *(-8%)*\n"
             f"\n"
-            f"⚠️ _BSC On-Chain — verify liquidity before entry_\n"
             f"🟡 Binance Alpha  🕐 {_ts()} UTC\n"
             f"{'━'*20}"
         )
