@@ -4828,7 +4828,15 @@ def scan_alpha_explosion(all_t: dict):
 
         # Alpha explosion: 1m candle ≥ 5x avg + coin moving + not already exhausted
         # chg <= 8.0: catch early moves only — POPCAT was +14.5% before signal = near top
-        _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8 and chg >= 2.0 and chg <= 8.0 and vol >= 50_000)
+        _t_low24  = t.get("low24", price)
+        _t_high24 = t.get("high24", price)
+        _t_rng    = _t_high24 - _t_low24
+        _t_pos24  = (price - _t_low24) / _t_rng if _t_rng > 0 else 0.5
+        # Block if price is at 90%+ of daily range = near top entry
+        _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8
+                      and chg >= 2.0 and chg <= 8.0
+                      and vol >= 50_000
+                      and _t_pos24 <= 0.90)
 
         if not _explosion:
             continue
@@ -4836,7 +4844,7 @@ def scan_alpha_explosion(all_t: dict):
         log.info("ALPHA_EXPLOSION %s chg=%.1f%% 1m_spike=%.0fx prev=%.0fx vol=$%.0f",
                  sym, chg, spike_1m, prev_spike, vol)
 
-        # Fetch real buy/sell flow for the last ~5 min (last 500 trades)
+        # Fetch real buy/sell flow for the last ~500 trades
         _buy_v, _sell_v = fetch_agg_trades(sym, base_url)
         _net_v  = _buy_v - _sell_v
         _ratio  = (_buy_v / _sell_v) if _sell_v > 0 else 0.0
@@ -4848,6 +4856,23 @@ def scan_alpha_explosion(all_t: dict):
         elif _ratio >= 1.0:  _ratio_icon = "🟡"
         else:                _ratio_icon = "🔴"
         _net_icon = "✅" if _net_v > 0 else "❌"
+
+        # Liquidity power label — combines ratio + net flow + chain pool depth
+        _chain_lq_pre = t.get("chain_lq", 0.0)   # pool depth (pre-computed)
+        if _has_flow:
+            if _ratio >= 5.0 and _net_v >= 100_000:
+                _liq_power = "🚀 *ضخمة — Massive Inflow*"
+            elif _ratio >= 3.0 and _net_v >= 30_000:
+                _liq_power = "🟢 *كبيرة — Strong Inflow*"
+            elif _ratio >= 1.5 and _net_v >= 5_000:
+                _liq_power = "🟡 *عادية — Normal Inflow*"
+            else:
+                _liq_power = "🔴 *ضعيفة — Weak Inflow*"
+            # Thin pool warning regardless of ratio
+            if _chain_lq_pre > 0 and _chain_lq_pre < 500_000:
+                _liq_power += " ⚠️ _thin pool_"
+        else:
+            _liq_power = ""
 
         _alpha_verdict = "🟢 *Strong Signal* ✅"
 
@@ -4915,6 +4940,7 @@ def scan_alpha_explosion(all_t: dict):
             f"💰 `${_fp(price)}`  📈 `+{chg:.1f}%` 24h  📍 `{_pos24_pct}%` from bottom {_pos_icon}\n"
             f"\n"
             f"⚡ Vol surge: `{spike_1m:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
+            + (f"💧 {_liq_power}\n" if _liq_power else "")
             + (f"📊 Ratio: `{_ratio:.1f}x` {_ratio_icon}\n" if _has_flow else "")
             + (f"✅ Flow:\n"
                f"  📥 In:  `{_fv(_buy_v)}`\n"
