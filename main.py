@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.2"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.3"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4836,7 +4836,7 @@ def scan_alpha_explosion(all_t: dict):
         _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8
                       and chg >= 2.0 and chg <= 8.0
                       and vol >= 50_000
-                      and _t_pos24 <= 0.82)   # raised from 0.90 — 84-88% is still near-top
+                      and _t_pos24 <= 0.75)   # tightened from 0.82 — block near-top entries (ATM 99%)
 
         if not _explosion:
             continue
@@ -4879,6 +4879,12 @@ def scan_alpha_explosion(all_t: dict):
                 _liq_power += " ⚠️ _thin pool_"
         else:
             _liq_power = ""
+
+        # Block Weak Inflow signals entirely — only Normal/Strong/Massive should send
+        # LAB (ratio=1.1x, net=+4.7K) + RECALL (ratio=1.2x) = noise, not real accumulation
+        if _has_flow and _liq_power.startswith("🔴"):
+            log.info("ALPHA skip %s — weak inflow (ratio=%.2f net=%+.0f)", sym, _ratio, _net_v)
+            continue
 
         _alpha_verdict = "🟢 *Strong Signal* ✅"
 
