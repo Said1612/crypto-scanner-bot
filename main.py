@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.3"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.4"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3360,6 +3360,10 @@ def _check(sym, ticker, interval, sector_boost=False):
     msg += ai_str
 
     # ── Late Entry Hard Block ─────────────────────────────────────────────
+    # Absolute ceiling: no signal at 93%+ regardless of scanner type
+    # SEI at 99% came from scan_trend_gainer (momentum_bypass=True) — 93%+ = daily top, no room left
+    if pos24 > 0.93 and not is_moonshot:
+        _rej(f"late_entry_absolute({pos24*100:.0f}%)"); return
     if pos24 > 0.80 and not is_moonshot and not momentum_bypass:
         if volume_explosion and score >= 8.5:
             pass   # allow: explosive volume + high quality
