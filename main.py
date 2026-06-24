@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.0"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.1"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4864,7 +4864,7 @@ def scan_alpha_explosion(all_t: dict):
                 _liq_power = "🚀 *Massive Inflow*"
             elif _ratio >= 3.0 and _net_v >= 30_000:
                 _liq_power = "🟢 *Strong Inflow*"
-            elif _ratio >= 1.5 and _net_v >= 5_000:
+            elif _ratio >= 1.4 and _net_v >= 5_000:
                 _liq_power = "🟡 *Normal Inflow*"
             else:
                 _liq_power = "🔴 *Weak Inflow*"
@@ -4887,7 +4887,7 @@ def scan_alpha_explosion(all_t: dict):
         _high24 = t.get("high24", price)
         _rng24  = _high24 - _low24
         _pos24_pct = int((price - _low24) / _rng24 * 100) if _rng24 > 0 else 50
-        _pos_icon  = "✅" if _pos24_pct <= 50 else ("⚠️" if _pos24_pct <= 70 else "🔴")
+        _pos_icon  = "✅" if _pos24_pct <= 65 else ("⚠️" if _pos24_pct <= 80 else "🔴")
 
         # On-chain fields (confirmed field names from API)
         _mkt_cap   = t.get("mkt_cap",   0.0)
