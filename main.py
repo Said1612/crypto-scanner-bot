@@ -4836,6 +4836,19 @@ def scan_alpha_explosion(all_t: dict):
         log.info("ALPHA_EXPLOSION %s chg=%.1f%% 1m_spike=%.0fx prev=%.0fx vol=$%.0f",
                  sym, chg, spike_1m, prev_spike, vol)
 
+        # Fetch real buy/sell flow for the last ~5 min (last 500 trades)
+        _buy_v, _sell_v = fetch_agg_trades(sym, base_url)
+        _net_v  = _buy_v - _sell_v
+        _ratio  = (_buy_v / _sell_v) if _sell_v > 0 else 0.0
+        _has_flow = (_buy_v + _sell_v) > 0
+
+        # Flow quality icons
+        if _ratio >= 3.0:    _ratio_icon = "🔥"
+        elif _ratio >= 1.5:  _ratio_icon = "🟢"
+        elif _ratio >= 1.0:  _ratio_icon = "🟡"
+        else:                _ratio_icon = "🔴"
+        _net_icon = "✅" if _net_v > 0 else "❌"
+
         _alpha_verdict = "🟢 *Strong Signal* ✅"
 
         # Simple TP/SL for Alpha (no klines, use fixed %%)
@@ -4902,6 +4915,12 @@ def scan_alpha_explosion(all_t: dict):
             f"💰 `${_fp(price)}`  📈 `+{chg:.1f}%` 24h  📍 `{_pos24_pct}%` from bottom {_pos_icon}\n"
             f"\n"
             f"⚡ Vol surge: `{spike_1m:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
+            + (f"📊 Ratio: `{_ratio:.1f}x` {_ratio_icon}\n" if _has_flow else "")
+            + (f"✅ Flow:\n"
+               f"  📥 In:  `{_fv(_buy_v)}`\n"
+               f"  📤 Out: `{_fv(_sell_v)}`\n"
+               f"  {'▲' if _net_v >= 0 else '▼'} Net: `{'+'if _net_v>=0 else ''}{_fv(abs(_net_v))}` {_net_icon}\n"
+               if _has_flow else "")
             + (f"{_onchain_lines}" if _onchain_lines else "")
             + f"\n"
             f"🎯 TP1: `${_fp(_tp1)}` *(+8%)*\n"
