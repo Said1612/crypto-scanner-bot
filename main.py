@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.5"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.6"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3091,25 +3091,25 @@ def _check(sym, ticker, interval, sector_boost=False):
         if _fcf_val <= 0.65 and score < 6.0:
             _rej(f"fcf_structure({_fcf_val:.2f})"); return
         # Double-weak: FCF mediocre + H random/anti-persistent = no structural edge
-        # Calibrated to crypto reality: FCF < 0.80 (was 0.90) + H < 0.48 (was 0.52) + score < 6.5
-        # FCF=0.80-0.90 combined with H=0.48-0.52 is the NORMAL crypto range, not "double weak".
+        # Calibrated to crypto reality: FCF < 0.80 (was 0.90) + H < 0.49 (was 0.48) + score < 6.5
+        # FCF=0.80-0.90 combined with H=0.49-0.52 is the NORMAL crypto range, not "double weak".
         if (_cq_result and _fcf_val < 0.80
-                and _cq_result["H"] < 0.48 and score < 6.5):
+                and _cq_result["H"] < 0.49 and score < 6.5):
             _rej(f"fractal_double_weak(fcf={_fcf_val:.2f},H={_cq_result['H']:.3f})"); return
 
     # Anti-Persistent Gate: H is structurally low in crypto (0.45-0.52 on short frames).
-    # Data: PROM H=0.473 SL (6m), NAORIS H=0.453 SL (76m) — true anti-persistent losses.
-    # Threshold lowered: H < 0.47 (was < 0.49) — H=0.47-0.49 is borderline random, not anti-persistent.
+    # Data: PROM H=0.473 SL (6m), NAORIS H=0.453 SL (76m), DCR H=0.47 SL — anti-persistent losses.
+    # Threshold raised: H < 0.48 (was < 0.47) — H=0.47 at boundary still mean-reverts in crypto.
     # score < 8.0 (was 8.5) — post FCF+CQ compression score rarely reaches 8.5.
     if (_cq_result and not is_moonshot
-            and _cq_result["H"] < 0.47 and score < 8.0
+            and _cq_result["H"] < 0.48 and score < 8.0
             and not _is_explosive):
         _rej(f"anti_persistent(H={_cq_result['H']:.3f})"); return
 
     # Noah Effect + Anti-Persistent + High Position = triple fakeout risk
     # REN pattern: H=0.454 + Noah(73% wicks) + pos=83% → all three together = near-certain SL
     if (_cq_result and _cq_result.get("noah_effect")
-            and _cq_result["H"] < 0.47
+            and _cq_result["H"] < 0.48
             and pos24 > 0.65
             and not is_moonshot and not _is_explosive and not momentum_bypass):
         _rej(f"noah_anti_persistent_highpos(H={_cq_result['H']:.3f},pos={int(pos24*100)}%)"); return
