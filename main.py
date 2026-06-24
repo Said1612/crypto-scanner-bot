@@ -4843,7 +4843,7 @@ def scan_alpha_explosion(all_t: dict):
             f"🆕 *#{sym_base}* 🔥 · Alpha BSC · Signal #{signal_count}\n"
             f"💰 `${_fp(price)}`  📈 `+{chg:.1f}%` 24h\n"
             f"\n"
-            f"⚡ Vol surge: `{vol_surge:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
+            f"⚡ Vol surge: `{spike_1m:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
             f"\n"
             f"🎯 TP1: `${_fp(_tp1)}` *(+8%)*\n"
             f"🎯 TP2: `${_fp(_tp2)}` *(+20%)*\n"
@@ -4869,11 +4869,11 @@ def scan_alpha_explosion(all_t: dict):
                 "sl_pct":   -8.0,   # Alpha signals use fixed -8% SL
             }
             _db_add(sym, price, "Binance", "Alpha", "alpha_explosion",
-                    vol_surge, 0.5, 5.0, 0.3, vol_surge, 0.0, chg, "Alpha BSC")
+                    spike_1m, 0.5, 5.0, 0.3, spike_1m, 0.0, chg, "Alpha BSC")
             save_state()
             sent += 1
             log.info("scan_alpha_explosion: signal %s chg=%.1f%% vol=%.0f surge=%.1fx",
-                     sym, chg, vol, vol_surge)
+                     sym, chg, vol, spike_1m)
 
     if sent:
         log.info("scan_alpha_explosion: fired=%d", sent)
