@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.4"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.5"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2631,7 +2631,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # momentum_bypass: scan_trend_gainer validates 1h volume trend separately.
     # Still requires spike ≥ 0.8x — below-average volume (IO: 0.2x) is not a valid entry.
     # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
-    effective_spike_min = 0.0 if momentum_bypass else (1.5 if super_ratio else spike_min)
+    effective_spike_min = 0.8 if momentum_bypass else (1.5 if super_ratio else spike_min)
     if spike < effective_spike_min:
         _rej("low_spike"); return
 
