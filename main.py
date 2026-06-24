@@ -4957,19 +4957,21 @@ def scan_alpha_explosion(all_t: dict):
             f"🟡 Binance Alpha  🕐 {_ts()} UTC\n"
             f"{'━'*20}"
         )
-        if send(_msg):
+        _ok, _sig_msg_id = send_ex(_msg)
+        if _ok:
             alerted[sym_base] = now
             _signal_dedup[sym] = now
             # Track for milestones + SL monitoring + AI learning
             tracking[sym] = {
-                "entry":    price,
-                "t0":       now,
-                "hit":      set(),
-                "max":      0.0,
-                "min":      0.0,
-                "exchange": "Binance",
-                "is_flash": False,
-                "sl_pct":   -8.0,   # Alpha signals use fixed -8% SL
+                "entry":      price,
+                "t0":         now,
+                "hit":        set(),
+                "max":        0.0,
+                "min":        0.0,
+                "exchange":   "Binance",
+                "is_flash":   False,
+                "sl_pct":     -8.0,        # Alpha signals use fixed -8% SL
+                "sig_msg_id": _sig_msg_id, # enables "back to signal" link on milestones
             }
             _db_add(sym, price, "Binance", "Alpha", "alpha_explosion",
                     spike_1m, 0.5, 5.0, 0.3, spike_1m, 0.0, chg, "Alpha BSC")
