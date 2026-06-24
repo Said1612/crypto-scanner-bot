@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.1"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.2"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4836,7 +4836,7 @@ def scan_alpha_explosion(all_t: dict):
         _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8
                       and chg >= 2.0 and chg <= 8.0
                       and vol >= 50_000
-                      and _t_pos24 <= 0.90)
+                      and _t_pos24 <= 0.82)   # raised from 0.90 — 84-88% is still near-top
 
         if not _explosion:
             continue
@@ -4849,6 +4849,12 @@ def scan_alpha_explosion(all_t: dict):
         _net_v  = _buy_v - _sell_v
         _ratio  = (_buy_v / _sell_v) if _sell_v > 0 else 0.0
         _has_flow = (_buy_v + _sell_v) > 0
+
+        # Block sell-side spikes: ratio < 1.0 = sellers dominate, net <= 0 = outflow
+        # STBL: 49x spike but ratio=0.7 + net=-5.5K = distribution dump, not a buy signal
+        if _has_flow and (_ratio < 1.0 or _net_v <= 0):
+            log.info("ALPHA skip %s — sell spike (ratio=%.2f net=%+.0f)", sym, _ratio, _net_v)
+            continue
 
         # Flow quality icons
         if _ratio >= 3.0:    _ratio_icon = "🔥"
@@ -4942,10 +4948,10 @@ def scan_alpha_explosion(all_t: dict):
             f"⚡ Vol surge: `{spike_1m:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
             + (f"💧 {_liq_power}\n" if _liq_power else "")
             + (f"📊 Ratio: `{_ratio:.1f}x` {_ratio_icon}\n" if _has_flow else "")
-            + (f"✅ Flow:\n"
+            + (f"{'📥' if _net_v >= 0 else '📤'} Flow:\n"
                f"  📥 In:  `{_fv(_buy_v)}`\n"
                f"  📤 Out: `{_fv(_sell_v)}`\n"
-               f"  {'▲' if _net_v >= 0 else '▼'} Net: `{'+'if _net_v>=0 else ''}{_fv(abs(_net_v))}` {_net_icon}\n"
+               f"  {'▲' if _net_v >= 0 else '▼'} Net: `{'+' if _net_v >= 0 else ''}{_fv(abs(_net_v))}` {_net_icon}\n"
                if _has_flow else "")
             + (f"{_onchain_lines}" if _onchain_lines else "")
             + f"\n"
