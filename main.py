@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.6"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.7"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -319,12 +319,32 @@ def _is_primary_process() -> bool:
     """Return True only if this process is still the active (newest) bot instance.
     When a new process starts it overwrites _PID_FILE — old process detects mismatch
     and stops sending signals, eliminating stale-process signal leakage on VPS updates.
+
+    Self-healing: if the PID in the file belongs to a process that is no longer
+    running (stale lock left behind by a crashed/killed instance), reclaim primary.
+    Without this, a dead "newer" instance would suppress all sends forever.
     """
     try:
         with open(_PID_FILE, "r") as f:
-            return int(f.read().strip()) == _MY_PID
+            stored = int(f.read().strip())
+        if stored == _MY_PID:
+            return True
+        if stored <= 0:
+            # Invalidated (0) by a clean shutdown, or invalid — reclaim.
+            _register_primary()
+            return True
+        # A different PID owns the lock — only yield if it is actually alive.
+        try:
+            os.kill(stored, 0)   # signal 0 = existence check, does not kill
+            return False         # a live newer instance owns the lock
+        except ProcessLookupError:
+            _register_primary()  # stale lock — owner is dead, reclaim primary
+            log.warning("Reclaimed primary lock from dead PID %d", stored)
+            return True
+        except PermissionError:
+            return False         # alive (owned by another user) — yield
     except Exception:
-        return True  # if file missing, assume primary
+        return True  # if file missing/corrupt, assume primary
 _trend_dedup         : Dict[str, float] = {}  # {sym: last_trend_signal_ts} 12h cooldown
 _weekly_swing_dedup  : Dict[str, float] = {}  # {sym: last_weekly_swing_ts} 24h cooldown
 _trend_gainer_dedup  : Dict[str, float] = {}  # {sym: last_trend_gainer_ts} 6h cooldown
