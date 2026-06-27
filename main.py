@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.7"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.8"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4878,6 +4878,16 @@ def scan_alpha_explosion(all_t: dict):
         # STBL: 49x spike but ratio=0.7 + net=-5.5K = distribution dump, not a buy signal
         if _has_flow and (_ratio < 1.0 or _net_v <= 0):
             log.info("ALPHA skip %s — sell spike (ratio=%.2f net=%+.0f)", sym, _ratio, _net_v)
+            continue
+
+        # Net flow intensity: net must be a meaningful % of 24h volume = real conviction.
+        # US (Talus) SL: net=+6K on $2.5M vol = 0.24% → buyers barely edge sellers vs churn.
+        # Winners had real intensity: HOLO 22.4K/0.72M=3.1%, CTR 13.4K/1.57M=0.85%.
+        # Floor 0.4%: blocks thin-conviction pumps that fade back to entry.
+        _net_intensity = (_net_v / vol) if vol > 0 else 0.0
+        if _has_flow and _net_intensity < 0.004:
+            log.info("ALPHA skip %s — weak net intensity (%.2f%% net=%+.0f vol=$%.0f)",
+                     sym, _net_intensity * 100, _net_v, vol)
             continue
 
         # Flow quality icons
