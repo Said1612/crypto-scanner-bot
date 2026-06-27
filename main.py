@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.9"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.0"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -530,6 +530,44 @@ def _save_signal_db():
         log.debug("signal_db save: %s", e)
         try: os.unlink(tmp)
         except Exception: pass
+
+# ── Rejected-signal shadow log ─────────────────────────────────────────────
+# Records signals that PASSED detection but were blocked by a quality filter,
+# so eval_rejected.py can later replay klines and check whether the block was
+# correct (price faded = good block) or wrong (price ran +5% = filter too tight).
+REJECTED_DB       = "rejected_signals.json"
+_rej_log_dedup: Dict[str, float] = {}   # {sym: last_logged_ts} — 1h cooldown per coin
+
+def _log_rejected(sym, price, reason, extra=None):
+    """Append a blocked signal to rejected_signals.json (capped, atomic, deduped)."""
+    now = time.time()
+    if now - _rej_log_dedup.get(sym, 0) < 3600:   # 1h cooldown — avoid scan spam
+        return
+    _rej_log_dedup[sym] = now
+    try:
+        rec = {
+            "sym":         sym,
+            "date":        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp":   int(now),
+            "price_entry": price,
+            "reason":      reason,
+        }
+        if extra:
+            rec.update(extra)
+        try:
+            with open(REJECTED_DB) as f:
+                data = json.load(f)
+        except Exception:
+            data = []
+        data.append(rec)
+        if len(data) > 5000:
+            data = data[-5000:]
+        tmp = REJECTED_DB + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, REJECTED_DB)
+    except Exception as e:
+        log.debug("log_rejected failed: %s", e)
 
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding,
@@ -4874,20 +4912,28 @@ def scan_alpha_explosion(all_t: dict):
         _ratio  = (_buy_v / _sell_v) if _sell_v > 0 else 0.0
         _has_flow = (_buy_v + _sell_v) > 0
 
+        # Shadow-log context: shared metrics for any quality-filter rejection below.
+        _net_intensity = (_net_v / vol) if vol > 0 else 0.0
+        _rej_extra = {"ratio": round(_ratio, 2), "net_usd": round(_net_v, 0),
+                      "net_intensity": round(_net_intensity, 4), "pos24": round(_t_pos24, 3),
+                      "spike_1m": round(spike_1m, 1), "chg24": round(chg, 2),
+                      "vol": round(vol, 0), "chain_lq": round(t.get("chain_lq", 0.0), 0)}
+
         # Block sell-side spikes: ratio < 1.0 = sellers dominate, net <= 0 = outflow
         # STBL: 49x spike but ratio=0.7 + net=-5.5K = distribution dump, not a buy signal
         if _has_flow and (_ratio < 1.0 or _net_v <= 0):
             log.info("ALPHA skip %s — sell spike (ratio=%.2f net=%+.0f)", sym, _ratio, _net_v)
+            _log_rejected(sym, price, "alpha_sell_spike", _rej_extra)
             continue
 
         # Net flow intensity: net must be a meaningful % of 24h volume = real conviction.
         # US (Talus) SL: net=+6K on $2.5M vol = 0.24% → buyers barely edge sellers vs churn.
         # Winners had real intensity: HOLO 22.4K/0.72M=3.1%, CTR 13.4K/1.57M=0.85%.
         # Floor 0.4%: blocks thin-conviction pumps that fade back to entry.
-        _net_intensity = (_net_v / vol) if vol > 0 else 0.0
         if _has_flow and _net_intensity < 0.004:
             log.info("ALPHA skip %s — weak net intensity (%.2f%% net=%+.0f vol=$%.0f)",
                      sym, _net_intensity * 100, _net_v, vol)
+            _log_rejected(sym, price, "alpha_weak_intensity", _rej_extra)
             continue
 
         # Trend health: block coins still inside a 1h downtrend (price below SUPERTREND).
@@ -4902,6 +4948,7 @@ def scan_alpha_explosion(all_t: dict):
                 if _st_trend and not _st_trend[-1]:
                     log.info("ALPHA skip %s — below 1h SUPERTREND (downtrend bounce, ratio=%.1f net=%+.0f)",
                              sym, _ratio, _net_v)
+                    _log_rejected(sym, price, "alpha_below_supertrend", _rej_extra)
                     continue
 
         # Flow quality icons
@@ -4932,6 +4979,7 @@ def scan_alpha_explosion(all_t: dict):
         # LAB (ratio=1.1x, net=+4.7K) + RECALL (ratio=1.2x) = noise, not real accumulation
         if _has_flow and _liq_power.startswith("🔴"):
             log.info("ALPHA skip %s — weak inflow (ratio=%.2f net=%+.0f)", sym, _ratio, _net_v)
+            _log_rejected(sym, price, "alpha_weak_inflow", _rej_extra)
             continue
 
         _alpha_verdict = "🟢 *Strong Signal* ✅"
