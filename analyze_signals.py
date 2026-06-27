@@ -169,7 +169,57 @@ def main():
             print(f"    {k:<15} {v:3d} ({_pct(v,len(winners))})")
     print()
 
+    # ── معدل النجاح حسب كل مقياس (لمعايرة الفلاتر) ────────────────
+    WIN_OUT  = {"success", "partial", "stoploss_recovered"}
+    LOSS_OUT = {"stoploss", "reversal", "timeout"}
+    closed = [r for r in db if r.get("outcome") in WIN_OUT | LOSS_OUT]
+
+    def _is_win(r): return r.get("outcome") in WIN_OUT
+
+    def winrate_buckets(group, key, edges, label, fmt="{:.2f}"):
+        print(f"\n  === {label} ===")
+        bounds = ([(-1e18, edges[0])]
+                  + [(edges[i], edges[i+1]) for i in range(len(edges)-1)]
+                  + [(edges[-1], 1e18)])
+        for lo, hi in bounds:
+            grp = [r for r in group if r.get(key) is not None and lo <= r[key] < hi]
+            if not grp:
+                continue
+            n = len(grp)
+            w = sum(1 for r in grp if _is_win(r))
+            avg = _avg([r.get("max_gain_pct") for r in grp]) or 0
+            lo_s = "-inf" if lo < -1e17 else fmt.format(lo)
+            hi_s = "+inf" if hi >  1e17 else fmt.format(hi)
+            print(f"    [{lo_s:>8} .. {hi_s:>8})  n={n:3d}  win={w/n*100:5.1f}%  avg_peak={avg:+6.1f}%")
+
+    def winrate_cat(group, key, label):
+        print(f"\n  === {label} ===")
+        vals = defaultdict(list)
+        for r in group:
+            vals[r.get(key)].append(r)
+        for v, grp in sorted(vals.items(), key=lambda x: -len(x[1])):
+            n = len(grp); w = sum(1 for r in grp if _is_win(r))
+            avg = _avg([r.get("max_gain_pct") for r in grp]) or 0
+            print(f"    {str(v):>18}  n={n:3d}  win={w/n*100:5.1f}%  avg_peak={avg:+6.1f}%")
+
+    print(f"\n{'═'*60}")
+    print(f"  📐 معدل النجاح حسب المقياس — closed={len(closed)}")
+    if closed:
+        wtot = sum(1 for r in closed if _is_win(r))
+        print(f"  معدل النجاح الإجمالي: {wtot/len(closed)*100:.1f}% "
+              f"({wtot} ربح / {len(closed)-wtot} خسارة)")
     print(f"{'═'*60}")
+    if closed:
+        winrate_cat(closed, "is_alpha", "ALPHA مقابل SPOT")
+        winrate_cat(closed, "scanner",  "حسب السكانر")
+        winrate_buckets(closed, "ratio",   [1.5, 2.0, 3.0, 5.0],           "حسب RATIO")
+        winrate_buckets(closed, "pos24",   [0.40, 0.55, 0.65, 0.75, 0.85], "حسب POS24")
+        winrate_buckets(closed, "spike",   [3.0, 5.0, 10.0, 20.0],         "حسب SPIKE")
+        winrate_buckets(closed, "net_usd", [5000, 15000, 30000, 100000],   "حسب NET USD", fmt="{:.0f}")
+        winrate_buckets(closed, "score",   [4.0, 5.0, 6.0, 7.0],           "حسب SCORE")
+        winrate_buckets(closed, "ob_spot", [0.50, 0.60, 0.70],             "حسب ORDERBOOK")
+
+    print(f"\n{'═'*60}")
     print("  ملاحظة: حقول fra_* ستُملأ فقط في الإشارات الجديدة (v3.2.44+)")
     print(f"{'═'*60}\n")
 
