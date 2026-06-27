@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.0"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.1"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1459,13 +1459,27 @@ def _calc_tp_sl(price, high24, low24, spike, score, exchange, is_moonshot=False,
     return tp1, tp2, tp3, sl, sl_pct, tp_pcts
 
 
+def _market_type(t):
+    """Display label for the market a coin trades on.
+    Distinct concepts that must NOT be conflated in the signal text:
+      binance_alpha → on-chain Alpha BSC token (chain_lq/holders, no OI)
+      futures_only  → perpetual-only coin (has OI/funding/L-S, e.g. 0G)
+      otherwise     → regular spot.
+    """
+    if t.get("binance_alpha"):
+        return "Alpha"
+    if t.get("futures_only"):
+        return "Futures"
+    return "Spot"
+
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
                  high24=0.0, low24=0.0, badge="🔔1",
                  funding_label="Spot", ob_label="⚪ Balanced", ob_pct=50,
                  score=0.0, moonshot=False, momentum=False, vol_explosion=False,
                  interval="1h", is_flash=False, signal_type=None, is_alpha=False,
-                 fractal_score=None, oi_label="", counter_trend=False, verdict=""):
+                 fractal_score=None, oi_label="", counter_trend=False, verdict="",
+                 mkt_label=None):
     global signal_count
     signal_count += 1
 
@@ -1476,8 +1490,11 @@ def build_signal(sym, price, change, buy_v, sell_v,
     in_pct   = int(buy_v  / _total_v * 100) if _total_v > 0 else 50
     out_pct  = int(sell_v / _total_v * 100) if _total_v > 0 else 50
     ex_icon  = "🟡"
-    # Market type label shown next to coin name
-    if is_alpha:
+    # Market type label shown next to coin name.
+    # Prefer explicit mkt_label (distinguishes Alpha vs Futures); fall back to is_alpha.
+    if mkt_label is not None:
+        _mkt_label = mkt_label
+    elif is_alpha:
         _mkt_label = "Alpha"
     else:
         _mkt_label = "Spot"
@@ -3398,6 +3415,7 @@ def _check(sym, ticker, interval, sector_boost=False):
                        interval=interval,
                        is_flash=is_flash,
                        is_alpha=(ticker.get("futures_only", False) or ticker.get("binance_alpha", False)),
+                       mkt_label=_market_type(ticker),
                        fractal_score=_fractal_score,
                        oi_label=(_oi["label"] if _oi and _oi.get("label") else ""),
                        counter_trend=_counter_trend_main,
@@ -4317,6 +4335,7 @@ def scan_supertrend(all_t):
             score=score, interval="1h",
             signal_type="SUPERTREND BREAKOUT 📈",
             is_alpha=(ticker.get("futures_only", False) or ticker.get("binance_alpha", False)),
+            mkt_label=_market_type(ticker),
         )
 
         ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "supertrend",
@@ -4775,7 +4794,7 @@ def scan_quiet_accum(all_t):
             f"{'━'*20}\n"
             f"💀 *MAFIO SNIPER* 📡\n"
             f"\n"
-            f"🆕 *#{sym[:-4]}* 💀 · {'Alpha' if (t.get('futures_only') or t.get('binance_alpha')) else 'Spot'} · Signal #{signal_count} {badge}\n"
+            f"🆕 *#{sym[:-4]}* 💀 · {_market_type(t)} · Signal #{signal_count} {badge}\n"
             f"💰 Price: `${_fp(price)}`\n"
             f"📉 24h Change: `{t['change']:+.2f}%`\n"
             f"📍 Position: `%{pos_pct} from Bottom` ✅\n"
@@ -5524,7 +5543,7 @@ def scan_weekly_breakout(all_t):
             ob_pct         = int(ob_spot * 100)
             ob_lbl         = "🟢 Buyers" if ob_spot > 0.58 else "⚪ Balanced"
             pos_pct        = int(pos24 * 100)
-            _mkt           = "Alpha" if (t.get("futures_only") or t.get("binance_alpha")) else "Spot"
+            _mkt           = _market_type(t)
             _, badge       = _register_confirm(sym, "weekly_breakout")
 
             global signal_count
@@ -5725,7 +5744,7 @@ def scan_deep_value(all_t):
             ob_pct         = int(ob_spot * 100)
             ob_lbl         = "🟢 Buyers" if ob_spot > 0.58 else "⚪ Balanced"
             pos_pct        = int(pos24 * 100)
-            _mkt           = "Alpha" if (t.get("futures_only") or t.get("binance_alpha")) else "Spot"
+            _mkt           = _market_type(t)
             _, badge       = _register_confirm(sym, "deep_value")
 
             global signal_count
