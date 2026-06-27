@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.5.8"  # bump this with every push — verify after restart
+BOT_VERSION = "3.5.9"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4889,6 +4889,20 @@ def scan_alpha_explosion(all_t: dict):
             log.info("ALPHA skip %s — weak net intensity (%.2f%% net=%+.0f vol=$%.0f)",
                      sym, _net_intensity * 100, _net_v, vol)
             continue
+
+        # Trend health: block coins still inside a 1h downtrend (price below SUPERTREND).
+        # CTR bounced inside a multi-week downtrend (price under 4h ST) = counter-trend bounce,
+        # higher SL risk. Require 1h SUPERTREND bullish unless flow proves an independent reversal.
+        # Bypass: Strong/Massive inflow (ratio>=3 AND net>=30K) — heavy buying IS the confirmation.
+        _strong_flow = (_ratio >= 3.0 and _net_v >= 30_000)
+        if not _strong_flow:
+            _kl_1h = fetch_klines(sym, base_url, interval="1h", limit=30) if base_url else []
+            if len(_kl_1h) >= 14:
+                _st_trend = _calc_supertrend(_kl_1h, period=10, mult=3.0)
+                if _st_trend and not _st_trend[-1]:
+                    log.info("ALPHA skip %s — below 1h SUPERTREND (downtrend bounce, ratio=%.1f net=%+.0f)",
+                             sym, _ratio, _net_v)
+                    continue
 
         # Flow quality icons
         if _ratio >= 3.0:    _ratio_icon = "🔥"
