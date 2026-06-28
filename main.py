@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.1"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.2"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2899,9 +2899,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     if spike >= 20.0 and move < _va_min and not is_moonshot:
         _rej("vol_absorption"); return
 
-    # Post-peak distribution: ARTX pattern — high volume spike after peak, price already fell
-    # spike>=15x + pos24>50% + price>5% below 24h high = dump/distribution, not accumulation
-    if (spike >= 15.0 and pos24 > 0.50
+    # Post-peak distribution: ARTX/XEC pattern — big volume spike AFTER the peak,
+    # price already fell back. Coin rocketed to its high then dropped to mid-range = the
+    # move already played out; the signal would arrive late on the pullback.
+    # pos24 threshold lowered 0.50 → 0.40: XEC spiked to 100% then fell to 48% of range and
+    # dodged the old 0.50 gate by 2 points. 0.40 still allows genuine bottom reversals
+    # (moonshots near the low, e.g. KAS at pos=16%) which are NOT post-peak.
+    if (spike >= 15.0 and pos24 > 0.40
             and ticker["high24"] > 0 and price < ticker["high24"] * 0.95):
         _rej("post_peak_dist"); return
 
