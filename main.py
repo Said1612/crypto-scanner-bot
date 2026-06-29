@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.2"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.3"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4912,14 +4912,16 @@ def scan_alpha_explosion(all_t: dict):
             continue
 
         # Alpha explosion: 1m candle ≥ 5x avg + coin moving + not already exhausted
-        # chg <= 8.0: catch early moves only — POPCAT was +14.5% before signal = near top
+        # chg <= 6.0: catch EARLY moves only. Data: every Alpha winner entered at chg < 4.5%
+        # (GWEI +4.0%→+21%, CTR +3.4%, AIGENSYN +2.0%) while BIRB at +7.6% (already extended)
+        # hit SL -8.5%. Lowered 8.0 → 6.0 — a coin already up 7%+ on the day is chasing.
         _t_low24  = t.get("low24", price)
         _t_high24 = t.get("high24", price)
         _t_rng    = _t_high24 - _t_low24
         _t_pos24  = (price - _t_low24) / _t_rng if _t_rng > 0 else 0.5
         # Block if price is at 90%+ of daily range = near top entry
         _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8
-                      and chg >= 2.0 and chg <= 8.0
+                      and chg >= 2.0 and chg <= 6.0
                       and vol >= 50_000
                       and _t_pos24 <= 0.75)   # tightened from 0.82 — block near-top entries (ATM 99%)
 
