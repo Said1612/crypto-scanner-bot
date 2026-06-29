@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.3"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.4"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2777,7 +2777,11 @@ def _check(sym, ticker, interval, sector_boost=False):
         crash_from_top = (ticker["high24"] - price) / ticker["high24"] * 100
         if pump_size > 30.0 and crash_from_top > ctx["crash_limit"]:
             _vol_breakout = (spike >= _breakout_spike_min and ob_quick >= _breakout_ob_thr and move >= 1.0)
-            if not _vol_breakout:
+            # momentum_bypass exempt: scan_trend_gainer already validated trend health
+            # (crash<20% from peak + pos24>0.50 + bullish candles + sustained volume). Slow
+            # grinders (ACT/SYN +30%+ over hours) never spike, so they'd always fail _vol_breakout
+            # and get wrongly rejected as post_pump despite being healthy uptrends.
+            if not _vol_breakout and not momentum_bypass:
                 _rej("post_pump"); return
 
     # Position guard — uses ctx.pos_limit (adaptive)
