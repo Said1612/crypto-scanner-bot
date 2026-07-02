@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.4"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.5"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4923,11 +4923,14 @@ def scan_alpha_explosion(all_t: dict):
         _t_high24 = t.get("high24", price)
         _t_rng    = _t_high24 - _t_low24
         _t_pos24  = (price - _t_low24) / _t_rng if _t_rng > 0 else 0.5
-        # Block if price is at 90%+ of daily range = near top entry
+        # pos24 <= 0.70: clean threshold from real outcomes. Alpha signals at pos24 71-72%
+        # hit SL even with strong flow — SPACE (ratio 4.5x, intensity 1.37%) lost at pos 71%,
+        # HOLO lost at 72%. Best high-pos winner was TAC at pos 67% (+202%). 0.70 blocks the
+        # late-entry losers (HOLO/SPACE/HANA 71-73%) while keeping TAC and all sub-50% winners.
         _explosion = (spike_1m >= 5.0 and prev_spike >= 0.8
                       and chg >= 2.0 and chg <= 6.0
                       and vol >= 50_000
-                      and _t_pos24 <= 0.75)   # tightened from 0.82 — block near-top entries (ATM 99%)
+                      and _t_pos24 <= 0.70)   # tightened 0.75 → 0.70 (SPACE/HOLO SL at pos 71-72%)
 
         if not _explosion:
             continue
