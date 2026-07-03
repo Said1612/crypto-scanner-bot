@@ -35,9 +35,18 @@ def load():
 
 def main():
     db = load()
+    # Optional date filter: `python3 analyze_signals.py 2026-07-01` analyzes only
+    # signals on/after that UTC date — lets us isolate POST-FIX signals from the
+    # older contaminated history and judge the current filters on clean data.
+    since = None
+    if len(sys.argv) > 1 and len(sys.argv[1]) >= 8 and sys.argv[1][:4].isdigit():
+        since = sys.argv[1]
+        db = [r for r in db if (r.get("date") or "") >= since]
     total = len(db)
     print(f"\n{'═'*60}")
     print(f"  MAFIO SNIPER — تحليل الإشارات")
+    if since:
+        print(f"  ⏱ منذ: {since} (بيانات ما بعد الإصلاح فقط)")
     print(f"  إجمالي السجلات: {total}")
     print(f"{'═'*60}\n")
 
