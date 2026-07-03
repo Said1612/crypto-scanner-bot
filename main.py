@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.6"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.7"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -531,43 +531,96 @@ def _save_signal_db():
         try: os.unlink(tmp)
         except Exception: pass
 
-# ── Rejected-signal shadow log ─────────────────────────────────────────────
+# ── Rejected-signal shadow log + real-time outcome tracking ────────────────
 # Records signals that PASSED detection but were blocked by a quality filter,
-# so eval_rejected.py can later replay klines and check whether the block was
-# correct (price faded = good block) or wrong (price ran +5% = filter too tight).
+# then shadow-tracks each one in real time using the live all_t prices the bot
+# already fetches — so we can measure whether the block was RIGHT (price faded
+# to -8%) or WRONG (price ran +5%). Real-time tracking is reliable for Alpha BSC
+# tokens, whose HISTORICAL klines are not available from the spot API (the old
+# eval_rejected.py replay approach returned "nodata" for ~70% of them).
 REJECTED_DB       = "rejected_signals.json"
-_rej_log_dedup: Dict[str, float] = {}   # {sym: last_logged_ts} — 1h cooldown per coin
+_rejected_db: List[dict] = []            # in-memory, mirrors _signal_db pattern
+_rej_log_dedup: Dict[str, float] = {}    # {sym: last_logged_ts} — 1h cooldown per coin
+REJ_WIN_PCT  =  5.0
+REJ_LOSS_PCT = -8.0
+REJ_MAX_AGE  = 86400   # 24h horizon, matches signal timeout
+
+def _load_rejected_db():
+    global _rejected_db
+    try:
+        with open(REJECTED_DB) as f:
+            _rejected_db = json.load(f)
+        log.info("rejected_db loaded: %d records", len(_rejected_db))
+    except Exception:
+        _rejected_db = []
+
+def _save_rejected_db():
+    try:
+        tmp = REJECTED_DB + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(_rejected_db, f, ensure_ascii=False)
+        os.replace(tmp, REJECTED_DB)
+    except Exception as e:
+        log.debug("rejected_db save: %s", e)
 
 def _log_rejected(sym, price, reason, extra=None):
-    """Append a blocked signal to rejected_signals.json (capped, atomic, deduped)."""
+    """Append a blocked signal (capped, deduped) with pending shadow outcome."""
     now = time.time()
     if now - _rej_log_dedup.get(sym, 0) < 3600:   # 1h cooldown — avoid scan spam
         return
     _rej_log_dedup[sym] = now
     try:
         rec = {
-            "sym":         sym,
-            "date":        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            "timestamp":   int(now),
-            "price_entry": price,
-            "reason":      reason,
+            "sym":            sym,
+            "date":           datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp":      int(now),
+            "price_entry":    price,
+            "reason":         reason,
+            "shadow_outcome": "pending",   # pending → would_win / would_lose / expired
+            "shadow_peak":    0.0,         # highest % reached from entry
+            "shadow_dd":      0.0,         # deepest % below entry
         }
         if extra:
             rec.update(extra)
-        try:
-            with open(REJECTED_DB) as f:
-                data = json.load(f)
-        except Exception:
-            data = []
-        data.append(rec)
-        if len(data) > 5000:
-            data = data[-5000:]
-        tmp = REJECTED_DB + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(data, f, ensure_ascii=False)
-        os.replace(tmp, REJECTED_DB)
+        _rejected_db.append(rec)
+        if len(_rejected_db) > 5000:
+            del _rejected_db[:len(_rejected_db) - 5000]
+        _save_rejected_db()
     except Exception as e:
         log.debug("log_rejected failed: %s", e)
+
+def _update_rejected_outcomes(all_t):
+    """Shadow-track pending blocked signals against the live all_t snapshot.
+    Zero extra API calls (reuses prices already fetched). Marks would_win when
+    peak first reaches +5%, would_lose when drawdown first reaches -8%, else
+    expired after 24h. Runs every scan so peaks between saves aren't missed."""
+    if not _rejected_db:
+        return
+    now = time.time()
+    changed = False
+    for rec in _rejected_db:
+        if rec.get("shadow_outcome", "pending") != "pending":
+            continue
+        entry = rec.get("price_entry", 0) or 0
+        if entry <= 0:
+            rec["shadow_outcome"] = "invalid"; changed = True; continue
+        t = all_t.get(rec.get("sym", ""))
+        if t and (t.get("price", 0) or 0) > 0:
+            gain = (t["price"] - entry) / entry * 100.0
+            if gain > rec.get("shadow_peak", 0.0):
+                rec["shadow_peak"] = round(gain, 2); changed = True
+            if gain < rec.get("shadow_dd", 0.0):
+                rec["shadow_dd"] = round(gain, 2); changed = True
+            if rec["shadow_peak"] >= REJ_WIN_PCT:
+                rec["shadow_outcome"] = "would_win"; changed = True; continue
+            if rec["shadow_dd"] <= REJ_LOSS_PCT:
+                rec["shadow_outcome"] = "would_lose"; changed = True; continue
+        if now - (rec.get("timestamp", 0) or 0) >= REJ_MAX_AGE:
+            rec["shadow_outcome"] = ("would_win"  if rec.get("shadow_peak", 0.0) >= REJ_WIN_PCT
+                                     else "would_lose" if rec.get("shadow_dd", 0.0) <= REJ_LOSS_PCT
+                                     else "expired")
+            changed = True
+    return changed
 
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding,
@@ -6129,6 +6182,7 @@ def main():
     register_commands()
     load_state()
     load_signal_db()
+    _load_rejected_db()
 
     _startup_msg = (
         f"🔄 *MAFIO SNIPER v{BOT_VERSION} — Online*\n"
@@ -6215,6 +6269,15 @@ def main():
                 _save_signal_db()
 
             check_milestones(all_t)
+
+            # Shadow-track blocked signals in real time (updates in-memory each scan,
+            # persists every 5 min). Non-blocking — never break the loop over this.
+            try:
+                _rej_dirty = _update_rejected_outcomes(all_t)
+                if _rej_dirty and int(now) % 300 < 35:
+                    _save_rejected_db()
+            except Exception as _re:
+                log.debug("rejected outcome update: %s", _re)
 
             # ── BTC Health + Dump Cascade ────────────────────────────────────────
             check_btc_health(all_t)
