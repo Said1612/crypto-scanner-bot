@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.5"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.6"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3169,6 +3169,12 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Moonshots and volume_explosion bypass — spike IS the quality signal; fractal lags the move.
     if _fva_result and not is_moonshot and not volume_explosion:
         _fcf_val = _fva_result["fcf"]
+        # Absolute FCF floor — severe fractal exhaustion loses even with a good score AND
+        # strong order flow. HEI hit SL at FCF 0.45 despite OB 79% + ratio 3.9x + pos 31%.
+        # Historical: NAORIS(0.40 SL), HUMA(0.50 SL). No observed winner had FCF < 0.77.
+        # This closes the gap where score >= 6.0 let very-low-FCF signals bypass fcf_structure.
+        if _fcf_val < 0.50:
+            _rej(f"fcf_exhausted({_fcf_val:.2f})"); return
         # Threshold lowered: FCF ≤ 0.65 (was 0.75) — FCF=0.70-0.75 is mediocre but not exhausted.
         # score < 6.0 (was 7.5) — account for FCF+CQ double compression on post-adj score.
         if _fcf_val <= 0.65 and score < 6.0:
