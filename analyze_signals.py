@@ -219,6 +219,55 @@ def main():
         winrate_buckets(closed, "score",   [4.0, 5.0, 6.0, 7.0],           "حسب SCORE")
         winrate_buckets(closed, "ob_spot", [0.50, 0.60, 0.70],             "حسب ORDERBOOK")
 
+    # ── CONVICTION SCORE (0-10) — combines the validated winning factors ─────────
+    # Goal: find a threshold that separates winners from losers so we can safely
+    # block the weak tier WITHOUT blocking TAC-type winners (strong flow, weak spike).
+    def _conviction(r):
+        s = 0.0
+        ratio = r.get("ratio") or 0
+        ob    = r.get("ob_spot") or 0
+        net   = r.get("net_usd") or 0
+        pos   = r.get("pos24")
+        spike = r.get("spike") or 0
+        fs    = r.get("fractal_score") or 0
+        jy    = r.get("fra_jy") or 0
+        # Order flow (max 4) — this is what carried TAC (ratio 2.7 + OB 72)
+        s += 2 if ratio >= 3.0 else 1 if ratio >= 2.0 else 0
+        s += 2 if ob >= 0.72 else 1 if ob >= 0.65 else 0
+        s += 2 if net >= 100_000 else 1 if net >= 30_000 else 0
+        s = min(s, 4)
+        # Early entry (max 2)
+        if pos is not None:
+            s += 2 if pos <= 0.45 else 1 if pos <= 0.60 else 0
+        # Volume event (max 2)
+        s += 2 if spike >= 15 else 1 if spike >= 8 else 0
+        # Fractal health (max 2)
+        s += 1 if fs >= 7 else 0
+        s += 1 if jy >= 0.05 else 0
+        return min(round(s), 10)
+
+    for r in closed:
+        r["_conv"] = _conviction(r)
+
+    print(f"\n{'═'*60}")
+    print("  💎 معدل النجاح حسب درجة القناعة (0-10)")
+    print(f"{'═'*60}")
+    if closed:
+        winrate_buckets(closed, "_conv", [2, 4, 6, 8], "حسب CONVICTION")
+        # Where do the BIG winners land? (must not block these)
+        big = sorted([r for r in closed if _is_win(r)],
+                     key=lambda x: -(x.get("max_gain_pct") or 0))[:12]
+        print("\n  === أين تقع أكبر الرابحات؟ (يجب ألا نحجبها) ===")
+        for r in big:
+            print(f"    {r.get('sym','?'):>12}  conv={r.get('_conv')}  "
+                  f"gain={r.get('max_gain_pct',0):+6.1f}%  ratio={r.get('ratio')} "
+                  f"ob={r.get('ob_spot')} pos={r.get('pos24')} spike={r.get('spike')}")
+        # Lowest-conviction winners set the safe floor for blocking
+        conv_wins = [r.get("_conv") for r in closed if _is_win(r)]
+        if conv_wins:
+            print(f"\n  أدنى قناعة بين الرابحات = {min(conv_wins)}  "
+                  f"← الحجب يجب أن يكون تحت هذا الرقم فقط")
+
     print(f"\n{'═'*60}")
     print("  ملاحظة: حقول fra_* ستُملأ فقط في الإشارات الجديدة (v3.2.44+)")
     print(f"{'═'*60}\n")
