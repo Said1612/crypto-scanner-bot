@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.7"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.8"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3222,12 +3222,9 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Moonshots and volume_explosion bypass — spike IS the quality signal; fractal lags the move.
     if _fva_result and not is_moonshot and not volume_explosion:
         _fcf_val = _fva_result["fcf"]
-        # Absolute FCF floor — severe fractal exhaustion loses even with a good score AND
-        # strong order flow. HEI hit SL at FCF 0.45 despite OB 79% + ratio 3.9x + pos 31%.
-        # Historical: NAORIS(0.40 SL), HUMA(0.50 SL). No observed winner had FCF < 0.77.
-        # This closes the gap where score >= 6.0 let very-low-FCF signals bypass fcf_structure.
-        if _fcf_val < 0.50:
-            _rej(f"fcf_exhausted({_fcf_val:.2f})"); return
+        # NOTE: this whole block is dead when _fva is force-disabled (_fva=None) — the real
+        # FCF floor for regular signals lives in the Late FCF Gate below, where _fva_show has
+        # populated _fva_result. Kept here for when _fva is ever re-enabled.
         # Threshold lowered: FCF ≤ 0.65 (was 0.75) — FCF=0.70-0.75 is mediocre but not exhausted.
         # score < 6.0 (was 7.5) — account for FCF+CQ double compression on post-adj score.
         if _fcf_val <= 0.65 and score < 6.0:
@@ -3439,6 +3436,12 @@ def _check(sym, ticker, interval, sector_boost=False):
         if (not is_moonshot and volume_explosion
                 and _post_fcf <= 0.42 and not momentum_bypass):
             _rej(f"vol_explosion_fcf_extreme({_post_fcf:.2f})"); return
+        # Regular signals: FCF < 0.50 = severe fractal exhaustion, loses even with strong flow.
+        # HEI hit SL at FCF 0.45 (OB 79% + ratio 3.9x + pos 31%); "B" fired at FCF 0.40. No
+        # observed winner had FCF < 0.77. This is the WORKING location — the same floor in the
+        # pre-display block above is dead code (its gate agent _fva is force-disabled).
+        if (not is_moonshot and not volume_explosion and _post_fcf < 0.50):
+            _rej(f"fcf_exhausted({_post_fcf:.2f})"); return
 
     # ── Entry Verdict — computed before building signal so it shows at top ──
     _fra_res = (_fra.get("resistance") if _fra else None)
