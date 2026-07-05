@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.8"  # bump this with every push — verify after restart
+BOT_VERSION = "3.6.9"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1525,6 +1525,20 @@ def _market_type(t):
         return "Futures"
     return "Spot"
 
+def _momentum_warning(ratio, spike, pos24):
+    """Display-only flag (never blocks) for 'loud/likely-extended' signals — an
+    extreme buyer ratio OR huge volume surge combined with a mid-high position
+    usually means the explosion already happened, so entry is late. PHAROS
+    (surge 82x, pos 62%) and ZORA (ratio 9.7x, pos 55%) hit SL right after firing.
+    NOT a block: loud signals still win 36-54% (SNDK ratio 9.1x, BNRS ratio 5.5x),
+    so blocking would kill winners too — this only warns the reader to verify entry."""
+    try:
+        if pos24 is not None and (ratio >= 8.0 or spike >= 30.0) and pos24 >= 0.55:
+            return "⚠️ *High momentum* — may already be extended, verify entry\n"
+    except Exception:
+        pass
+    return ""
+
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
                  high24=0.0, low24=0.0, badge="🔔1",
@@ -1591,6 +1605,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
     _type_line = f"📈 *{signal_type}*\n" if signal_type else ""
     _counter_tag = "\n🔥 *Counter-trend* — Rising against BTC decline\n" if counter_trend else ""
+    _mom_warn = _momentum_warning(ratio, spike, pos_from_bottom / 100.0)
 
     # TP/SL lines
     tp1, tp2, tp3, sl, sl_pct, tp_pcts = _calc_tp_sl(
@@ -1617,6 +1632,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         + f"🆕 *#{base}* 💀 · {_mkt_label} · Signal #{signal_count} {badge}\n"
         + f"💰 `${_fp(price)}`  📈 `+{move:.2f}%`  📍 `{pos_from_bottom}%` {pos_icon}\n"
         + (f"{score_label}\n" if score_label else "")
+        + (f"{_mom_warn}" if _mom_warn else "")
         + f"\n"
         + f"⚡ `{spike:.1f}x`  ·  📊 Ratio `{ratio:.1f}x` {int_icon}  ·  📥 `{in_pct}%` 📤 `{out_pct}%`\n"
         + f"💹 Net `+{_fv(net)}`\n"
@@ -5140,7 +5156,9 @@ def scan_alpha_explosion(all_t: dict):
             f"\n"
             f"🆕 *#{sym_base}* 🔥 · Alpha BSC · Signal #{signal_count}\n"
             f"💰 `${_fp(price)}`  📈 `+{chg:.1f}%` 24h  📍 `{_pos24_pct}%` from bottom {_pos_icon}\n"
-            f"\n"
+            + (f"{_momentum_warning(_ratio, spike_1m, _t_pos24)}"
+               if _momentum_warning(_ratio, spike_1m, _t_pos24) else "")
+            + f"\n"
             f"⚡ Vol surge: `{spike_1m:.1f}x`  ·  📊 Vol: `${vol/1e6:.2f}M`\n"
             + (f"💧 {_liq_power}\n" if _liq_power else "")
             + (f"📊 Ratio: `{_ratio:.1f}x` {_ratio_icon}\n" if _has_flow else "")
