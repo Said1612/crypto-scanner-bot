@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.1"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.2"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -65,6 +65,14 @@ REDIS_URL      = os.getenv("REDIS_URL", os.getenv("UPSTASH_REDIS_REST_URL", ""))
 REDIS_TOKEN    = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY      = "mafio_v31"
 PROXY_URL      = os.getenv("PROXY_URL", "")   # e.g. http://user:pass@host:port
+
+# v3.7.2: alpha_explosion PAUSED. Closed-signal data (n=27): win 11.1%, avg_peak +5.3% —
+# these signals do NOT run (main peaks +45%, volume_explosion +37%). They lose at EVERY pos
+# level (low<0.35 → 10%, high 0.55-0.70 → 12.5%) so the pos cap is not the fix; the whole
+# path underperforms. Clean (post-filter) signals are still shadow-logged as
+# "alpha_explosion_paused" so we can measure whether a future filter flips it positive before
+# re-enabling. Flip to True to resume sending.
+ALPHA_EXPLOSION_ENABLED = False
 
 FAST_SCAN_S      = 5     # every 5s — confirmed working: catches REPAI/NEOS/BLINKY type explosions
 SLOW_SCAN_S      = 300   # every 5min (1h klines)
@@ -5104,6 +5112,16 @@ def scan_alpha_explosion(all_t: dict):
         if _has_flow and _liq_power.startswith("🔴"):
             log.info("ALPHA skip %s — weak inflow (ratio=%.2f net=%+.0f)", sym, _ratio, _net_v)
             _log_rejected(sym, price, "alpha_weak_inflow", _rej_extra)
+            continue
+
+        # v3.7.2: alpha_explosion paused — this signal passed every quality filter and is
+        # exactly what we used to SEND (and lose on: 11% win, +5.3% avg_peak). Shadow-log it
+        # so _update_rejected_outcomes tracks whether it would_win/would_lose; this is the data
+        # we need to decide if a future filter can revive the path. Re-enable via ALPHA_EXPLOSION_ENABLED.
+        if not ALPHA_EXPLOSION_ENABLED:
+            log.info("ALPHA paused %s — alpha_explosion disabled (11%% win, +5.3%% peak); shadow-logging only",
+                     sym)
+            _log_rejected(sym, price, "alpha_explosion_paused", _rej_extra)
             continue
 
         _alpha_verdict = "🟢 *Strong Signal* ✅"
