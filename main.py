@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.6.9"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.0"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -625,9 +625,13 @@ def _update_rejected_outcomes(all_t):
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding,
             fractal_score=None, h_value=None, oi_delta=None, fra=None,
-            is_alpha=False):
+            is_alpha=False, mkt_cap=0.0, chain_lq=0.0):
     """Record a new signal with all parameters for future ML training."""
     _fra_d = fra or {}
+    # liq_ratio: on-chain liquidity as a fraction of market cap — tests the user's
+    # hypothesis that a healthy liquidity-to-mktcap ratio precedes real explosions
+    # (thin liq vs a big mktcap = manipulable/illiquid). Only meaningful for Alpha.
+    _liq_ratio = round(chain_lq / mkt_cap, 4) if (mkt_cap and mkt_cap > 0) else None
     _signal_db.append({
         "id":           f"{sym}_{int(time.time())}",
         "sym":          sym,
@@ -649,6 +653,10 @@ def _db_add(sym, price, exchange, tier_name, scanner,
         "net_usd":      round(net, 0),
         "move_pct":     round(move, 2),
         "funding":      funding,
+        # On-chain size/liquidity (Alpha) — for the liq/mktcap explosion study
+        "mkt_cap":      round(mkt_cap, 0) if mkt_cap else None,
+        "chain_lq":     round(chain_lq, 0) if chain_lq else None,
+        "liq_ratio":    _liq_ratio,     # chain_lq / mkt_cap (None if unknown)
         # Fractal aggregate
         "fractal_score": fractal_score,
         "h_value":       round(h_value, 4) if h_value is not None else None,
@@ -3621,7 +3629,8 @@ def _check(sym, ticker, interval, sector_boost=False):
             h_value=(_cq_result["H"] if _cq_result else None),
             oi_delta=(_oi["oi_delta_1h"] if _oi else None),
             fra=_fra,
-            is_alpha=_is_alpha_coin)
+            is_alpha=_is_alpha_coin,
+            mkt_cap=ticker.get("mkt_cap", 0.0), chain_lq=ticker.get("chain_lq", 0.0))
     # Record fractal snapshot for self-learning
     if _fractal_agent is not None and _fra and _fra.get("_features"):
         _fractal_agent.record_signal(sym, _fra["_features"])
@@ -5194,7 +5203,8 @@ def scan_alpha_explosion(all_t: dict):
                 "sig_msg_id": _sig_msg_id, # enables "back to signal" link on milestones
             }
             _db_add(sym, price, "Binance", "Alpha", "alpha_explosion",
-                    spike_1m, 0.5, 5.0, 0.3, spike_1m, 0.0, chg, "Alpha BSC")
+                    spike_1m, 0.5, 5.0, 0.3, spike_1m, 0.0, chg, "Alpha BSC",
+                    mkt_cap=t.get("mkt_cap", 0.0), chain_lq=t.get("chain_lq", 0.0))
             save_state()
             sent += 1
             log.info("scan_alpha_explosion: signal %s chg=%.1f%% vol=%.0f surge=%.1fx",

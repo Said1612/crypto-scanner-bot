@@ -277,8 +277,58 @@ def main():
             print(f"\n  أدنى قناعة بين الرابحات = {min(conv_wins)}  "
                   f"← الحجب يجب أن يكون تحت هذا الرقم فقط")
 
+    # ── EXPLOSION SIGNATURE — what separates big winners from losers ─────────────
+    # The user's core question: what predicts a real move? Profile the metric
+    # averages of BIG winners vs losers side by side. A metric whose average
+    # differs sharply between the two groups is a real signal; a similar one is noise.
+    def _mean(recs, key):
+        vals = [r.get(key) for r in recs if isinstance(r.get(key), (int, float))]
+        return sum(vals) / len(vals) if vals else None
+
+    def _hit(recs, key, pred):
+        vals = [r for r in recs if isinstance(r.get(key), (int, float))]
+        if not vals: return None
+        return sum(1 for r in vals if pred(r[key])) / len(vals) * 100
+
+    big  = [r for r in closed if (r.get("max_gain_pct") or 0) >= 20]   # +20% explosions
+    mega = [r for r in closed if (r.get("max_gain_pct") or 0) >= 50]   # +50% monsters
+    lose = [r for r in closed if not _is_win(r)]
+
     print(f"\n{'═'*60}")
-    print("  ملاحظة: حقول fra_* ستُملأ فقط في الإشارات الجديدة (v3.2.44+)")
+    print(f"  💥 بصمة الانفجار — رابحون كبار (≥+20%: {len(big)}) مقابل خاسرون ({len(lose)})")
+    print(f"{'═'*60}")
+    FEATURES = [
+        ("pos24",         "pos24 (موقع الدخول)"),
+        ("ratio",         "ratio"),
+        ("ob_spot",       "order book"),
+        ("net_usd",       "net USD"),
+        ("spike",         "spike"),
+        ("move_pct",      "move %"),
+        ("fractal_score", "fractal score"),
+        ("h_value",       "Hurst H"),
+        ("fra_jy",        "Jy (زخم)"),
+        ("market_bias",   "market bias"),
+        ("liq_ratio",     "liq/mktcap (فكرتك!)"),
+        ("mkt_cap",       "market cap"),
+    ]
+    print(f"  {'المقياس':<22} {'رابحون ≥20%':>14} {'وحوش ≥50%':>14} {'خاسرون':>12}")
+    print(f"  {'-'*62}")
+    for key, label in FEATURES:
+        bw, mw, lo = _mean(big, key), _mean(mega, key), _mean(lose, key)
+        def _f(v):
+            if v is None: return "—"
+            return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:.3f}"
+        print(f"  {label:<22} {_f(bw):>14} {_f(mw):>14} {_f(lo):>12}")
+
+    # liq/mktcap deep-dive (the user's hypothesis)
+    print(f"\n  === liq/mktcap — هل السيولة حسب القيمة السوقية تتنبأ؟ ===")
+    if any(r.get("liq_ratio") is not None for r in closed):
+        winrate_buckets(closed, "liq_ratio", [0.01, 0.03, 0.06, 0.10], "حسب liq/mktcap", fmt="{:.3f}")
+    else:
+        print("    (لا بيانات بعد — ستُملأ في الإشارات الجديدة بعد هذا التحديث)")
+
+    print(f"\n{'═'*60}")
+    print("  ملاحظة: حقول fra_* + liq_ratio تُملأ في الإشارات الجديدة فقط")
     print(f"{'═'*60}\n")
 
 if __name__ == "__main__":
