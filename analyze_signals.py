@@ -320,6 +320,19 @@ def main():
             return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:.3f}"
         print(f"  {label:<22} {_f(bw):>14} {_f(mw):>14} {_f(lo):>12}")
 
+    # pos24 SPLIT by scanner type — resolves the confounding: Alpha (accumulation)
+    # and main/Spot (momentum breakout) have OPPOSITE pos dynamics, so the pooled
+    # pos curve is a misleading U-shape. Split them to see the true edge per type.
+    print(f"\n{'═'*60}")
+    print("  📍 pos24 مفصولاً حسب النوع (يحل الالتباس)")
+    print(f"{'═'*60}")
+    a_closed = [r for r in closed if r.get("is_alpha")]
+    s_closed = [r for r in closed if not r.get("is_alpha")]
+    print(f"\n  --- ALPHA فقط (n={len(a_closed)}) — المتوقع: pos منخفض يربح ---")
+    winrate_buckets(a_closed, "pos24", [0.35, 0.45, 0.55, 0.70], "Alpha pos24")
+    print(f"\n  --- SPOT/FUTURES فقط (n={len(s_closed)}) — المتوقع: pos عالٍ يربح ---")
+    winrate_buckets(s_closed, "pos24", [0.40, 0.55, 0.70, 0.85], "Spot pos24")
+
     # liq/mktcap deep-dive (the user's hypothesis)
     print(f"\n  === liq/mktcap — هل السيولة حسب القيمة السوقية تتنبأ؟ ===")
     if any(r.get("liq_ratio") is not None for r in closed):
