@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.0"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.1"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1540,8 +1540,13 @@ def _momentum_warning(ratio, spike, pos24):
     (surge 82x, pos 62%) and ZORA (ratio 9.7x, pos 55%) hit SL right after firing.
     NOT a block: loud signals still win 36-54% (SNDK ratio 9.1x, BNRS ratio 5.5x),
     so blocking would kill winners too — this only warns the reader to verify entry."""
+    # ratio >= 5 chosen from the explosion-signature study: ratio 5+ won only 32%
+    # (n=62) while losers averaged ratio 244x and winners ~3x. High ratio at a
+    # mid/high position = the loud, late phase that reverts. Still display-only:
+    # a high-ratio signal at a LOW position (SNDK ratio 9x, pos 9% → +16%) is fine,
+    # so the pos>=0.55 guard keeps early accumulation unwarned.
     try:
-        if pos24 is not None and (ratio >= 8.0 or spike >= 30.0) and pos24 >= 0.55:
+        if pos24 is not None and (ratio >= 5.0 or spike >= 30.0) and pos24 >= 0.55:
             return "⚠️ *High momentum* — may already be extended, verify entry\n"
     except Exception:
         pass
