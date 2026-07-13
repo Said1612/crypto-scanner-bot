@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.2"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.3"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -548,6 +548,8 @@ def _save_signal_db():
 # eval_rejected.py replay approach returned "nodata" for ~70% of them).
 REJECTED_DB       = "rejected_signals.json"
 _rejected_db: List[dict] = []            # in-memory, mirrors _signal_db pattern
+_rej_save_pending = False                # sticky dirty flag — stays set until a save succeeds
+_rej_last_save    = 0.0                  # last successful save time (throttle)
 _rej_log_dedup: Dict[str, float] = {}    # {sym: last_logged_ts} — 1h cooldown per coin
 REJ_WIN_PCT  =  5.0
 REJ_LOSS_PCT = -8.0
@@ -6226,6 +6228,7 @@ def _mark_report_sent(key: str, report_type: str):
 
 def main():
     global last_fast, last_slow, last_super, last_accum, last_sg, last_sector, last_weekly_swing, last_deep_value, last_trend_gainer, last_quiet_buildup, last_report, last_report_date, last_weekly_date, last_monthly_date, last_alpha
+    global _rej_save_pending, _rej_last_save
     # Error tracking — alert Telegram on repeated loop errors
     _loop_err_count = [0]    # [count] — mutable so inner scope can modify
     _loop_last_err  = [""]   # [last_error_str]
@@ -6327,9 +6330,16 @@ def main():
             # Shadow-track blocked signals in real time (updates in-memory each scan,
             # persists every 5 min). Non-blocking — never break the loop over this.
             try:
-                _rej_dirty = _update_rejected_outcomes(all_t)
-                if _rej_dirty and int(now) % 300 < 35:
+                # Sticky dirty flag: a change (esp. a one-shot 24h-expiry flip on a coin
+                # that has left all_t) stays pending until an actual save succeeds, so no
+                # resolution is ever lost to a missed save-window (the old modulo gate bug
+                # left Alpha records stuck 'pending' on disk forever). Throttle to 60s.
+                if _update_rejected_outcomes(all_t):
+                    _rej_save_pending = True
+                if _rej_save_pending and (now - _rej_last_save) >= 60:
                     _save_rejected_db()
+                    _rej_save_pending = False
+                    _rej_last_save    = now
             except Exception as _re:
                 log.debug("rejected outcome update: %s", _re)
 
