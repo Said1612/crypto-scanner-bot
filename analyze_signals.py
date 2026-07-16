@@ -228,6 +228,33 @@ def main():
         winrate_buckets(closed, "score",   [4.0, 5.0, 6.0, 7.0],           "حسب SCORE")
         winrate_buckets(closed, "ob_spot", [0.50, 0.60, 0.70],             "حسب ORDERBOOK")
 
+        # ── CHURN / PUMP-DUMP test (JUV/WIF hypothesis) ──────────────────────
+        # Thin net relative to a huge spike = two-sided churn / distribution, not
+        # real accumulation → suspected pump-and-dump. net_per_spike = net$ per 1x
+        # of the volume-spike multiple. Low = churn (JUV: 112x/$35K → 310).
+        for r in closed:
+            _sp = r.get("spike") or 0
+            r["_net_per_spike"] = ((r.get("net_usd") or 0) / _sp) if _sp > 0 else None
+        winrate_buckets(closed, "_net_per_spike", [300, 800, 2000, 6000],
+                        "حسب NET/SPIKE (churn — منخفض=توزيع)", fmt="{:.0f}")
+
+        # Direct pump-dump vs sustained: coins that SPIKED ≥10% then either dumped
+        # (closed loss) or held (closed win). If dumps have systematically lower
+        # net/spike, that metric is a real pre-emptive pump-dump filter.
+        _spiked = [r for r in closed if (r.get("max_gain_pct") or 0) >= 10]
+        _dumped = [r for r in _spiked if r.get("outcome") in LOSS_OUT]
+        _held   = [r for r in _spiked if r.get("outcome") in WIN_OUT]
+        print("\n  === 💣 PUMP-DUMP مقابل مستدام (قمة ≥10%) ===")
+        for _lbl, _grp in [("💥 dumped (قمة≥10% ← خسارة)", _dumped),
+                           ("✅ sustained (قمة≥10% ← ربح)", _held)]:
+            if not _grp:
+                print(f"    {_lbl}: n=0"); continue
+            _nps = _med([r.get("_net_per_spike") for r in _grp])
+            _sp  = _med([r.get("spike") for r in _grp])
+            _nt  = _med([r.get("net_usd") for r in _grp])
+            print(f"    {_lbl}: n={len(_grp):3d}  median net/spike={_nps or 0:6.0f}  "
+                  f"median spike={_sp or 0:5.1f}x  median net=${_nt or 0:,.0f}")
+
     # ── CONVICTION SCORE (0-10) — combines the validated winning factors ─────────
     # Goal: find a threshold that separates winners from losers so we can safely
     # block the weak tier WITHOUT blocking TAC-type winners (strong flow, weak spike).
