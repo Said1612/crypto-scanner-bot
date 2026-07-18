@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.3"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.4"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -73,6 +73,16 @@ PROXY_URL      = os.getenv("PROXY_URL", "")   # e.g. http://user:pass@host:port
 # "alpha_explosion_paused" so we can measure whether a future filter flips it positive before
 # re-enabling. Flip to True to resume sending.
 ALPHA_EXPLOSION_ENABLED = False
+
+# v3.7.4: Super-Ratio Bypass DISABLED. The bot rewarded ratio>=20x with bypasses
+# (relaxed spike floor + overridden position limit) as "whale demand". But 298
+# closed signals prove high ratio is the LOSERS' signature: ratio>=5 wins 32%,
+# 5-10=35%, 10-20=15%, >=20=37.5% — all far below the 57% average (losers' median
+# ratio=197, winners=2.68). The bypass was admitting the exact signals that lose.
+# When False, ratio>=20 signals must clear the normal spike + position gates like
+# any other — this does NOT block them, it just removes the free pass. Flip to True
+# to restore the old behavior.
+SUPER_RATIO_BYPASS = False
 
 FAST_SCAN_S      = 5     # every 5s — confirmed working: catches REPAI/NEOS/BLINKY type explosions
 SLOW_SCAN_S      = 300   # every 5min (1h klines)
@@ -2794,7 +2804,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     _pre_buy, _pre_sell = fetch_agg_trades(sym, base_url,
                                             minutes=60 if interval in ("60m", "1h") else 10)
     _pre_ratio = _pre_buy / _pre_sell if _pre_sell > 0 else 99.0
-    super_ratio = _pre_ratio >= 20.0
+    super_ratio = _pre_ratio >= 20.0 and SUPER_RATIO_BYPASS   # v3.7.4: inverted signal — gated off
     # momentum_bypass: scan_trend_gainer validates 1h volume trend separately.
     # Still requires spike ≥ 0.8x — below-average volume (IO: 0.2x) is not a valid entry.
     # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
@@ -2892,7 +2902,7 @@ def _check(sym, ticker, interval, sector_boost=False):
         # Volume breakout: Mid/Large = 2.5x spike enough (absolute $ >>> small cap 5x)
         _sg_bypass = (interval == "1m_sg" and spike >= 10.0)
         _vol_breakout = (spike >= _breakout_spike_min and ob_quick >= _breakout_ob_thr and move >= 1.0)
-        if _pre_ratio < 20.0 and not _sg_bypass and not _vol_breakout:
+        if not super_ratio and not _sg_bypass and not _vol_breakout:
             _rej("high_pos"); return
 
     # High position + weak volume = false signal (我踏马来了 pattern)
