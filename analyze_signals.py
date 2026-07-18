@@ -221,7 +221,8 @@ def main():
     if closed:
         winrate_cat(closed, "is_alpha", "ALPHA مقابل SPOT")
         winrate_cat(closed, "scanner",  "حسب السكانر")
-        winrate_buckets(closed, "ratio",   [1.5, 2.0, 3.0, 5.0],           "حسب RATIO")
+        winrate_buckets(closed, "ratio",   [1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0],
+                        "حسب RATIO (يكشف منطقة Super-Ratio ≥20)")
         winrate_buckets(closed, "pos24",   [0.40, 0.55, 0.65, 0.75, 0.85], "حسب POS24")
         winrate_buckets(closed, "spike",   [3.0, 5.0, 10.0, 20.0],         "حسب SPIKE")
         winrate_buckets(closed, "net_usd", [5000, 15000, 30000, 100000],   "حسب NET USD", fmt="{:.0f}")
