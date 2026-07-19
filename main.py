@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.6"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.7"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -649,7 +649,7 @@ def _update_rejected_outcomes(all_t):
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding,
             fractal_score=None, h_value=None, oi_delta=None, fra=None,
-            is_alpha=False, mkt_cap=0.0, chain_lq=0.0):
+            is_alpha=False, mkt_cap=0.0, chain_lq=0.0, fcf=None):
     """Record a new signal with all parameters for future ML training."""
     _fra_d = fra or {}
     # liq_ratio: on-chain liquidity as a fraction of market cap — tests the user's
@@ -684,6 +684,10 @@ def _db_add(sym, price, exchange, tier_name, scanner,
         # Fractal aggregate
         "fractal_score": fractal_score,
         "h_value":       round(h_value, 4) if h_value is not None else None,
+        # v3.7.7: log FCF so we can build a rigorous FCF win-rate breakdown later.
+        # Live evidence keeps showing FCF<0.9 fails by close (HYPER 0.79, AIN 0.85,
+        # ALPINE 0.64, SNXX 0.86 all SL) while FCF>1.1 runs (ON 1.32 +17%, PORTO 1.31).
+        "fcf":           round(fcf, 3) if fcf is not None else None,
         "oi_delta":      round(oi_delta, 2) if oi_delta is not None else None,
         # Fractal detail components (for pattern analysis)
         "fra_verdict":      _fra_d.get("verdict"),
@@ -3671,7 +3675,8 @@ def _check(sym, ticker, interval, sector_boost=False):
             oi_delta=(_oi["oi_delta_1h"] if _oi else None),
             fra=_fra,
             is_alpha=_is_alpha_coin,
-            mkt_cap=ticker.get("mkt_cap", 0.0), chain_lq=ticker.get("chain_lq", 0.0))
+            mkt_cap=ticker.get("mkt_cap", 0.0), chain_lq=ticker.get("chain_lq", 0.0),
+            fcf=(_fva_result.get("fcf") if _fva_result else None))
     # Record fractal snapshot for self-learning
     if _fractal_agent is not None and _fra and _fra.get("_features"):
         _fractal_agent.record_signal(sym, _fra["_features"])

@@ -224,6 +224,8 @@ def main():
         winrate_buckets(closed, "ratio",   [1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0],
                         "حسب RATIO (يكشف منطقة Super-Ratio ≥20)")
         winrate_buckets(closed, "pos24",   [0.40, 0.55, 0.65, 0.75, 0.85], "حسب POS24")
+        winrate_buckets(closed, "fcf",     [0.60, 0.80, 1.00, 1.20],
+                        "حسب FCF (v3.7.7 — يمتلئ بالإشارات الجديدة فقط)")
         winrate_buckets(closed, "spike",   [3.0, 5.0, 10.0, 20.0],         "حسب SPIKE")
         winrate_buckets(closed, "net_usd", [5000, 15000, 30000, 100000],   "حسب NET USD", fmt="{:.0f}")
         winrate_buckets(closed, "score",   [4.0, 5.0, 6.0, 7.0],           "حسب SCORE")
