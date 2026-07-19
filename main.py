@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.4"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.5"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -464,8 +464,10 @@ def save_state():
     payload = _tracking_payload()
     # Always save to local file — primary backup that survives Redis outages
     try:
-        with open(TRACKING_FILE, "w") as f:
-            json.dump(payload, f)
+        _tmp = TRACKING_FILE + ".tmp"                 # v3.7.5: atomic write — a SIGTERM
+        with open(_tmp, "w") as f:                    # mid-json.dump was truncating the file,
+            json.dump(payload, f)                     # wiping ALL open positions on restart.
+        os.replace(_tmp, TRACKING_FILE)
     except Exception as e:
         log.debug("tracking_state local save: %s", e)
     # Also push to Redis if configured (for multi-instance sync)
@@ -473,8 +475,10 @@ def save_state():
         _redis("POST", f"/set/{REDIS_KEY}", {"value": json.dumps(payload)})
     # Always persist daily_results to local JSON
     try:
-        with open(DAILY_LOG, "w") as f:
+        _tmp = DAILY_LOG + ".tmp"                     # v3.7.5: atomic write (see above)
+        with open(_tmp, "w") as f:
             json.dump(daily_results, f)
+        os.replace(_tmp, DAILY_LOG)
     except Exception as e:
         log.debug("daily_log save: %s", e)
 
@@ -1699,7 +1703,10 @@ def check_milestones(all_t):
             continue
 
         t = all_t.get(sym)
-        if not t: continue
+        # v3.7.5: reject price=0/missing — a transient API glitch (the "x0.0" bug) would
+        # otherwise compute gain=-100%, fire a FALSE stop-loss, close a live winner, and
+        # block re-entry for 24h. Mirrors the guard in _update_rejected_outcomes.
+        if not t or (t.get("price", 0) or 0) <= 0: continue
         gain = (t["price"] - info["entry"]) / info["entry"] * 100.0
         if gain > info.get("max", 0.0):
             info["max"] = gain
@@ -2268,14 +2275,14 @@ def poll_telegram():
                 if _ai_agent is None:
                     send("❌ AI Agent not active")
                 else:
-                    send(_ai_agent.summary(), parse_mode="Markdown")
+                    send(_ai_agent.summary())   # v3.7.5: send() has no parse_mode kwarg — was TypeError
 
             if text.lower().split("@")[0] == "/fractal_summary":
                 log.info("Manual /fractal_summary from chat %s", cid)
                 if _fractal_agent is None:
                     send("❌ Fractal Agent غير مفعّل")
                 else:
-                    send(_fractal_agent.summary(), parse_mode="Markdown")
+                    send(_fractal_agent.summary())   # v3.7.5: send() has no parse_mode kwarg — was TypeError
     except Exception as e:
         log.warning("poll_telegram: %s", e)
 
