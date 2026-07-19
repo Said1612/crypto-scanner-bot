@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.5"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.6"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1698,8 +1698,10 @@ def check_milestones(all_t):
         # ── Expiry checks (no API needed) ────────────────────────────────
         # 1. Hard limit: 24h max tracking window — remove from memory only, keep DB as active
         if elapsed > TRACK_HOURS * 3600:
-            tracking.pop(sym, None)
-            save_state()
+            # v3.7.5: close via the standard expired path (was popped without _db_close,
+            # orphaning slow winners like BR as outcome="active" forever and starving the
+            # AI trainer of them). _out becomes "success" when max>=5%, else "timeout".
+            expired.append((sym, "timeout"))
             continue
 
         t = all_t.get(sym)
@@ -2562,6 +2564,13 @@ def _check(sym, ticker, interval, sector_boost=False):
     now      = time.time()
     # momentum_signal: set by scan_trend_follow — must be assigned early (used before line 2775)
     momentum_bypass = ticker.get("momentum_signal", False)
+
+    # v3.7.5: guard a malformed ticker. Four scanners call _check without a per-coin
+    # try/except; a missing key or price=0 would raise deep inside and abort the whole
+    # scan cycle every time (the same bad coin recurs each loop), starving every
+    # lower-ranked coin. Reject early instead of crashing the scan.
+    if (ticker.get("price", 0) or 0) <= 0 or any(k not in ticker for k in ("high24", "low24", "change")):
+        return
 
     # ── Circuit Breaker — blocks signals after 3 consecutive SL hits ──────
     if _cb_is_active():
