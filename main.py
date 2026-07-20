@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.11"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.12"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -83,6 +83,13 @@ ALPHA_EXPLOSION_ENABLED = False
 # any other — this does NOT block them, it just removes the free pass. Flip to True
 # to restore the old behavior.
 SUPER_RATIO_BYPASS = False
+
+# v3.7.12: user trades SPOT only. Suppress futures-only signals — they're for coins
+# that don't exist on spot (so un-buyable for a spot trader), and this also drops the
+# stock/commodity PERP signals (CBRS/AMD/QCOM/oil futures) the user doesn't want, while
+# still sending spot tokenized stocks (bStocks like SNDKB) and Alpha (both spot-tradable).
+# Flip to False to receive futures signals again.
+SPOT_ONLY = True
 
 FAST_SCAN_S      = 5     # every 5s — confirmed working: catches REPAI/NEOS/BLINKY type explosions
 SLOW_SCAN_S      = 300   # every 5min (1h klines)
@@ -2583,6 +2590,11 @@ def _check(sym, ticker, interval, sector_boost=False):
     if (ticker.get("price", 0) or 0) <= 0 or any(k not in ticker for k in ("high24", "low24", "change")):
         return
 
+    # v3.7.12: spot-only mode — drop futures-only coins (un-buyable for a spot trader,
+    # and covers the stock/commodity perps). Alpha stays (spot-tradable).
+    if SPOT_ONLY and ticker.get("futures_only") and not ticker.get("binance_alpha"):
+        return
+
     # ── Circuit Breaker — blocks signals after 3 consecutive SL hits ──────
     if _cb_is_active():
         resume = datetime.fromtimestamp(_cb_blocked_until, tz=timezone.utc).strftime("%H:%M UTC")
@@ -4326,6 +4338,7 @@ def scan_supertrend(all_t):
         and s.endswith("USDT")
         and s[:-4] not in STABLECOINS
         and now_ts - alerted.get(s, 0) >= COOLDOWN
+        and not (SPOT_ONLY and t.get("futures_only") and not t.get("binance_alpha"))  # v3.7.12
     ]
     candidates.sort(key=lambda x: -x[1]["vol"])
     candidates = candidates[:350]   # cap API calls
