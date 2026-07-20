@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.9"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.10"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -132,6 +132,9 @@ BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                                                      # commodity tokens above. Add other confirmed 2X/3X/ETF
                                                      # tokens here once their full name is verified.
                   "SNDKB", "AMD", "QCOM",            # v3.7.9: tokenized EQUITIES (bStocks) — SanDisk /
+                  "CBRS", "CBRSB",                   # v3.7.10: Cerebras Systems stock + its 5x bStock
+                                                     # (user-verified on Binance: "Cerebras Systems" /
+                                                     # "Cerebras (bStocks)"). Same equity class as below.
                                                      # Advanced Micro Devices / Qualcomm. A crypto liquidity
                                                      # scanner's spike/ratio/flow logic doesn't apply to stocks
                                                      # (they track NASDAQ, gap on earnings, trade in market
