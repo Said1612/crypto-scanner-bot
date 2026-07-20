@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.7"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.8"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -126,6 +126,11 @@ SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","I
 # Coins to skip permanently: delisted, suspended, or confirmed manipulation-prone
 BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "XAU", "XAUT", "PAXG", "XAGX",   # Gold/silver commodity tokens
+                  "SNXX",                            # v3.7.8: "Tradr 2X Long SNDK ETF" — leveraged token
+                                                     # decays (volatility drag), follows a stock not crypto
+                                                     # flow; hit SL twice. Same non-crypto class as the
+                                                     # commodity tokens above. Add other confirmed 2X/3X/ETF
+                                                     # tokens here once their full name is verified.
                   "LSM",                             # Confirmed wash-trading manipulation (97% fake bids)
                   "TOMO",                            # Delisted/rebranded — stale API data causes false sleeping giant loops
                   "FTM",                             # Rebranded to SONIC — old ticker shows ghost volume
