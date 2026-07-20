@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.8"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.9"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -131,6 +131,12 @@ BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                                                      # flow; hit SL twice. Same non-crypto class as the
                                                      # commodity tokens above. Add other confirmed 2X/3X/ETF
                                                      # tokens here once their full name is verified.
+                  "SNDKB", "AMD", "QCOM",            # v3.7.9: tokenized EQUITIES (bStocks) — SanDisk /
+                                                     # Advanced Micro Devices / Qualcomm. A crypto liquidity
+                                                     # scanner's spike/ratio/flow logic doesn't apply to stocks
+                                                     # (they track NASDAQ, gap on earnings, trade in market
+                                                     # hours). Same "wrong asset class" rationale as the
+                                                     # commodity tokens. SNDKB confirmed a stock by the user.
                   "LSM",                             # Confirmed wash-trading manipulation (97% fake bids)
                   "TOMO",                            # Delisted/rebranded — stale API data causes false sleeping giant loops
                   "FTM",                             # Rebranded to SONIC — old ticker shows ghost volume
