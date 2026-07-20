@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.10"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.11"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -126,20 +126,13 @@ SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","I
 # Coins to skip permanently: delisted, suspended, or confirmed manipulation-prone
 BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "XAU", "XAUT", "PAXG", "XAGX",   # Gold/silver commodity tokens
-                  "SNXX",                            # v3.7.8: "Tradr 2X Long SNDK ETF" — leveraged token
-                                                     # decays (volatility drag), follows a stock not crypto
-                                                     # flow; hit SL twice. Same non-crypto class as the
-                                                     # commodity tokens above. Add other confirmed 2X/3X/ETF
-                                                     # tokens here once their full name is verified.
-                  "SNDKB", "AMD", "QCOM",            # v3.7.9: tokenized EQUITIES (bStocks) — SanDisk /
-                  "CBRS", "CBRSB",                   # v3.7.10: Cerebras Systems stock + its 5x bStock
-                                                     # (user-verified on Binance: "Cerebras Systems" /
-                                                     # "Cerebras (bStocks)"). Same equity class as below.
-                                                     # Advanced Micro Devices / Qualcomm. A crypto liquidity
-                                                     # scanner's spike/ratio/flow logic doesn't apply to stocks
-                                                     # (they track NASDAQ, gap on earnings, trade in market
-                                                     # hours). Same "wrong asset class" rationale as the
-                                                     # commodity tokens. SNDKB confirmed a stock by the user.
+                  "SNXX", "CBRSB",                   # v3.7.11: LEVERAGED tokens only (Tradr 2X Long SNDK
+                                                     # ETF / Cerebras 5x bStock). These decay via volatility
+                                                     # drag regardless of the underlying — bad to hold; SNXX
+                                                     # hit SL twice. PLAIN tokenized stocks (SNDKB/AMD/QCOM/
+                                                     # CBRS) were UN-blocked at the user's request: they trade
+                                                     # them on Spot and some ran +100% — profit is the goal,
+                                                     # not asset-class purity. (Flag leveraged names on sight.)
                   "LSM",                             # Confirmed wash-trading manipulation (97% fake bids)
                   "TOMO",                            # Delisted/rebranded — stale API data causes false sleeping giant loops
                   "FTM",                             # Rebranded to SONIC — old ticker shows ghost volume
