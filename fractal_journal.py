@@ -15,6 +15,8 @@ USAGE (one line each, phone-friendly via Termius):
   python3 fractal_journal.py add PYTH 1to1 long 0.0455 0.0530 0.0430 note here
       models:  1to1  = "One to One" (fib measured move)
                adv   = "Advanced Fractal" (small fractal enlarged)
+               weave = "Chart Weave" (1-2-3-4-5 woven reversal; enter the
+                       projected dip off bottom-4, target the peak, stop below (4))
 
   # mark the result when it resolves  (outcome = win|loss|expired)
   #   win     = price reached the target before the stop
@@ -29,7 +31,7 @@ import json, os, sys
 from datetime import datetime, timezone
 
 DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fractal_journal.json")
-MODELS = {"1to1": "One-to-One", "adv": "Advanced-Fractal"}
+MODELS = {"1to1": "One-to-One", "adv": "Advanced-Fractal", "weave": "Chart-Weave"}
 OUTCOMES = {"win", "loss", "expired"}
 
 
