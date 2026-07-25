@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.12"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.13"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -246,6 +246,10 @@ COIN_CATEGORIES = {
 }
 
 BINANCE_BASE          = "https://api.binance.com/api/v3"
+# v3.7.13: referenced by _retroactive_peak_update for legacy exchange="MEXC" rows in
+# signal_history.json but never defined — every MEXC record raised NameError (swallowed),
+# so their true peak/drawdown was never repaired. Live scanning is Binance-only now.
+MEXC_BASE             = "https://api.mexc.com/api/v3"
 BINANCE_FUTURES       = "https://fapi.binance.com"
 BINANCE_ALPHA_TOKEN_URL = "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/alpha/all/token/list"
 USE_BINANCE  = os.getenv("USE_BINANCE", "true").lower() == "true"
@@ -470,8 +474,14 @@ def _tracking_payload() -> dict:
     """Serialize tracking + alerted for save (handles set → list for JSON)."""
     return {
         "alerted":      dict(alerted),
-        "tracking":     {k: {**v, "hit": list(v["hit"])} for k, v in tracking.items()},
+        # .get on "hit": a legacy/hand-edited entry missing the key used to raise
+        # KeyError here — outside save_state's try — permanently breaking every save.
+        "tracking":     {k: {**v, "hit": list(v.get("hit", []))} for k, v in tracking.items()},
         "signal_count": signal_count,
+        # v3.7.13: the circuit breaker lived only in memory, so any restart during its
+        # 4h block resumed signalling immediately and reset the consecutive-SL streak.
+        "cb_consecutive_sl": _cb_consecutive_sl,
+        "cb_blocked_until":  _cb_blocked_until,
     }
 
 def save_state():
@@ -498,9 +508,17 @@ def save_state():
 
 def _load_tracking_from(s: dict):
     """Apply a saved state dict into global alerted/tracking/signal_count."""
-    global signal_count
+    global signal_count, _cb_consecutive_sl, _cb_blocked_until
     alerted.update(s.get("alerted", {}))
     signal_count = int(s.get("signal_count", signal_count))
+    # v3.7.13: restore the circuit breaker. Take the strictest of the saved and current
+    # values so merging Redis + local state can only ever extend a block, never shorten
+    # one — a restart must not be a way to escape the 4h cool-off.
+    try:
+        _cb_consecutive_sl = max(_cb_consecutive_sl, int(s.get("cb_consecutive_sl", 0)))
+        _cb_blocked_until  = max(_cb_blocked_until, float(s.get("cb_blocked_until", 0.0)))
+    except (TypeError, ValueError):
+        pass
     now = time.time()
     for k, v in s.get("tracking", {}).items():
         v["hit"] = set(v.get("hit", []))
@@ -592,14 +610,21 @@ def _load_rejected_db():
     except Exception:
         _rejected_db = []
 
-def _save_rejected_db():
+def _save_rejected_db() -> bool:
+    """Returns True only when the file actually landed on disk (v3.7.13).
+
+    The caller clears the sticky dirty flag; clearing it after a failed write loses
+    one-shot outcome flips (pending → would_win) exactly as before v3.7.3.
+    """
     try:
         tmp = REJECTED_DB + ".tmp"
         with open(tmp, "w") as f:
             json.dump(_rejected_db, f, ensure_ascii=False)
         os.replace(tmp, REJECTED_DB)
+        return True
     except Exception as e:
         log.debug("rejected_db save: %s", e)
+        return False
 
 def _log_rejected(sym, price, reason, extra=None):
     """Append a blocked signal (capped, deduped) with pending shadow outcome."""
@@ -663,7 +688,7 @@ def _update_rejected_outcomes(all_t):
 def _db_add(sym, price, exchange, tier_name, scanner,
             ratio, ob_spot, score, pos24, spike, net, move, funding,
             fractal_score=None, h_value=None, oi_delta=None, fra=None,
-            is_alpha=False, mkt_cap=0.0, chain_lq=0.0, fcf=None):
+            is_alpha=False, mkt_cap=0.0, chain_lq=0.0, fcf=None, interval=None):
     """Record a new signal with all parameters for future ML training."""
     _fra_d = fra or {}
     # liq_ratio: on-chain liquidity as a fraction of market cap — tests the user's
@@ -681,6 +706,9 @@ def _db_add(sym, price, exchange, tier_name, scanner,
         "scanner":      scanner,        # main / supertrend / accum
         "is_alpha":     is_alpha,       # True = Binance Alpha token (different dynamics)
         "market_bias":  market_bias,
+        # v3.7.13: kline interval the spike/move were measured on (1m / 5m / 60m / 1m_sg).
+        # Without it, spike and move_pct are not comparable across scanners after the fact.
+        "interval":     interval,
         # Signal metrics (features for ML)
         "price_entry":  price,
         "ratio":        round(ratio, 3),
@@ -742,12 +770,21 @@ def _db_coin_fatigue(sym, days: int = 7, min_signals: int = 2, min_gain: float =
     return best < min_gain
 
 
-def _db_close(sym, outcome, max_gain, price_exit, duration_min, reason):
-    """Update outcome when a signal closes (stop-loss / timeout / expired)."""
+def _db_close(sym, outcome, max_gain, price_exit, duration_min, reason, max_dd=None):
+    """Update outcome when a signal closes (stop-loss / timeout / expired).
+
+    max_dd: live-tracked deepest drawdown from entry (tracking[sym]["min"], <= 0).
+    v3.7.13: this was computed live and shown in Telegram ("📉 Max loss") but never
+    persisted, so max_drawdown_pct stayed None on every winner — making the
+    early-drawdown pattern (the strongest observed predictor) impossible to analyse
+    from stored data. _retroactive_peak_update may later refine it from klines.
+    """
     for rec in reversed(_signal_db):
         if rec["sym"] == sym and rec["outcome"] == "active":
             rec["outcome"]      = outcome
             rec["max_gain_pct"] = round(max_gain, 2)
+            if max_dd is not None:
+                rec["max_drawdown_pct"] = round(max_dd, 2)
             rec["price_exit"]   = price_exit
             rec["duration_min"] = duration_min
             rec["close_reason"] = reason
@@ -1053,9 +1090,13 @@ def fetch_oi_ls(sym: str) -> dict:
     if cached and (now - cached["ts"]) < OI_TTL:
         return cached
 
+    # "ok": False marks a neutral fallback (no futures market, API error, bad payload).
+    # v3.7.13: without it, a failed fetch recorded oi_delta = 0.0 in the signal DB,
+    # indistinguishable from genuinely flat open interest. Gates keep using the neutral
+    # numbers exactly as before — only the logged value now becomes None on failure.
     default = {"oi_delta_1h": 0.0, "expanding": False, "contracting": False,
                "ls_ratio": 1.0, "short_squeeze": False, "long_crowded": False,
-               "label": "", "ts": now}
+               "label": "", "ts": now, "ok": False}
     try:
         # ── OI history (30m intervals, last 3 → ~1h change) ──────────────
         hist = _get(f"{BINANCE_FUTURES}/futures/data/openInterestHist",
@@ -1098,7 +1139,7 @@ def fetch_oi_ls(sym: str) -> dict:
         result = {"oi_delta_1h": round(delta, 2), "expanding": expanding,
                   "contracting": contracting, "ls_ratio": ls_ratio,
                   "short_squeeze": short_squeeze, "long_crowded": long_crowded,
-                  "label": label, "ts": now}
+                  "label": label, "ts": now, "ok": True}
         _oi_cache[sym] = result
         return result
 
@@ -1293,7 +1334,8 @@ def _ai_assess(sym, exchange, tier, scanner, score,
                fractal_score=None, h_value=None, oi_delta=None,
                min_prob=0, crowded_longs=False,
                is_moonshot=False, fra_verdict=None, fra_res_pct=999.0,
-               verdict_pts=None, is_alpha=False) -> tuple:
+               verdict_pts=None, is_alpha=False,
+               volume_explosion=False, momentum_bypass=False) -> tuple:
     """Return (ai_text, blocked). blocked=True when AI is bearish + confirming danger pattern.
     min_prob: if set, also blocks when AI probability is below this threshold.
     crowded_longs: if True, blocks when AI < 50% (long squeeze risk).
@@ -1350,6 +1392,12 @@ def _ai_assess(sym, exchange, tier, scanner, score,
         #   - ratio ≥ 4.0: overwhelming real demand overrides AI doubt
         # Data: DOLO blocked by Jy gate (-0.15) regardless of AI. CHIP (1.1x spike) blocked by
         # verdict pts < 5.0. This gate only targets regular signals with no quality bypass.
+        # v3.7.13: volume_explosion / momentum_bypass are now PARAMETERS. They used to be
+        # read as module globals that do not exist (they are locals of _check), so this
+        # line raised NameError for every non-moonshot signal — swallowed by the except
+        # below, which returned ("", False). That made the whole AI assessment silently
+        # dead (no 🤖 line, every block condition unreachable) except on moonshots, where
+        # `not is_moonshot` short-circuits before the undefined name is evaluated.
         strong_ai_dissent = (not is_moonshot
                              and not volume_explosion
                              and not momentum_bypass
@@ -1392,8 +1440,18 @@ def _notify_once(key: str, ttl: int = 300) -> bool:
     now = time.time()
     try:
         # If lock exists and is still fresh → already sent by another process
-        if os.path.exists(path) and now - os.path.getmtime(path) < ttl:
-            return False
+        if os.path.exists(path):
+            if now - os.path.getmtime(path) < ttl:
+                return False
+            # v3.7.13: the lock is STALE — it must be removed, otherwise the O_EXCL
+            # below raises FileExistsError and we return False forever. Nothing else
+            # unlinks these files, so every key fired exactly once per container and
+            # then went permanently silent (e.g. only the first stop-loss alert per
+            # coin was ever delivered).
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass          # another process cleaned it up first — fine, race on O_EXCL
         # Atomic create: O_EXCL ensures only ONE process succeeds even in a race
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, str(now).encode())
@@ -1797,15 +1855,20 @@ def check_milestones(all_t):
         info = tracking.pop(sym, None)
         if info:
             _max   = info.get("max", 0.0)
+            _min   = info.get("min", 0.0)          # v3.7.13: live-tracked deepest drawdown
             _t0    = info.get("t0", now)
             _dur   = int((now - _t0) / 60)
-            _exit  = all_t.get(sym, {}).get("price", info["entry"])
+            # .get on entry: the "corrupted" branch above routes here precisely when
+            # "entry" is missing, and a hard subscript raised KeyError — dropping the
+            # signal from tracking with _db_close never called (record stuck "active").
+            _entry = info.get("entry", 0.0)
+            _exit  = all_t.get(sym, {}).get("price", _entry)
             _out   = "success" if _max >= 5.0 else reason
-            _db_close(sym, _out, _max, _exit, _dur, reason)
+            _db_close(sym, _out, _max, _exit, _dur, reason, max_dd=_min)
             _cb_record_outcome(is_sl=(reason == "stoploss"), sym=sym)
             daily_results.append({
                 "sym":      sym,
-                "entry":    info["entry"],
+                "entry":    _entry,
                 "max":      _max,
                 "elapsed":  int(now - _t0),
                 "success":  _max >= 5.0,
@@ -3239,7 +3302,9 @@ def _check(sym, ticker, interval, sector_boost=False):
             _rej("quality_fail"); return
 
     # Counter-trend: coin rising while BTC declining = independent capital flow (EPIC pattern)
-    _btc_24h = all_t.get("BTCUSDT", {}).get("change", 0.0) if "all_t" in dir() else 0.0
+    # (v3.7.13: removed a dead `_btc_24h` line here — it was guarded by `"all_t" in dir()`,
+    #  which is always False inside a function, so it was permanently 0.0 and never read.
+    #  market_bias already carries the market-wide direction this needs.)
     _counter_trend_main = market_bias < -15 and change > 0.5
     # Bear market fighting bonus: coin rising strongly against BTC decline
     _fighting_bear = (market_bias <= -20 and move >= 5.0
@@ -3506,6 +3571,16 @@ def _check(sym, ticker, interval, sector_boost=False):
         except Exception as _cqe_disp:
             log.debug("CQ display error: %s", _cqe_disp)
 
+    # v3.7.13: recompute the fractal score now that FVA/CQ results actually exist.
+    # It is first computed ~90 lines above, where both are still None, so
+    # _calc_fractal_score short-circuits to a constant 7.0 — meaning the value shown
+    # in Telegram, fed to the AI, and written to signal_history.json was the same
+    # number on every signal ever recorded (a zero-variance, useless column).
+    # DISPLAY/DB/AI ONLY: the three quality gates upstream already ran against the old
+    # constant, so signal behaviour is unchanged. Once this column has real variance we
+    # can decide from data whether those gates are worth re-enabling.
+    _fractal_score = _calc_fractal_score(_fra, _fva_result, _cq_result)
+
     # ── Late FCF Gate (post-display-path) ────────────────────────────────────
     # _fva gate agent is disabled (_fva=None) to prevent score-silencing during explosive moves.
     # But extreme FCF values from _fva_show (display) still indicate near-certain loss.
@@ -3588,7 +3663,9 @@ def _check(sym, ticker, interval, sector_boost=False):
                                     fra_verdict=(_fra.get("verdict") if _fra else None),
                                     fra_res_pct=_fra_res_pct,
                                     verdict_pts=_v_pts,
-                                    is_alpha=_is_alpha_coin)
+                                    is_alpha=_is_alpha_coin,
+                                    volume_explosion=volume_explosion,
+                                    momentum_bypass=momentum_bypass)
     if ai_blocked:
         _rej("ai_block"); return
     msg += ai_str
@@ -3691,11 +3768,14 @@ def _check(sym, ticker, interval, sector_boost=False):
             ratio, ob_spot, score, pos24, spike, net, move, funding_label,
             fractal_score=_fractal_score,
             h_value=(_cq_result["H"] if _cq_result else None),
-            oi_delta=(_oi["oi_delta_1h"] if _oi else None),
+            # v3.7.13: only log OI when the fetch actually succeeded — a failed/absent
+            # futures market used to be stored as 0.0, i.e. "flat OI".
+            oi_delta=(_oi["oi_delta_1h"] if (_oi and _oi.get("ok")) else None),
             fra=_fra,
             is_alpha=_is_alpha_coin,
             mkt_cap=ticker.get("mkt_cap", 0.0), chain_lq=ticker.get("chain_lq", 0.0),
-            fcf=(_fva_result.get("fcf") if _fva_result else None))
+            fcf=(_fva_result.get("fcf") if _fva_result else None),
+            interval=interval)
     # Record fractal snapshot for self-learning
     if _fractal_agent is not None and _fra and _fra.get("_features"):
         _fractal_agent.record_signal(sym, _fra["_features"])
@@ -5020,6 +5100,9 @@ def scan_alpha_explosion(all_t: dict):
     Separate from _check() — simplified signal with on-chain risk warning.
     """
     global _alpha_vol_cache
+    if _cb_is_active():          # v3.7.13: this scanner builds tracking[] directly
+        return                   # instead of going through _check, so it used to keep
+                                 # firing during a circuit-breaker block.
     MAX_SIGNALS = 3
     sent = 0
     now  = time.time()
@@ -5637,7 +5720,13 @@ def scan_weekly_breakout(all_t):
       - 1h flow: ratio >= 1.5x, net > 0, OB >= 0.55
       - 24h cooldown per coin
     """
+    if _cb_is_active():          # v3.7.13: creates tracking[] directly, not via _check
+        return
     now = time.time()
+    # v3.7.13: this was referenced below but never defined anywhere, so every candidate
+    # raised NameError — swallowed by the per-symbol `except Exception` — meaning this
+    # scanner had never fired a single signal. Computed from the live BTC ticker now.
+    _btc_falling_wb = all_t.get("BTCUSDT", {}).get("change", 0.0) < 0
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t["exchange"] == "Binance"
@@ -5826,7 +5915,12 @@ def scan_deep_value(all_t):
       - 1h flow: net > tier_min*0.5, ratio >= 2.5, spike >= 2.0, OB >= 0.68
       - 24h cooldown per coin
     """
+    if _cb_is_active():          # v3.7.13: creates tracking[] directly, not via _check
+        return
     now = time.time()
+    # v3.7.13: same never-defined-name bug as scan_weekly_breakout — this scanner has
+    # also never produced a signal. See the note there.
+    _btc_falling = all_t.get("BTCUSDT", {}).get("change", 0.0) < 0
     candidates = [
         (sym, t) for sym, t in all_t.items()
         if t["exchange"] == "Binance"
@@ -6100,7 +6194,12 @@ def scan_trend_gainer(all_t: dict):
             # even though the coin IS moving now. The 10%+ 24h change IS the quality signal.
             last3 = klines[-4:-1]  # 3 completed candles before current
             bullish = sum(1 for k in last3 if float(k[4]) > float(k[1]))
-            if bullish < 2 and change < 10.0:
+            # v3.7.13: `change` was an undefined name here. `and` short-circuits, so it
+            # only blew up when bullish < 2 — i.e. exactly the case the >=10% exception
+            # was written to rescue. The NameError was swallowed per-symbol, so every
+            # explosive-breakout coin (SYN/TNSR type) was silently dropped instead.
+            _tg_change = ticker.get("change", 0.0)
+            if bullish < 2 and _tg_change < 10.0:
                 continue  # bearish reversal — skip (only strict for early-stage 3-10%)
 
             # All checks passed — set momentum_signal so _check() bypasses pos24 filters
@@ -6388,9 +6487,11 @@ def main():
                 if _update_rejected_outcomes(all_t):
                     _rej_save_pending = True
                 if _rej_save_pending and (now - _rej_last_save) >= 60:
-                    _save_rejected_db()
-                    _rej_save_pending = False
-                    _rej_last_save    = now
+                    # Only clear the flag when the write truly succeeded — otherwise the
+                    # pending resolutions stay queued for the next attempt (v3.7.13).
+                    if _save_rejected_db():
+                        _rej_save_pending = False
+                    _rej_last_save = now
             except Exception as _re:
                 log.debug("rejected outcome update: %s", _re)
 

@@ -95,11 +95,17 @@ class MafioAgent:
             self._history = []
             return
 
+        # max_gain_pct is a running peak that starts at 0.0 and only ever rises, so a
+        # signal that went straight down records exactly 0.0 — the old `abs(...) >= 1.0`
+        # filter therefore discarded every clean loser as a "no-data zero record".
+        # Keep the guard for genuinely unresolved rows, but never drop a closed one.
+        _RESOLVED = ("stoploss", "timeout", "stoploss_recovered", "success")
         completed = [
             s for s in self._history
             if s.get("outcome", "active") != "active"
             and s.get("max_gain_pct") is not None
-            and abs(s.get("max_gain_pct", 0)) >= 1.0   # exclude no-data zero records
+            and (abs(s.get("max_gain_pct", 0)) >= 1.0
+                 or s.get("outcome") in _RESOLVED)
         ]
 
         if len(completed) < 10:
@@ -111,7 +117,12 @@ class MafioAgent:
 
         wins  = [s for s in completed if s.get("max_gain_pct", 0) >= 5
                  or s.get("outcome") == "stoploss_recovered"]
-        loses = [s for s in completed if s.get("max_gain_pct", 0) < 0]
+        # A loser is defined by OUTCOME, not by a negative max_gain_pct — that value can
+        # never be negative (see above), so this list was empty on every retrain, which
+        # left avg_l = 0.0 for every feature and made the learned weights meaningless.
+        loses = [s for s in completed
+                 if s.get("outcome") in ("stoploss", "timeout")
+                 and (s.get("max_gain_pct") or 0.0) < 5.0]
 
         def _avg(lst, key):
             vals = [float(s.get(key) or 0) for s in lst if s.get(key) is not None]
