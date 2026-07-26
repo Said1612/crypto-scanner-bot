@@ -30,6 +30,30 @@ _FEAT_RANGES = {
     "oi_delta":      (-10.0, 15.0),
 }
 
+# ── Outcome classification ────────────────────────────────────────────────────
+# A record is only a genuine win if it reached +5% AND did not close on a stop.
+# Reading close_reason as well as outcome matters: records written before the
+# peak_then_sl label existed carry outcome="success" together with
+# close_reason="stoploss", so they are reclassified correctly here without having
+# to rewrite signal_history.json. Judging by peak alone made the agent cite coins
+# that stopped out as successful precedents.
+_SL_CLOSED = ("stoploss", "peak_then_sl")
+
+
+def _closed_on_stop(rec: dict) -> bool:
+    return (rec.get("outcome") in _SL_CLOSED
+            or rec.get("close_reason") == "stoploss")
+
+
+def _is_clean_win(rec: dict) -> bool:
+    """Reached +5% peak and survived — no stop-out."""
+    if rec.get("outcome") == "stoploss_recovered":
+        return True          # explicitly recovered above the stop
+    if _closed_on_stop(rec):
+        return False
+    return (rec.get("max_gain_pct") or 0.0) >= 5.0
+
+
 # Feature weights for linear scoring (v2 baseline, updated by training)
 _DEFAULT_WEIGHTS = {
     "ob_spot":  1.5,
@@ -115,14 +139,14 @@ class MafioAgent:
         if len(completed) == self._trained_on:
             return
 
-        wins  = [s for s in completed if s.get("max_gain_pct", 0) >= 5
-                 or s.get("outcome") == "stoploss_recovered"]
+        wins  = [s for s in completed if _is_clean_win(s)]
         # A loser is defined by OUTCOME, not by a negative max_gain_pct — that value can
         # never be negative (see above), so this list was empty on every retrain, which
         # left avg_l = 0.0 for every feature and made the learned weights meaningless.
+        # peak_then_sl belongs here: it closed on a stop, whatever peak it printed.
         loses = [s for s in completed
-                 if s.get("outcome") in ("stoploss", "timeout")
-                 and (s.get("max_gain_pct") or 0.0) < 5.0]
+                 if not _is_clean_win(s)
+                 and (_closed_on_stop(s) or s.get("outcome") == "timeout")]
 
         def _avg(lst, key):
             vals = [float(s.get(key) or 0) for s in lst if s.get(key) is not None]
@@ -142,21 +166,23 @@ class MafioAgent:
         if self._weights["pos24"] > 0:
             self._weights["pos24"] = -self._weights["pos24"]
 
+        # Win rates below count a stop-out as a loss even when it printed a >=5% peak,
+        # otherwise every scanner's and tier's apparent quality is inflated.
         sc_stats: Dict[str, list] = {}
         for s in completed:
             sc = s.get("scanner", "main")
-            sc_stats.setdefault(sc, []).append(s.get("max_gain_pct", 0))
+            sc_stats.setdefault(sc, []).append((s.get("max_gain_pct") or 0.0, _is_clean_win(s)))
         for sc, vals in sc_stats.items():
-            win_rate = sum(1 for v in vals if v >= 5) / len(vals)
-            avg_gain = sum(vals) / len(vals)
+            win_rate = sum(1 for _, w in vals if w) / len(vals)
+            avg_gain = sum(g for g, _ in vals) / len(vals)
             self._scanner_adj[sc] = round((win_rate - 0.50) * 40 + (avg_gain / 10), 1)
 
         tier_stats: Dict[str, list] = {}
         for s in completed:
             tier = s.get("tier", "Unknown")
-            tier_stats.setdefault(tier, []).append(s.get("max_gain_pct", 0))
+            tier_stats.setdefault(tier, []).append(_is_clean_win(s))
         for tier, vals in tier_stats.items():
-            win_rate = sum(1 for v in vals if v >= 5) / len(vals)
+            win_rate = sum(1 for w in vals if w) / len(vals)
             self._tier_adj[tier] = round((win_rate - 0.50) * 30, 1)
 
         self._trained_on   = len(completed)
@@ -260,7 +286,7 @@ class MafioAgent:
         if not similar:
             return 0.0, ""
 
-        wins     = sum(1 for s in similar if s.get("max_gain_pct", 0) >= 5)
+        wins     = sum(1 for s in similar if _is_clean_win(s))
         win_prob = wins / len(similar) * 100
 
         parts = []
@@ -269,7 +295,17 @@ class MafioAgent:
             dd   = s.get("max_drawdown_pct")   # None for old records without retro update
             sym  = s.get("sym", "?").replace("USDT", "")
             sign = "+" if peak >= 0 else ""
-            icon = "✅" if peak >= 5 else ("❌" if peak < 0 else "⚠️")
+            # 🛑 = printed a real peak but still closed on a stop. Previously these
+            # showed ✅, so a precedent that lost money read as a success. A coin that
+            # never rose and then stopped out stays a plain ❌.
+            if _is_clean_win(s):
+                icon = "✅"
+            elif _closed_on_stop(s) and peak >= 5:
+                icon = "🛑"
+            elif _closed_on_stop(s) or peak < 0:
+                icon = "❌"
+            else:
+                icon = "⚠️"
             if dd is not None and dd < -3.0:
                 # Show drawdown only if meaningful (> -3%)
                 parts.append(f"{sym} ▲{sign}{peak:.0f}% ▼{dd:.0f}% {icon}")

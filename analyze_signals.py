@@ -64,17 +64,31 @@ def main():
     print()
 
     # ── تحديد الفئات ──────────────────────────────────────────
-    winners   = [r for r in db if (r.get("max_gain_pct") or 0) >= 20]
-    moderate  = [r for r in db if 5 <= (r.get("max_gain_pct") or 0) < 20]
-    losers    = [r for r in db if r.get("outcome") in ("stoploss", "reversal")
+    # "قمة ثم وقف": بلغت +5% ثم أُغلقت على الوقف — تربح فقط مع وقف متحرّك نشط،
+    # لا تُحسب نجاحاً كاملاً. تُقرأ من close_reason أيضاً لتصحيح السجلات القديمة
+    # التي كُتبت قبل وجود الوسم (outcome="success" مع close_reason="stoploss").
+    def _on_stop(r):
+        return (r.get("outcome") in ("stoploss", "peak_then_sl")
+                or r.get("close_reason") == "stoploss")
+
+    peak_then_sl = [r for r in db
+                    if _on_stop(r) and (r.get("max_gain_pct") or 0) >= 5]
+    winners   = [r for r in db if (r.get("max_gain_pct") or 0) >= 20 and not _on_stop(r)]
+    moderate  = [r for r in db if 5 <= (r.get("max_gain_pct") or 0) < 20 and not _on_stop(r)]
+    losers    = [r for r in db if r.get("outcome") in ("stoploss", "reversal", "peak_then_sl")
                  and (r.get("max_gain_pct") or 0) < 5]
     active    = [r for r in db if r.get("outcome") == "active"]
 
     print(f"🏆 فئات الأداء:")
     print(f"  ✅ رابحون كبار  (≥+20%)  : {len(winners)}")
     print(f"  🟡 ربح معتدل   (+5-20%) : {len(moderate)}")
+    print(f"  🛑 قمة ثم وقف            : {len(peak_then_sl)}   ← تربح بوقف متحرّك فقط")
     print(f"  ❌ خسائر                  : {len(losers)}")
     print(f"  ⏳ نشط                    : {len(active)}")
+    if peak_then_sl:
+        _pk = sorted(peak_then_sl, key=lambda r: r.get("max_gain_pct", 0), reverse=True)
+        print(f"     أعلى القمم المهدورة: " + " · ".join(
+            f"{r['sym'].replace('USDT','')} ▲{r.get('max_gain_pct',0):.0f}%" for r in _pk[:6]))
     print()
 
     # ── أفضل الإشارات ─────────────────────────────────────────

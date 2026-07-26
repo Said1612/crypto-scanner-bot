@@ -1863,7 +1863,16 @@ def check_milestones(all_t):
             # signal from tracking with _db_close never called (record stuck "active").
             _entry = info.get("entry", 0.0)
             _exit  = all_t.get(sym, {}).get("price", _entry)
-            _out   = "success" if _max >= 5.0 else reason
+            # v3.7.13: a signal that peaked >= +5% and THEN stopped out was labelled
+            # "success" while close_reason stayed "stoploss" — one record carrying two
+            # contradictory verdicts. It inflated the win rate and, worse, the AI cited
+            # such coins as successful precedents (e.g. "MVLLB +8% ✅" for a signal that
+            # actually closed at -9.4%). It gets its own class: profitable only with an
+            # actively trailed stop, not a signal that ran to target on its own.
+            if _max >= 5.0:
+                _out = "peak_then_sl" if reason == "stoploss" else "success"
+            else:
+                _out = reason
             _db_close(sym, _out, _max, _exit, _dur, reason, max_dd=_min)
             _cb_record_outcome(is_sl=(reason == "stoploss"), sym=sym)
             daily_results.append({
@@ -2169,7 +2178,9 @@ def _period_report(period_label: str, days: int):
         return
 
     WIN_OUT  = {"success", "partial", "stoploss_recovered"}
-    LOSS_OUT = {"stoploss", "reversal", "timeout"}
+    # v3.7.13: peak_then_sl closed on a stop, so it belongs on the loss side of the
+    # headline rate — it only pays with an actively trailed stop, never on its own.
+    LOSS_OUT = {"stoploss", "reversal", "timeout", "peak_then_sl"}
 
     wins   = [e for e in entries if e.get("outcome") in WIN_OUT]
     losses = [e for e in entries if e.get("outcome") in LOSS_OUT]
