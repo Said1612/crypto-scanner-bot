@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.15"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.16"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2922,19 +2922,29 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Still requires spike ≥ 0.8x — below-average volume (IO: 0.2x) is not a valid entry.
     # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
     effective_spike_min = 0.8 if momentum_bypass else (1.5 if super_ratio else spike_min)
-    if spike < effective_spike_min:
-        # v3.7.15 diagnostic: this gate is what actually kills scan_trend_gainer's
-        # candidates — the log showed a low_spike rejection one second after nearly
-        # every TREND_GAINER candidate line. But "low_spike" alone cannot distinguish
-        # a marginal 0.79x from a dead 0.20x, and only the former would mean the floor
-        # is wrong. There is a plausible catch-22 here: spike is measured against the
-        # recent average, so a coin grinding up on sustained volume raises its own
-        # baseline until ordinary candles read below 1.0x — the steadier the trend, the
-        # lower the ratio. Log the real numbers for momentum candidates (whose 1h volume
-        # trend scan_trend_gainer already validated) and set the floor from that data.
+    # v3.7.16: `spike` is this candle's volume against its own recent average, which is the
+    # wrong question for a coin grinding up over hours. The steadier the trend, the more it
+    # lifts that average, so an ordinary candle sits near 1.0x and routine variance drops it
+    # under the 0.8 floor — discarding roughly half of scan_trend_gainer's candidates on the
+    # luck of which 5-minute window the scan landed in. The log showed a low_spike rejection
+    # one second after nearly every candidate line, and ON — the largest winner on record at
+    # +200%, scanner="momentum" — came through this same path.
+    # Those scanners already verified volume on the right timeframe (trend_gainer: last 4h
+    # against the 24h hourly average; quiet_buildup: last 3 candles against the prior 3), so
+    # accept that measurement when it shows volume at or above the coin's own daily pace.
+    # Below 1.0x it carries no evidence and the candle still has to stand on its own.
+    _mom_ratio = ticker.get("_mom_vol_ratio", 0.0) if momentum_bypass else 0.0
+    _spike_eff = max(spike, _mom_ratio) if _mom_ratio >= 1.0 else spike
+    if _spike_eff < effective_spike_min:
+        # Diagnostic kept from v3.7.15 so the fix above stays measurable: these are the
+        # momentum candidates the gate still drops even after the 1h volume evidence is
+        # taken into account. Logs the candle spike, the ratio its scanner measured, and
+        # what the two combined to — if these cluster just under the floor, the floor is
+        # the next thing to revisit; if they are near zero, the volume really was dead.
         if momentum_bypass:
-            log.info("MOMENTUM_SPIKE_BLOCK %-12s spike=%.2fx < floor=%.2fx  vol24=%.1fM",
-                     sym, spike, effective_spike_min, vol_24h / 1e6)
+            log.info("MOMENTUM_SPIKE_BLOCK %-12s spike=%.2fx mom_ratio=%.2fx eff=%.2fx "
+                     "< floor=%.2fx  vol24=%.1fM",
+                     sym, spike, _mom_ratio, _spike_eff, effective_spike_min, vol_24h / 1e6)
         _rej("low_spike"); return
 
     # Spike candle must close in upper half — rejects pump-dump wicks
@@ -6229,6 +6239,10 @@ def scan_trend_gainer(all_t: dict):
             _trend_gainer_dedup[sym] = now
             ticker_copy = dict(ticker)
             ticker_copy["momentum_signal"] = True
+            # v3.7.16: hand _check the volume evidence this scanner just verified on the
+            # 1h timeframe. Without it _check re-tests volume on a single 5m candle, which
+            # throws away a sustained trend whenever that one candle happens to be quiet.
+            ticker_copy["_mom_vol_ratio"] = avg_recent / max(avg_vol_1h, 1)
 
             log.info("TREND_GAINER candidate %s chg=%.1f%% pos24=%.0f%% crash=%.1f%% vol_ratio=%.1fx bulls=%d/%d",
                      sym, ticker.get("change", 0), pos24 * 100, crash_from_high,
@@ -6351,6 +6365,7 @@ def scan_quiet_buildup(all_t: dict):
             _quiet_buildup_dedup[sym] = now
             ticker_copy = dict(ticker)
             ticker_copy["momentum_signal"] = True
+            ticker_copy["_mom_vol_ratio"] = vol_ratio   # v3.7.16 — see scan_trend_gainer
 
             log.info(
                 "QUIET_BUILDUP candidate %s chg=%.1f%% vol_ratio=%.2fx consec=%s bulls=%d pos24=%.0f%% net=%s",
