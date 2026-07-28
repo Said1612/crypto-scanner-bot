@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.14"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.15"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2923,6 +2923,18 @@ def _check(sym, ticker, interval, sector_boost=False):
     # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
     effective_spike_min = 0.8 if momentum_bypass else (1.5 if super_ratio else spike_min)
     if spike < effective_spike_min:
+        # v3.7.15 diagnostic: this gate is what actually kills scan_trend_gainer's
+        # candidates — the log showed a low_spike rejection one second after nearly
+        # every TREND_GAINER candidate line. But "low_spike" alone cannot distinguish
+        # a marginal 0.79x from a dead 0.20x, and only the former would mean the floor
+        # is wrong. There is a plausible catch-22 here: spike is measured against the
+        # recent average, so a coin grinding up on sustained volume raises its own
+        # baseline until ordinary candles read below 1.0x — the steadier the trend, the
+        # lower the ratio. Log the real numbers for momentum candidates (whose 1h volume
+        # trend scan_trend_gainer already validated) and set the floor from that data.
+        if momentum_bypass:
+            log.info("MOMENTUM_SPIKE_BLOCK %-12s spike=%.2fx < floor=%.2fx  vol24=%.1fM",
+                     sym, spike, effective_spike_min, vol_24h / 1e6)
         _rej("low_spike"); return
 
     # Spike candle must close in upper half — rejects pump-dump wicks
