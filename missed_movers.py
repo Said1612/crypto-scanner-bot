@@ -11,9 +11,14 @@ missed_movers.py — لماذا لم يلتقط البوت العملات الت
   🟢 أُطلقت إشارة       → البوت نجح
 
 USAGE (على الـ VPS):
-  python3 missed_movers.py            # ارتفاع ≥ 8% خلال 24 ساعة
+  python3 missed_movers.py            # ارتفاع ≥ 8% خلال 24 ساعة، سيولة ≥ $2M
   python3 missed_movers.py 12         # ارتفاع ≥ 12%
   python3 missed_movers.py 8 12       # ارتفاع ≥ 8% خلال 12 ساعة
+  python3 missed_movers.py 8 24 0.5   # خفض حدّ السيولة إلى $0.5M
+
+السيولة تُفصل عمداً: عملة بحجم $300K ترتفع +65% ليست فرصة فائتة — الدخول
+والخروج منها يحرّك السعر. خلطها مع الرابحين الحقيقيين يجعل نسبة الالتقاط
+تبدو كارثية بينما البوت يؤدي عمله. النسبة التي تهمّ تُحسب على القابل للتداول.
 
 ملاحظة: يقرأ فقط — لا يعدّل البوت ولا أي ملف.
 """
@@ -30,6 +35,8 @@ except ImportError:
 
 MIN_GAIN = float(sys.argv[1]) if len(sys.argv) > 1 else 8.0
 HOURS    = int(sys.argv[2]) if len(sys.argv) > 2 else 24
+# حدّ السيولة الذي يفصل "فرصة حقيقية" عن "مضخّة رقيقة" — بالمليون دولار
+MIN_VOL  = (float(sys.argv[3]) if len(sys.argv) > 3 else 2.0) * 1e6
 SERVICE  = "crypto-scanner"
 
 # REJ BTCUSDT [5m] low_move(-1.0%)   → (sym, interval, reason)
@@ -102,14 +109,23 @@ def main():
             never.append(g)
 
     total = len(gainers)
+    liq   = lambda lst: [g for g in lst if g["vol"] >= MIN_VOL]
+    f_l, b_l, n_l = liq(fired), liq(blocked), liq(never)
+    total_l = len(f_l) + len(b_l) + len(n_l)
+    thin    = total - total_l
+
     print("=" * 74)
     print(f"  📊 {total} عملة ارتفعت ≥ +{MIN_GAIN:g}% خلال {HOURS} ساعة")
+    print(f"     منها {total_l} قابلة للتداول (سيولة ≥ ${MIN_VOL/1e6:g}M) · {thin} مضخّة رقيقة")
     print("=" * 74)
-    print(f"  🟢 أطلق البوت إشارة : {len(fired):>3}")
-    print(f"  🟡 فحصها ورفضها     : {len(blocked):>3}   ← مشكلة فلترة")
-    print(f"  🔴 لم يفحصها أبداً   : {len(never):>3}   ← ثغرة تغطية")
-    if total:
-        print(f"\n  نسبة الالتقاط: {len(fired)/total*100:.0f}%")
+    print(f"                        الكل    القابل للتداول")
+    print(f"  🟢 أطلق إشارة       : {len(fired):>4}   {len(f_l):>10}")
+    print(f"  🟡 فحصها ورفضها     : {len(blocked):>4}   {len(b_l):>10}   ← مشكلة فلترة")
+    print(f"  🔴 لم يفحصها أبداً   : {len(never):>4}   {len(n_l):>10}   ← ثغرة تغطية")
+    if total_l:
+        print(f"\n  ⭐ نسبة الالتقاط على القابل للتداول: {len(f_l)/total_l*100:.0f}%"
+              f"   (على الكل: {len(fired)/total*100:.0f}%)")
+        print(f"     الرقم الأول هو المقياس — الثاني تشوّهه المضخّات الرقيقة.")
 
     if fired:
         print("\n🟢 التقطها البوت:")
@@ -117,23 +133,28 @@ def main():
             print(f"   {g['sym'].replace('USDT',''):<12} +{g['chg']:.1f}%   vol=${g['vol']/1e6:.1f}M")
 
     if blocked:
-        print(f"\n🟡 فحصها ورفضها — أهم أسباب الرفض لكل عملة:")
+        print(f"\n🟡 فحصها ورفضها — أهم أسباب الرفض لكل عملة  (💧 = سيولة رقيقة):")
         print(f"   {'عملة':<12} {'24h':>7} {'الحجم':>9} {'فحوص':>6}  الأسباب الغالبة")
         print("   " + "─" * 68)
         for g in sorted(blocked, key=lambda x: x["chg"], reverse=True)[:25]:
-            top = " · ".join(f"{r}×{c}" for r, c in g["reasons"].most_common(3))
-            print(f"   {g['sym'].replace('USDT',''):<12} {g['chg']:>6.1f}% "
+            top  = " · ".join(f"{r}×{c}" for r, c in g["reasons"].most_common(3))
+            mark = "  " if g["vol"] >= MIN_VOL else "💧"
+            print(f" {mark}{g['sym'].replace('USDT',''):<12} {g['chg']:>6.1f}% "
                   f"{g['vol']/1e6:>8.1f}M {g['scans']:>6}  {top}")
 
-        # أي فلتر هو المسؤول الأكبر عن تفويت الرابحين؟
-        agg = Counter()
-        for g in blocked:
-            for reason, n in g["reasons"].items():
-                agg[reason] += n
-        print(f"\n   🎯 الفلاتر التي حجبت الرابحين (مجمّعة):")
-        for reason, n in agg.most_common(10):
-            coins = sum(1 for g in blocked if reason in g["reasons"])
-            print(f"      {reason:<22} {n:>6} رفض   على {coins} عملة")
+        # أي فلتر هو المسؤول الأكبر عن تفويت الرابحين؟ يُحسب على القابل للتداول
+        # فقط — الفلاتر التي تحجب المضخّات الرقيقة تؤدي عملها، لا تخطئ.
+        if b_l:
+            agg = Counter()
+            for g in b_l:
+                for reason, n in g["reasons"].items():
+                    agg[reason] += n
+            print(f"\n   🎯 الفلاتر التي حجبت رابحين قابلين للتداول (سيولة ≥ ${MIN_VOL/1e6:g}M):")
+            for reason, n in agg.most_common(10):
+                coins = [g['sym'].replace('USDT','') for g in b_l if reason in g["reasons"]]
+                print(f"      {reason:<22} {n:>6} رفض   على {len(coins)}: {', '.join(coins[:5])}")
+            print(f"\n      ↑ هذه هي القائمة التي تُبنى عليها القرارات — أي فلتر يتكرّر هنا")
+            print(f"        على عملات سائلة متعددة هو المرشّح للمراجعة بالبيانات.")
 
     if never:
         print(f"\n🔴 لم يفحصها البوت إطلاقاً (لم تدخل مجمّع المرشّحين):")
