@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.16"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.17"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -796,26 +796,33 @@ def _db_close(sym, outcome, max_gain, price_exit, duration_min, reason, max_dd=N
                 _fractal_agent.record_outcome(sym, max_gain)
             return
 
-def _retroactive_peak_update(max_per_call: int = 3):
+def _retroactive_peak_update(max_per_call: int = 5):
     """
-    For timed-out signals (last 14 days), fetch real 1h klines and record:
-      - max_gain_pct   : highest peak reached from entry (before reversal)
-      - max_drawdown_pct: deepest trough reached from entry (can be negative)
+    For every closed signal of the last 14 days, replay the 1h klines and record what
+    actually happened rather than what the 30s tracking loop happened to observe:
+      - max_gain_pct    : highest peak reached from entry
+      - max_drawdown_pct: deepest trough reached from entry (negative below entry)
 
     Example: coin entered $1 → peaked at $2 (+100%) → crashed to $0.60 (-40%)
-      max_gain_pct    = +100%  (the real opportunity available)
-      max_drawdown_pct= -40%   (the worst moment after entry)
+      max_gain_pct     = +100%  (the real opportunity available)
+      max_drawdown_pct = -40%   (the worst moment after entry)
 
-    This gives AI full picture — a signal that peaked +100% is a winner even if
-    the coin later fell below entry. Without this, all timeout signals look weak.
+    Both columns are the basis for every filter decision, and the live values are
+    biased low on the same side for winners and losers alike, so the comparison
+    between them is only trustworthy once this has run over both.
     """
     now    = time.time()
     cutoff = now - 14 * 86400
 
-    # Include both timeout AND stoploss — some SL-triggered signals recovered strongly
+    # Every closed outcome, not just the losing ones. Live tracking polls every 30s and
+    # therefore reads a peak that is systematically too low — HEI was recorded at +10.32%
+    # while the klines show it actually reached +30.07%. Correcting only losers left the
+    # winners understated too, so every comparison between the two groups was drawn on
+    # numbers biased in the same direction.
+    _RETRO_OUTCOMES = ("timeout", "stoploss", "peak_then_sl", "success")
     candidates = [
         rec for rec in _signal_db
-        if rec.get("outcome") in ("timeout", "stoploss")
+        if rec.get("outcome") in _RETRO_OUTCOMES
         and (rec.get("timestamp") or 0) >= cutoff
         and not rec.get("retro_updated")
     ]
@@ -837,7 +844,10 @@ def _retroactive_peak_update(max_per_call: int = 3):
             base_url  = MEXC_BASE if exchange == "MEXC" else BINANCE_BASE
             start_ms  = signal_ts * 1000
             hours_ago = max(1, int((now - signal_ts) / 3600))
-            limit     = min(hours_ago + 1, 168)   # cap at 7 days of 1h candles
+            # 400 covers the full 14-day candidate window (Binance allows up to 1000).
+            # The old 168 cap stopped 7 days after entry, so anything that kept running
+            # past that — ON is still climbing on day 9 — had its peak cut off.
+            limit     = min(hours_ago + 1, 400)
 
             r = S.get(f"{base_url}/klines",
                       params={"symbol": sym, "interval": "1h",
@@ -862,8 +872,17 @@ def _retroactive_peak_update(max_per_call: int = 3):
                 rec["max_gain_pct"] = round(true_peak, 2)
                 changed = True
 
-            # Always update drawdown — shows real risk profile
-            rec["max_drawdown_pct"] = round(true_drawdown, 2)
+            # Always update drawdown — shows real risk profile.
+            # This counts as a change: the value is written unconditionally, but the save
+            # below used to be gated on `changed`, which only tracked the peak. A record
+            # whose peak was already accurate had its freshly computed drawdown dropped
+            # on the next restart, along with the retro_updated flag — so the same API
+            # calls were repeated forever and the column stayed empty.
+            _prev_dd = rec.get("max_drawdown_pct")
+            _new_dd  = round(true_drawdown, 2)
+            if _prev_dd is None or abs((_prev_dd or 0.0) - _new_dd) > 0.01:
+                changed = True
+            rec["max_drawdown_pct"] = _new_dd
 
             # Stoploss that recovered strongly → reclassify for AI training
             if rec.get("outcome") == "stoploss" and true_peak >= 5.0:
@@ -882,11 +901,14 @@ def _retroactive_peak_update(max_per_call: int = 3):
             log.debug("retro_peak error %s: %s", sym, _rpe)
             rec["retro_updated"] = True
 
-    if updated:
+    # Save whenever anything was processed, not only when a value moved. Every path in
+    # the loop sets retro_updated, and if that flag is not persisted the same records are
+    # fetched again after every restart while never being marked done.
+    if candidates[:max_per_call]:
         _save_signal_db()
-        if _ai_agent is not None:
-            _ai_agent.force_retrain()
-            log.info("RETRO_PEAK: %d records updated → AI retrained", updated)
+    if updated and _ai_agent is not None:
+        _ai_agent.force_retrain()
+        log.info("RETRO_PEAK: %d records updated → AI retrained", updated)
 
 
 # ══════════════════════════════════════════════════════
