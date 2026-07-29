@@ -194,10 +194,20 @@ def main():
 
     # ── معدل النجاح حسب كل مقياس (لمعايرة الفلاتر) ────────────────
     WIN_OUT  = {"success", "partial", "stoploss_recovered"}
-    LOSS_OUT = {"stoploss", "reversal", "timeout"}
+    LOSS_OUT = {"stoploss", "reversal", "timeout", "peak_then_sl"}
     closed = [r for r in db if r.get("outcome") in WIN_OUT | LOSS_OUT]
 
-    def _is_win(r): return r.get("outcome") in WIN_OUT
+    def _is_win(r):
+        """فوز نظيف: بلغ الهدف ولم يُغلق على الوقف.
+
+        السجلات التي كُتبت قبل وسم peak_then_sl تحمل outcome="success" مع
+        close_reason="stoploss" — أي بلغت +5% ثم انعكست إلى الوقف. اعتبارها فوزاً
+        ينفخ كل الجداول أدناه، وهي بالضبط الفئة التي تربح بإدارة الوقف لا بجودة
+        الإشارة. أما stoploss_recovered فهو ارتداد حقيقي مؤكّد من الشموع.
+        """
+        if r.get("outcome") == "stoploss_recovered":
+            return True
+        return r.get("outcome") in WIN_OUT and not _on_stop(r)
 
     def winrate_buckets(group, key, edges, label, fmt="{:.2f}"):
         print(f"\n  === {label} ===")
@@ -384,9 +394,78 @@ def main():
     else:
         print("    (لا بيانات بعد — ستُملأ في الإشارات الجديدة بعد هذا التحديث)")
 
-    print(f"\n{'═'*60}")
+    # ══════════════════════════════════════════════════════════════════
+    #  جدول القرار — الأسئلة المعلّقة، بثلاث فئات صريحة لا فئتين
+    # ══════════════════════════════════════════════════════════════════
+    print(f"\n{'═'*66}")
+    print("  ⚖️  جدول القرار — فصل 'قمة ثم وقف' عن الفوز النظيف")
+    print(f"{'═'*66}")
+
+    def _cls(r):
+        if _is_win(r):                                   return "win"
+        if _on_stop(r) and (r.get("max_gain_pct") or 0) >= 5: return "pk_sl"
+        return "loss"
+
+    def decision_buckets(key, edges, label, fmt="{:.2f}", group=None):
+        grp_all = group if group is not None else closed
+        have = [r for r in grp_all if r.get(key) is not None]
+        print(f"\n  === {label} ===   (n={len(have)} سجل يحمل القيمة)")
+        if not have:
+            print("    ⏳ لا بيانات بعد")
+            return
+        print(f"    {'النطاق':<22} {'n':>4} {'نظيف':>6} {'قمة+وقف':>9} {'خسارة':>7}  {'أفضل':>7}")
+        print("    " + "─" * 62)
+        bounds = ([(-1e18, edges[0])]
+                  + [(edges[i], edges[i+1]) for i in range(len(edges)-1)]
+                  + [(edges[-1], 1e18)])
+        for lo, hi in bounds:
+            g = [r for r in have if lo <= r[key] < hi]
+            if not g:
+                continue
+            c = {"win": 0, "pk_sl": 0, "loss": 0}
+            for r in g:
+                c[_cls(r)] += 1
+            best = max((r.get("max_gain_pct") or 0) for r in g)
+            lo_s = "-inf" if lo < -1e17 else fmt.format(lo)
+            hi_s = "+inf" if hi >  1e17 else fmt.format(hi)
+            flag = "  ⛔" if (c["win"] == 0 and len(g) >= 5) else ""
+            print(f"    [{lo_s:>8}..{hi_s:>8}) {len(g):>4} {c['win']:>6} "
+                  f"{c['pk_sl']:>9} {c['loss']:>7}  {best:>+6.0f}%{flag}")
+        print("    ⛔ = صفر فوز نظيف على 5 سجلات أو أكثر → مرشّح للاستبعاد")
+
+    decision_buckets("fcf",     [0.80, 1.00, 1.10, 1.30], "FCF")
+    decision_buckets("ratio",   [2.0, 3.0, 5.0, 10.0, 20.0], "RATIO", fmt="{:.1f}")
+    decision_buckets("spike",   [1.5, 3.0, 5.0, 10.0], "SPIKE", fmt="{:.1f}")
+    decision_buckets("ob_spot", [0.55, 0.65, 0.75], "ORDERBOOK")
+
+    # نسبة الألم: |أعمق نزول| ÷ أعلى صعود. تنبّأت بانعكاس DODO (1.38) قبل حدوثه —
+    # الإشارة التي تؤلم أكثر مما تعطي غالباً تنتهي على الوقف مهما بلغت قمّتها.
+    pain = []
+    for r in closed:
+        dd, pk = r.get("max_drawdown_pct"), r.get("max_gain_pct")
+        if dd is not None and pk and pk > 0:
+            r["_pain"] = round(abs(dd) / pk, 2)
+            pain.append(r)
+    print(f"\n{'═'*66}")
+    print("  🩹 نسبة الألم = |أعمق نزول| ÷ أعلى صعود")
+    print(f"{'═'*66}")
+    if len(pain) < 5:
+        print(f"\n  ⏳ {len(pain)} سجل فقط يحمل عمودَي النزول والصعود معاً.")
+        print("     العمود يُملأ عند الإغلاق (v3.7.13) وبالتصحيح الأثري (v3.7.17) —")
+        print("     أعد التشغيل بعد أن يكتمل التصحيح.")
+    else:
+        decision_buckets("_pain", [0.20, 0.50, 1.00], "نسبة الألم", fmt="{:.2f}", group=pain)
+        for lbl, sel in (("فوز نظيف", "win"), ("قمة ثم وقف", "pk_sl"), ("خسارة", "loss")):
+            g = [r["_pain"] for r in pain if _cls(r) == sel]
+            if g:
+                print(f"    {lbl:<12} n={len(g):<3} وسيط الألم = {_med(g):.2f}")
+        print("\n    لو كان وسيط 'الفوز النظيف' أقل بوضوح من الفئتين الأخريين،")
+        print("    فالنسبة تصلح فلتراً — تُحسب بعد ساعات من الإشارة، لا وقتها.")
+
+    print(f"\n{'═'*66}")
     print("  ملاحظة: حقول fra_* + liq_ratio تُملأ في الإشارات الجديدة فقط")
-    print(f"{'═'*60}\n")
+    print("  ولا تُبنى قرارات على عمود ما زال التصحيح الأثري يعدّله.")
+    print(f"{'═'*66}\n")
 
 if __name__ == "__main__":
     main()
