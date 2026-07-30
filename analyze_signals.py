@@ -526,5 +526,59 @@ def main():
     print("  ولا تُبنى قرارات على عمود ما زال التصحيح الأثري يعدّله.")
     print(f"{'═'*66}\n")
 
+    # ══════════════════════════════════════════════════════════════════
+    #  العائد المتوقّع لكل ماسح — نسبة النجاح وحدها تُضلّل
+    # ══════════════════════════════════════════════════════════════════
+    # مسار momentum نسبته 26% فقط، لكنه أنتج ON (+209%). مسار بنسبة 26% وربح
+    # وسطي +40% يتفوّق على مسار بنسبة 60% وربح +5%. الحكم بالنسبة وحدها يقتل
+    # المسارات عالية التقلّب التي تحمل كل الأرباح الكبيرة.
+    print(f"{'═'*78}")
+    print("  💰 العائد المتوقّع لكل ماسح — النسبة وحدها لا تكفي")
+    print(f"{'═'*78}")
+
+    def _realized(r):
+        """الربح المحقّق فعلاً عند الإغلاق: (سعر الخروج − الدخول) ÷ الدخول."""
+        e, x = r.get("price_entry"), r.get("price_exit")
+        if not e or not x or e <= 0:
+            return None
+        return (x - e) / e * 100.0
+
+    print(f"\n    {'الماسح':<18} {'n':>4} {'فوز%':>6} {'وسيطالقمة':>11} "
+          f"{'وسيطالمحقق':>12} {'EVحمل':>9} {'EVنصف':>9} {'أفضل':>8}")
+    print("    " + "─" * 76)
+
+    _rows = defaultdict(list)
+    for r in closed:
+        _rows[r.get("scanner") or "?"].append(r)
+
+    for sc, grp in sorted(_rows.items(), key=lambda x: -len(x[1])):
+        if len(grp) < 5:
+            continue
+        n     = len(grp)
+        wr    = sum(1 for r in grp if _is_win(r)) / n * 100
+        peaks = [r.get("max_gain_pct") for r in grp if r.get("max_gain_pct") is not None]
+        real  = [v for v in (_realized(r) for r in grp) if v is not None]
+        best  = max(peaks) if peaks else 0.0
+        ev_hold = _avg(real) if real else None
+        # EV لو اقتنصت نصف القمة على الرابحين وتكبّدت الخسارة المحقّقة على الباقي.
+        # نموذج تقريبي لأسلوب الوقف المتحرّك — ليس قياساً، لكنه يقرّب أثر الانضباط.
+        _half = []
+        for r in grp:
+            pk, rl = r.get("max_gain_pct"), _realized(r)
+            if pk and pk > 0:
+                _half.append(pk * 0.5)
+            elif rl is not None:
+                _half.append(rl)
+        ev_half = _avg(_half) if _half else None
+        _f = lambda v: f"{v:+8.1f}%" if v is not None else "       —  "
+        print(f"    {sc:<18} {n:>4} {wr:>5.0f}% {(_med(peaks) or 0):>+10.1f}% "
+              f"{(_med(real) if real else 0):>+11.1f}% {_f(ev_hold)} {_f(ev_half)} "
+              f"{best:>+7.0f}%")
+
+    print("\n    EVحمل  = متوسط الربح المحقّق فعلاً لو حملتَ كل إشارة حتى إغلاقها.")
+    print("    EVنصف  = لو خرجتَ عند نصف القمة على الرابحين (نموذج الوقف المتحرّك).")
+    print("             الفارق بين العمودين هو قيمة انضباطك في الخروج.")
+    print("    موجب في العمودين = المسار يستحق البقاء مهما بدت نسبته منخفضة.\n")
+
 if __name__ == "__main__":
     main()
