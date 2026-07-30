@@ -23,6 +23,26 @@ def _med(vals):
     mid = len(v) // 2
     return v[mid] if len(v) % 2 else (v[mid-1] + v[mid]) / 2
 
+def _normalize_pos24(db):
+    """توحيد وحدة pos24: إصدارات قديمة خزّنتها نسبة مئوية (53.0) لا كسراً (0.53).
+
+    الخلط يُفسد كل تحليل يعتمد عليها: أي قيمة بصيغة النسبة تقع فوق 0.85 تلقائياً،
+    فيبدو أن "الدخول عند قمة النطاق يربح 82%" بينما الرقم مجرد أثر للوحدة الخاطئة
+    مضروباً في أن تلك السجلات قديمة من سوق صاعد. الحدّ 1.5 لأن الكسر لا يتجاوز
+    1.0 إلا بهامش ضئيل (سعر لحظي أعلى من high24)، والنسبة تبدأ من 0 إلى 100.
+    """
+    fixed = 0
+    for r in db:
+        p = r.get("pos24")
+        if isinstance(p, (int, float)) and p > 1.5:
+            r["pos24"] = round(p / 100.0, 4)
+            fixed += 1
+    if fixed:
+        print(f"⚠️  وُحِّدت وحدة pos24 في {fixed} سجل (كانت نسبة مئوية) — للقراءة فقط.")
+        print("    لإصلاحها على القرص نهائياً: python3 fix_pos24.py --apply\n")
+    return db
+
+
 def load():
     if not os.path.exists(DB_PATH):
         print(f"❌ لم يُعثر على {DB_PATH}")
@@ -30,8 +50,10 @@ def load():
     with open(DB_PATH) as f:
         raw = f.read().strip()
     if raw.startswith("["):
-        return json.loads(raw)
-    return [json.loads(l) for l in raw.splitlines() if l.strip()]
+        db = json.loads(raw)
+    else:
+        db = [json.loads(l) for l in raw.splitlines() if l.strip()]
+    return _normalize_pos24(db)
 
 def main():
     db = load()
