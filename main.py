@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.17"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.18"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1736,6 +1736,15 @@ def build_signal(sym, price, change, buy_v, sell_v,
     else:
         score_label = ""
 
+    # v3.7.18 — measured over 121 closed signals of these two types: held to close they
+    # average -2.3% (volume_explosion, n=83) and -3.0% (moonshot, n=38), while exiting
+    # near the peak averages +16.0% and +12.8%. They are not hold-and-wait setups; the
+    # whole return lives in taking the profit. Every peak_then_sl we tracked — HEI at
+    # +10.3%, LUMIA +8.4%, BMT +6.1%, DODO +5.6% — came from this family and closed on
+    # its stop. Says so on the signal itself, where it can still change the outcome.
+    _grab_tag = ("\n⚡ *اقتناص سريع* — إحصائياً: خسارة إن حُملت، +16% بالخروج عند الهدف\n"
+                 if (moonshot or vol_explosion) else "")
+
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
     _type_line = f"📈 *{signal_type}*\n" if signal_type else ""
@@ -1767,6 +1776,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         + f"🆕 *#{base}* 💀 · {_mkt_label} · Signal #{signal_count} {badge}\n"
         + f"💰 `${_fp(price)}`  📈 `+{move:.2f}%`  📍 `{pos_from_bottom}%` {pos_icon}\n"
         + (f"{score_label}\n" if score_label else "")
+        + (f"{_grab_tag}" if _grab_tag else "")
         + (f"{_mom_warn}" if _mom_warn else "")
         + f"\n"
         + f"⚡ `{spike:.1f}x`  ·  📊 Ratio `{ratio:.1f}x` {int_icon}  ·  📥 `{in_pct}%` 📤 `{out_pct}%`\n"
@@ -1819,6 +1829,34 @@ def check_milestones(all_t):
                     break
         if gain < info.get("min", 0.0):
             info["min"] = gain
+
+        # ── Pain-ratio warning (v3.7.18) ─────────────────────────────────
+        # |deepest drawdown| / highest peak. Measured across every closed signal that
+        # carries both columns: the clean winners sit at a median of 0.24, the ones that
+        # peaked and then stopped out at 1.14, the outright losses at 1.35. Above 1.0 only
+        # 1 of 33 ever became a clean win, and the best peak in that group was +20%.
+        # It called DODO's reversal while the signal still showed +5.55%; it closed at
+        # -8.41%. Fires once per symbol, and only once the position has actually been up,
+        # so it reads as "this is giving back more than it gave" rather than noise on a
+        # trade that simply started red.
+        _pk, _tr = info.get("max", 0.0), abs(info.get("min", 0.0))
+        if (_pk >= 3.0 and _tr > _pk and not info.get("pain_alerted")
+                and _notify_once(f"pain_{sym}", ttl=86400)):
+            info["pain_alerted"] = True
+            save_state()
+            send(f"━━━━━━━━━━━━━━━━━━━━\n"
+                 f"💀 MAFIO SNIPER 📡\n\n"
+                 f"🩹 نسبة ألم مرتفعة — #{sym.replace('USDT','')}\n"
+                 f"━━━━━━━━━━━━━━━━━━━━\n"
+                 f"📈 أعلى صعود:  +{_pk:.2f}%\n"
+                 f"📉 أعمق نزول:  -{_tr:.2f}%\n"
+                 f"⚖️ نسبة الألم: {_tr/max(_pk, 0.01):.2f}\n"
+                 f"💰 السعر الآن: ${_fp(t['price'])}\n\n"
+                 f"💡 فوق 1.0 تاريخياً: 1 من 33 فقط نجح نظيفاً\n"
+                 f"   راجع وقفك — الإشارة تعيد أكثر مما أعطت\n"
+                 f"━━━━━━━━━━━━━━━━━━━━")
+            log.info("PAIN_ALERT %s peak=%.2f%% trough=-%.2f%% ratio=%.2f",
+                     sym, _pk, _tr, _tr / max(_pk, 0.01))
 
         # 2. Stop-loss hit → alert AND close tracking
         # Use per-signal SL from _calc_tp_sl (stored at signal time), fallback to global -5%
