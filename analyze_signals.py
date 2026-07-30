@@ -455,6 +455,43 @@ def main():
                   f"{c['pk_sl']:>9} {c['loss']:>7}  {best:>+6.0f}%{flag}")
         print("    ⛔ = صفر فوز نظيف على 5 سجلات أو أكثر → مرشّح للاستبعاد")
 
+    # pos24 مقابل الماسح — يفصل السبب عن الارتباط.
+    # النطاق < 0.40 هو الأسوأ (30% فوز على 119 سجلاً)، لكن الماسحات التي تستهدف
+    # القيعان بطبعها (deep_value, quiet_accum المعطّل عند 25%) تتركّز فيه. لو بقي
+    # ضعيفاً داخل كل ماسح على حدة فالعلّة في الموقع؛ ولو تحسّن فالعلّة في الماسح.
+    print(f"\n{'═'*66}")
+    print("  🔀 POS24 × الماسح — هل الموقع هو السبب أم الماسح؟")
+    print(f"{'═'*66}")
+    _edges = [0.40, 0.65]
+    _names = ["< 0.40", "0.40-0.65", "> 0.65"]
+
+    def _band(p):
+        if p is None:            return None
+        if p < _edges[0]:        return 0
+        if p < _edges[1]:        return 1
+        return 2
+
+    _by_scanner = defaultdict(lambda: [[0, 0], [0, 0], [0, 0]])   # [wins, n] لكل نطاق
+    for r in closed:
+        b = _band(r.get("pos24"))
+        if b is None:
+            continue
+        cell = _by_scanner[r.get("scanner") or "?"][b]
+        cell[1] += 1
+        if _is_win(r):
+            cell[0] += 1
+    print(f"\n    {'الماسح':<18} " + "".join(f"{n:>14}" for n in _names))
+    print("    " + "─" * 62)
+    for sc, bands in sorted(_by_scanner.items(), key=lambda x: -sum(b[1] for b in x[1])):
+        if sum(b[1] for b in bands) < 5:
+            continue
+        cells = []
+        for w, n in bands:
+            cells.append(f"{w/n*100:>3.0f}% ({n:>3})" if n else "     —    ")
+        print(f"    {sc:<18} " + "".join(f"{c:>14}" for c in cells))
+    print("\n    اقرأ كل صف أفقياً: لو ارتفعت النسبة يميناً داخل نفس الماسح،")
+    print("    فالموقع نفسه يهمّ. ولو كان صف كامل منخفضاً، فالماسح هو المشكلة.")
+
     decision_buckets("fcf",     [0.80, 1.00, 1.10, 1.30], "FCF")
     decision_buckets("ratio",   [2.0, 3.0, 5.0, 10.0, 20.0], "RATIO", fmt="{:.1f}")
     decision_buckets("spike",   [1.5, 3.0, 5.0, 10.0], "SPIKE", fmt="{:.1f}")
