@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.18"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.19"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2991,10 +2991,19 @@ def _check(sym, ticker, interval, sector_boost=False):
     # +200%, scanner="momentum" — came through this same path.
     # Those scanners already verified volume on the right timeframe (trend_gainer: last 4h
     # against the 24h hourly average; quiet_buildup: last 3 candles against the prior 3), so
-    # accept that measurement when it shows volume at or above the coin's own daily pace.
-    # Below 1.0x it carries no evidence and the candle still has to stand on its own.
+    # take that measurement in place of the candle.
+    #
+    # v3.7.19: this originally only substituted when the ratio reached 1.0, a number chosen
+    # without evidence, and the diagnostic then showed every real value landing between
+    # 0.82x and 0.98x — so the substitution never once fired and v3.7.16 was dead code.
+    # The reason they cluster there is the catch-22 itself: a coin that ran early lifts its
+    # own 24h hourly average, leaving its later hours reading just under it while volume is
+    # still plainly healthy. MUUB was logged as a candidate at +47.8% and killed one second
+    # later on a ratio of 0.97. The floor that matters is the one scan_trend_gainer already
+    # enforces (0.80 of the daily pace); re-deriving it from a single 5m candle only adds
+    # noise. Keep max() so a genuine spike still counts for more.
     _mom_ratio = ticker.get("_mom_vol_ratio", 0.0) if momentum_bypass else 0.0
-    _spike_eff = max(spike, _mom_ratio) if _mom_ratio >= 1.0 else spike
+    _spike_eff = max(spike, _mom_ratio) if _mom_ratio > 0 else spike
     if _spike_eff < effective_spike_min:
         # Diagnostic kept from v3.7.15 so the fix above stays measurable: these are the
         # momentum candidates the gate still drops even after the 1h volume evidence is
