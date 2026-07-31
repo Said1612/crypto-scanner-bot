@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.19"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.20"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -130,6 +130,20 @@ STABLECOINS   = {"USDC","BUSD","DAI","TUSD","USDD","FDUSD","USDP","PYUSD","USDB"
                   "EUR","GBP","AUD","JPY","CHF","CAD","TRY","BRL","RUB","KRW","CNY","HKD","SGD","AED","SAR","MXN","PLN","SEK","NOK","DKK",
                   "PAXG","XAUT","OURIEL"}
 SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","IBVOL"}
+# Leveraged ETF tokens — NOT blocked, only labelled on the signal (v3.7.20).
+# These track a US stock at 2x-5x: SNXXB is Tradr 2X Long SNDK, MUUB is Direxion MU
+# Bull 2X, MVLLB and INTWB are GraniteShares 2X Long. Two properties make them
+# different from anything else the bot signals, and the trader has to know which one
+# is in front of them before sizing:
+#   - volatility drag: the daily rebalance bleeds value in a choppy tape even when the
+#     underlying ends flat, so time in the position works against you by construction.
+#   - the multiplier cuts both ways — a 20% drop in the stock is 40% here. Our own
+#     record has MVLLB at +8% peak against a -35% trough, a pain ratio of 4.4.
+# Kept out of BLACKLIST deliberately: they were among the largest movers on the day
+# this list was written (+31% to +61%), and the decision to trade them is the owner's.
+# Match is on the base symbol, so add new ones exactly as they appear (SNXXB, not SNXX).
+LEVERAGED_TOKENS = {"SNXXB", "MUUB", "MVLLB", "INTWB", "CBRSB", "SNXX"}
+
 # Coins to skip permanently: delisted, suspended, or confirmed manipulation-prone
 BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
                   "XAU", "XAUT", "PAXG", "XAGX",   # Gold/silver commodity tokens
@@ -1745,6 +1759,13 @@ def build_signal(sym, price, change, buy_v, sell_v,
     _grab_tag = ("\n⚡ *اقتناص سريع* — إحصائياً: خسارة إن حُملت، +16% بالخروج عند الهدف\n"
                  if (moonshot or vol_explosion) else "")
 
+    # v3.7.20 — see LEVERAGED_TOKENS. Not a block, a label: these are 2x-5x ETFs on a
+    # US stock, so the multiplier applies to the downside too and the daily rebalance
+    # bleeds value in a choppy tape regardless of direction. Sizing and holding time
+    # have to be decided differently, which is only possible if you can tell at a glance.
+    _lev_tag = ("\n🔴 *رمز مُرافع 2X* — الخسارة مضاعفة + تآكل بالتذبذب · حجم صغير، لا تحمله\n"
+                if base in LEVERAGED_TOKENS else "")
+
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
     _type_line = f"📈 *{signal_type}*\n" if signal_type else ""
@@ -1776,6 +1797,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         + f"🆕 *#{base}* 💀 · {_mkt_label} · Signal #{signal_count} {badge}\n"
         + f"💰 `${_fp(price)}`  📈 `+{move:.2f}%`  📍 `{pos_from_bottom}%` {pos_icon}\n"
         + (f"{score_label}\n" if score_label else "")
+        + (f"{_lev_tag}" if _lev_tag else "")
         + (f"{_grab_tag}" if _grab_tag else "")
         + (f"{_mom_warn}" if _mom_warn else "")
         + f"\n"
