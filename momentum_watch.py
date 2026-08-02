@@ -23,7 +23,9 @@ import sys
 from statistics import median
 
 DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_history.json")
-CUTOFF  = sys.argv[1] if len(sys.argv) > 1 else "2026-08-01"
+# القطع الافتراضي = لحظة نشر إصلاح مسار الزخم (v3.7.19، ~31-07 15:34 توقيت الخادم).
+# ORDI أول إشارة momentum بعده (سُجّلت 31-07 15:07 UTC) — قطع 01-08 كان يضعها خطأً في "قبل".
+CUTOFF  = sys.argv[1] if len(sys.argv) > 1 else "2026-07-31 13:30"
 SCANNER = sys.argv[2] if len(sys.argv) > 2 else "momentum"
 
 _SL_CLOSED = ("stoploss", "peak_then_sl")
