@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.20"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.21"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3055,7 +3055,11 @@ def _check(sym, ticker, interval, sector_boost=False):
         _upper_wick_ratio = 0.0
     # Bypass when price is actively rising — wick is temporary profit-taking, not distribution
     # SENT/MOVE pattern: previous candle bearish (downtrend), new candle exploding = real reversal
-    if sc_close_pct < 0.50 and move < 2.0:
+    # v3.7.21: momentum_bypass exempt. scan_trend_gainer already confirmed a sustained multi-hour
+    # uptrend (4h volume + bullish 1h candles + not crashed from peak); a single 5m candle closing
+    # in its lower half is an ordinary pullback inside a grind, not distribution. Data: of 18
+    # tradeable coins that rose >=8% in 24h, dump_wick blocked 17 of them, all grinds.
+    if sc_close_pct < 0.50 and move < 2.0 and not momentum_bypass:
         _rej("dump_wick"); return
     # upper_wick_reject check is deferred below (after is_moonshot and volume_explosion are defined)
 
@@ -3159,6 +3163,14 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Extreme spike alone = real demand even if net is small → lower floor
     if interval == "1m_sg" and spike >= 10.0:
         _abs_net_floor = 1_000.0
+    # v3.7.21: momentum_bypass gets a lower floor, not an exemption. net here is measured over
+    # the last 500 trades, which on a liquid coin is seconds — so a genuine grind (HEI +70%,
+    # BANK +20%) reads a tiny net in that window and gets killed as noise_net. scan_trend_gainer
+    # already validated sustained 4h volume, so the near-zero fake-pump case (CAKE net=$68) it
+    # guards against cannot pass that check anyway. Keep a $1k floor to still block dead flow.
+    # Data: noise_net blocked 16 of 18 tradeable 24h risers.
+    if momentum_bypass:
+        _abs_net_floor = min(_abs_net_floor, 1_000.0)
     if net < _abs_net_floor:
         _rej("noise_net"); return
 
