@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.21"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.22"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -142,7 +142,9 @@ SKIP_KEYWORDS = {"UP","DOWN","BULL","BEAR","3L","3S","2L","2S","HEDGE","BVOL","I
 # Kept out of BLACKLIST deliberately: they were among the largest movers on the day
 # this list was written (+31% to +61%), and the decision to trade them is the owner's.
 # Match is on the base symbol, so add new ones exactly as they appear (SNXXB, not SNXX).
-LEVERAGED_TOKENS = {"SNXXB", "MUUB", "MVLLB", "INTWB", "CBRSB", "SNXX"}
+LEVERAGED_TOKENS = {"SNXXB", "MUUB", "MVLLB", "INTWB", "CBRSB", "SNXX",
+                    "SOXLB",   # Direxion Semiconductor Bull 3X — signalled unlabelled (v3.7.22)
+                    "KORUB"}   # Direxion Daily KRE Bull — same 2x-3x ETF family
 
 # Coins to skip permanently: delisted, suspended, or confirmed manipulation-prone
 BLACKLIST     = {"MFT", "APR", "LOOM", "TORN", "ELF", "SPARTA",
