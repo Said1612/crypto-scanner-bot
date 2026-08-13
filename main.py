@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.22"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.23"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1758,14 +1758,14 @@ def build_signal(sym, price, change, buy_v, sell_v,
     # whole return lives in taking the profit. Every peak_then_sl we tracked — HEI at
     # +10.3%, LUMIA +8.4%, BMT +6.1%, DODO +5.6% — came from this family and closed on
     # its stop. Says so on the signal itself, where it can still change the outcome.
-    _grab_tag = ("\n⚡ *اقتناص سريع* — إحصائياً: خسارة إن حُملت، +16% بالخروج عند الهدف\n"
+    _grab_tag = ("\n⚡ *QUICK GRAB* — stats: a loss if held, +16% taking profit at target\n"
                  if (moonshot or vol_explosion) else "")
 
     # v3.7.20 — see LEVERAGED_TOKENS. Not a block, a label: these are 2x-5x ETFs on a
     # US stock, so the multiplier applies to the downside too and the daily rebalance
     # bleeds value in a choppy tape regardless of direction. Sizing and holding time
     # have to be decided differently, which is only possible if you can tell at a glance.
-    _lev_tag = ("\n🔴 *رمز مُرافع 2X* — الخسارة مضاعفة + تآكل بالتذبذب · حجم صغير، لا تحمله\n"
+    _lev_tag = ("\n🔴 *2X LEVERAGED* — loss is doubled + volatility decay · small size, don't hold\n"
                 if base in LEVERAGED_TOKENS else "")
 
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
@@ -1870,14 +1870,14 @@ def check_milestones(all_t):
             save_state()
             send(f"━━━━━━━━━━━━━━━━━━━━\n"
                  f"💀 MAFIO SNIPER 📡\n\n"
-                 f"🩹 نسبة ألم مرتفعة — #{sym.replace('USDT','')}\n"
+                 f"🩹 HIGH PAIN RATIO — #{sym.replace('USDT','')}\n"
                  f"━━━━━━━━━━━━━━━━━━━━\n"
-                 f"📈 أعلى صعود:  +{_pk:.2f}%\n"
-                 f"📉 أعمق نزول:  -{_tr:.2f}%\n"
-                 f"⚖️ نسبة الألم: {_tr/max(_pk, 0.01):.2f}\n"
-                 f"💰 السعر الآن: ${_fp(t['price'])}\n\n"
-                 f"💡 فوق 1.0 تاريخياً: 1 من 33 فقط نجح نظيفاً\n"
-                 f"   راجع وقفك — الإشارة تعيد أكثر مما أعطت\n"
+                 f"📈 Peak:      +{_pk:.2f}%\n"
+                 f"📉 Trough:    -{_tr:.2f}%\n"
+                 f"⚖️ Pain ratio: {_tr/max(_pk, 0.01):.2f}\n"
+                 f"💰 Price now:  ${_fp(t['price'])}\n\n"
+                 f"💡 Above 1.0 historically: only 1 of 33 became a clean win\n"
+                 f"   Check your stop — it's giving back more than it gave\n"
                  f"━━━━━━━━━━━━━━━━━━━━")
             log.info("PAIN_ALERT %s peak=%.2f%% trough=-%.2f%% ratio=%.2f",
                      sym, _pk, _tr, _tr / max(_pk, 0.01))
@@ -2458,7 +2458,7 @@ def poll_telegram():
             if text.lower().split("@")[0] == "/fractal_summary":
                 log.info("Manual /fractal_summary from chat %s", cid)
                 if _fractal_agent is None:
-                    send("❌ Fractal Agent غير مفعّل")
+                    send("❌ Fractal Agent not active")
                 else:
                     send(_fractal_agent.summary())   # v3.7.5: send() has no parse_mode kwarg — was TypeError
     except Exception as e:
