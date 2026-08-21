@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.23"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.24"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3557,9 +3557,18 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Moonshot FCF Gate: extreme fractal risk blocks even parabolic setups
     # Data: WCT(0.57 SL), HUMA(0.50 SL), NAORIS(0.40 SL) — FCF ≤ 0.60 = always lose
     # FCF ≤ 0.60 means ≥2 negative fractal conditions (1.618 exhaust + 3-wave or noise)
+    #
+    # v3.7.24: floor raised 0.60 → 0.80 after backtest on 56 closed moonshots
+    # (moonshot_filter_test.py). FCF ≤ 0.80 blocks 4 real losers {ADA, BABY, ID,
+    # BAS} while killing only 1 winner = 4:1 — a clean edge. Raising further to
+    # 1.00 blocks NO additional losers but kills a second winner, because the
+    # 0.80–1.00 FCF band was historically PROFITABLE (ROSE, MIRA won there).
+    # This is why MANTRA (FCF 0.98) is NOT caught here: its band is net-positive,
+    # so blocking it would cost more winners than it saves. The QUICK GRAB tag —
+    # not a pre-filter — is the correct guard for that band.
     if _fva_result and is_moonshot:
         _fcf_val = _fva_result["fcf"]
-        if _fcf_val <= 0.60:
+        if _fcf_val <= 0.80:
             _rej(f"moonshot_fib_exhaust({_fcf_val:.2f})"); return
         # Random/anti-persistent market + weak FCF = reversal trap even for moonshots
         # H < 0.55 = random or anti-persistent (no edge) — AIOT H=0.54 SL confirmed
