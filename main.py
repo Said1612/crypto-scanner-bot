@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.25"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.26"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -3023,7 +3023,22 @@ def _check(sym, ticker, interval, sector_boost=False):
     # momentum_bypass: scan_trend_gainer validates 1h volume trend separately.
     # Still requires spike ≥ 0.8x — below-average volume (IO: 0.2x) is not a valid entry.
     # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
-    effective_spike_min = 0.8 if (momentum_bypass or _trend_bypass) else (1.5 if super_ratio else spike_min)
+    # v3.7.26: trend_bypass gets a LOWER floor (0.5) than momentum (0.8). Measured cause:
+    # with the 0.8 floor, trend_bypass fired only 9 rescues in 18min while low_spike still
+    # blocked 71 tradeable winners — because a multi-hour market-wide melt-up inflates each
+    # coin's own volume average so hard that a coin up +30% reads spike 0.5-0.8, UNDER 0.8.
+    # The 24h change (>=12%) is the real confirmation here, so the candle spike only needs to
+    # prove volume has not collapsed (dead-cat / post-pump). 0.5 = still >=half the recent
+    # average = alive; below that the run is likely already over (high_pos/post_peak catch
+    # the rest downstream). momentum keeps 0.8 (scan_trend_gainer validated volume separately).
+    if momentum_bypass:
+        effective_spike_min = 0.8
+    elif _trend_bypass:
+        effective_spike_min = 0.5
+    elif super_ratio:
+        effective_spike_min = 1.5
+    else:
+        effective_spike_min = spike_min
     # v3.7.16: `spike` is this candle's volume against its own recent average, which is the
     # wrong question for a coin grinding up over hours. The steadier the trend, the more it
     # lifts that average, so an ordinary candle sits near 1.0x and routine variance drops it
@@ -3056,6 +3071,12 @@ def _check(sym, ticker, interval, sector_boost=False):
             log.info("MOMENTUM_SPIKE_BLOCK %-12s spike=%.2fx mom_ratio=%.2fx eff=%.2fx "
                      "< floor=%.2fx  vol24=%.1fM",
                      sym, spike, _mom_ratio, _spike_eff, effective_spike_min, vol_24h / 1e6)
+        # v3.7.26: log trend candidates STILL dropped after the 0.5 floor. If these cluster
+        # at 0.3-0.5 the floor is still too high for the melt-up; if near zero the volume
+        # really did collapse and the block is correct. Tunes the floor with data, not guesses.
+        elif _trend_bypass:
+            log.info("TREND_SPIKE_BLOCK %-12s change=%.1f%% spike=%.2fx < floor=%.2fx vol24=%.1fM",
+                     sym, change, spike, effective_spike_min, vol_24h / 1e6)
         _rej("low_spike"); return
 
     # v3.7.25: mark when the broad-run bypass is what carried a candidate past a
