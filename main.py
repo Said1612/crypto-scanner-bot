@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.26"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.27"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1690,6 +1690,64 @@ def _momentum_warning(ratio, spike, pos24):
         pass
     return ""
 
+def _setup_grade(ratio, pos24, net, scanner):
+    """v3.7.27 — auto quality read from the win-rate tables in analyze_signals
+    (n=351 closed signals). NOT advice and NOT a block: it only tells the reader
+    which historical bucket this setup falls in, so a good signal is legible at a
+    glance instead of every one looking alike. Every number below is measured:
+
+      Ratio  <1.5 -> 90% win · 1.5-2 -> 52% · 2-3 -> 42% · 10-20 -> 7.7% (worst)
+      pos24  0.40-0.65 (golden) -> 51-55% · <0.40 -> 35%
+      scanner main/supertrend -> 57-59% · volume_explosion -> 57% · moonshot/momentum -> 28-30%
+      net    $5-30K -> 47-68% · >$100K -> 34%
+    """
+    pts, plus, minus = 0, [], []
+
+    if ratio < 1.5:
+        pts += 3; plus.append("Ratio<1.5 (90% win)")
+    elif ratio < 2.0:
+        pts += 2; plus.append("Ratio<2.0 (52%)")
+    elif ratio < 3.0:
+        pts += 1
+    elif 10.0 <= ratio < 20.0:
+        pts -= 3; minus.append(f"Ratio {ratio:.0f}x (8% win)")
+    elif ratio >= 5.0:
+        pts -= 1; minus.append(f"Ratio {ratio:.0f}x high")
+
+    if 0.40 <= pos24 <= 0.65:
+        pts += 2; plus.append("pos golden (55%)")
+    elif 0.65 < pos24 <= 0.75:
+        pts += 1
+    elif pos24 < 0.40:
+        pts -= 1; minus.append("pos<0.40 (35%)")
+
+    if scanner in ("main", "supertrend"):
+        pts += 2; plus.append(f"{scanner} (58%)")
+    elif scanner == "volume_explosion":
+        pts += 1; plus.append("vol_explosion (57%)")
+    elif scanner in ("moonshot", "momentum"):
+        pts -= 1; minus.append(f"{scanner} (29% win)")
+
+    if 5_000 <= net <= 30_000:
+        pts += 1; plus.append("net sweet-spot")
+    elif net > 100_000:
+        pts -= 1; minus.append("net>$100K (34%)")
+
+    if pts >= 5:
+        head = "🟢🟢 A+ HIGH PROBABILITY"
+    elif pts >= 3:
+        head = "🟢 GOOD SETUP"
+    elif pts >= 1:
+        head = "🟡 MODERATE"
+    else:
+        head = "🔴 LOW PROBABILITY"
+
+    detail = " · ".join(plus[:3])
+    if minus:
+        detail = (detail + ("  ⚠ " if detail else "⚠ ") + " · ".join(minus[:2]))
+    return f"📋 *SETUP: {head}*\n" + (f"   _{detail}_\n" if detail else "")
+
+
 def build_signal(sym, price, change, buy_v, sell_v,
                  spike, move, exchange, tier_name, ema_bull,
                  high24=0.0, low24=0.0, badge="🔔1",
@@ -1768,6 +1826,20 @@ def build_signal(sym, price, change, buy_v, sell_v,
     _lev_tag = ("\n🔴 *2X LEVERAGED* — loss is doubled + volatility decay · small size, don't hold\n"
                 if base in LEVERAGED_TOKENS else "")
 
+    # v3.7.27 — auto setup grade from the win-rate data. Derive the scanner from the
+    # flags build_signal already receives (there is no scanner string here).
+    if moonshot:
+        _scanner_name = "moonshot"
+    elif vol_explosion:
+        _scanner_name = "volume_explosion"
+    elif momentum:
+        _scanner_name = "momentum"
+    elif signal_type and "SUPERTREND" in signal_type.upper():
+        _scanner_name = "supertrend"
+    else:
+        _scanner_name = "main"
+    _setup_line = _setup_grade(ratio, pos_from_bottom / 100.0, net, _scanner_name)
+
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
     _type_line = f"📈 *{signal_type}*\n" if signal_type else ""
@@ -1799,6 +1871,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
         + f"🆕 *#{base}* 💀 · {_mkt_label} · Signal #{signal_count} {badge}\n"
         + f"💰 `${_fp(price)}`  📈 `+{move:.2f}%`  📍 `{pos_from_bottom}%` {pos_icon}\n"
         + (f"{score_label}\n" if score_label else "")
+        + f"{_setup_line}"
         + (f"{_lev_tag}" if _lev_tag else "")
         + (f"{_grab_tag}" if _grab_tag else "")
         + (f"{_mom_warn}" if _mom_warn else "")
