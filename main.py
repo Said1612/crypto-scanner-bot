@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.24"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.25"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -2980,8 +2980,26 @@ def _check(sym, ticker, interval, sector_boost=False):
     # Alpha coins accumulate with subtler spikes (1.2x) vs regular coins (1.5x)
     _sector_mom_spike_thr = 1.2 if _is_alpha_coin else 1.5
     _sector_mom = _sector_mom_pre and spike >= _sector_mom_spike_thr
+
+    # ── Broad-run bypass (v3.7.25) ──────────────────────────────────────
+    # A coin objectively up ≥12% over 24h is running. The SAME baseline
+    # compression that momentum_bypass documents below (a rising trend lifts its
+    # own volume average, so later candles read UNDER the spike/move floors even
+    # while the run is healthy) hits it in the MAIN scan path too — but the main
+    # path had no correction, only the momentum path did. missed_movers proved the
+    # cost: during a market-wide melt-up, 0% capture — 40 of 42 tradeable winners
+    # (BOME +37%, PEOPLE +31%, NEIRO +31%, ENA +30%…) died on low_spike/low_move.
+    # Relax ONLY those two baseline artifacts. Every loss guard stays active for
+    # these coins: high_pos (line ~3261, NOT bypassed here → tops still blocked),
+    # late_entry, post_peak_dist, dump_wick, wick_distribution, noise_net, and the
+    # ob/flow quality gates. So we stop discarding mid-run coins with room left,
+    # without opening the door to distribution/topping runners. The move<-1.0 hard
+    # floor above still rejects a coin that is actively dumping right now.
+    _trend_bypass = change >= 12.0
+
     # momentum_bypass: 1h candle may be small (0.3-0.8%) while 24h trend is +20-30%
-    if move < move_min and not _sector_mom and not momentum_bypass: _rej(f"low_move({move:.1f}%)"); return
+    if move < move_min and not _sector_mom and not momentum_bypass and not _trend_bypass:
+        _rej(f"low_move({move:.1f}%)"); return
 
     # ── Volume-adjusted ratio: ILV pattern — big spike + lower ratio at breakout start ──
     # High spike (≥5x) = institutional volume → accept lower ratio (early accumulation)
@@ -3005,7 +3023,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     # momentum_bypass: scan_trend_gainer validates 1h volume trend separately.
     # Still requires spike ≥ 0.8x — below-average volume (IO: 0.2x) is not a valid entry.
     # super_ratio: ratio ≥ 20x bypasses spike (real whale demand regardless of volume candle)
-    effective_spike_min = 0.8 if momentum_bypass else (1.5 if super_ratio else spike_min)
+    effective_spike_min = 0.8 if (momentum_bypass or _trend_bypass) else (1.5 if super_ratio else spike_min)
     # v3.7.16: `spike` is this candle's volume against its own recent average, which is the
     # wrong question for a coin grinding up over hours. The steadier the trend, the more it
     # lifts that average, so an ordinary candle sits near 1.0x and routine variance drops it
@@ -3039,6 +3057,14 @@ def _check(sym, ticker, interval, sector_boost=False):
                      "< floor=%.2fx  vol24=%.1fM",
                      sym, spike, _mom_ratio, _spike_eff, effective_spike_min, vol_24h / 1e6)
         _rej("low_spike"); return
+
+    # v3.7.25: mark when the broad-run bypass is what carried a candidate past a
+    # spike/move floor it would otherwise have failed, so the path stays measurable
+    # (grep TREND_BYPASS in journalctl, then cross-ref outcomes) exactly like the
+    # momentum path. Only logs true rescues (real candle spike below the normal floor).
+    if _trend_bypass and not momentum_bypass and spike < spike_min:
+        log.info("TREND_BYPASS %-12s change=%.1f%% spike=%.2fx move=%.2f%% vol24=%.1fM",
+                 sym, change, spike, move, vol_24h / 1e6)
 
     # Spike candle must close in upper half — rejects pump-dump wicks
     # Sleeping giant: use candles[-2] (the actual spike candle, already completed)
