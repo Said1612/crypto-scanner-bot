@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.27"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.28"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1690,7 +1690,7 @@ def _momentum_warning(ratio, spike, pos24):
         pass
     return ""
 
-def _setup_grade(ratio, pos24, net, scanner):
+def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
     """v3.7.27 — auto quality read from the win-rate tables in analyze_signals
     (n=351 closed signals). NOT advice and NOT a block: it only tells the reader
     which historical bucket this setup falls in, so a good signal is legible at a
@@ -1700,6 +1700,12 @@ def _setup_grade(ratio, pos24, net, scanner):
       pos24  0.40-0.65 (golden) -> 51-55% · <0.40 -> 35%
       scanner main/supertrend -> 57-59% · volume_explosion -> 57% · moonshot/momentum -> 28-30%
       net    $5-30K -> 47-68% · >$100K -> 34%
+
+    v3.7.28 — added the two factors the first live batch showed the grade was
+    blind to: WIF graded GOOD while carrying L/S 2.20 (crowded longs) and FCF
+    0.86. Crowded L/S is one of the strongest losers in the data (L/S>2.5 = 0
+    clean wins) and weak FCF flags hollow flow. Both are optional: a scanner that
+    does not compute them (e.g. supertrend) passes None and they are skipped.
     """
     pts, plus, minus = 0, [], []
 
@@ -1733,9 +1739,25 @@ def _setup_grade(ratio, pos24, net, scanner):
     elif net > 100_000:
         pts -= 1; minus.append("net>$100K (34%)")
 
-    if pts >= 5:
+    # L/S crowding — the crowded-longs trap. Data: L/S > 2.5 = 0 clean wins.
+    if ls_ratio is not None:
+        if ls_ratio >= 2.5:
+            pts -= 3; minus.append(f"L/S {ls_ratio:.1f} crowded (0 win)")
+        elif ls_ratio >= 1.8:
+            pts -= 1; minus.append(f"L/S {ls_ratio:.1f} crowded")
+
+    # FCF — hollow flow. Below the moonshot 0.80 floor = weak buying pressure.
+    if fcf is not None and fcf < 0.80:
+        pts -= 1; minus.append(f"FCF {fcf:.2f} weak")
+
+    # Hard cap: a 0-win-history condition (L/S >= 2.5 = 0 clean wins in the data)
+    # can never read as GOOD/A+, however strong the other factors — the headline
+    # must not contradict its own "0 win" warning. Caps the grade at MODERATE.
+    _crowd_capped = ls_ratio is not None and ls_ratio >= 2.5
+
+    if pts >= 5 and not _crowd_capped:
         head = "🟢🟢 A+ HIGH PROBABILITY"
-    elif pts >= 3:
+    elif pts >= 3 and not _crowd_capped:
         head = "🟢 GOOD SETUP"
     elif pts >= 1:
         head = "🟡 MODERATE"
@@ -1755,7 +1777,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
                  score=0.0, moonshot=False, momentum=False, vol_explosion=False,
                  interval="1h", is_flash=False, signal_type=None, is_alpha=False,
                  fractal_score=None, oi_label="", counter_trend=False, verdict="",
-                 mkt_label=None):
+                 mkt_label=None, ls_ratio=None, fcf=None):
     global signal_count
     signal_count += 1
 
@@ -1838,7 +1860,8 @@ def build_signal(sym, price, change, buy_v, sell_v,
         _scanner_name = "supertrend"
     else:
         _scanner_name = "main"
-    _setup_line = _setup_grade(ratio, pos_from_bottom / 100.0, net, _scanner_name)
+    _setup_line = _setup_grade(ratio, pos_from_bottom / 100.0, net, _scanner_name,
+                               ls_ratio=ls_ratio, fcf=fcf)
 
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
@@ -3919,7 +3942,9 @@ def _check(sym, ticker, interval, sector_boost=False):
                        fractal_score=_fractal_score,
                        oi_label=(_oi["label"] if _oi and _oi.get("label") else ""),
                        counter_trend=_counter_trend_main,
-                       verdict=_v_label)
+                       verdict=_v_label,
+                       ls_ratio=(_oi.get("ls_ratio") if _oi else None),
+                       fcf=(_fva_result.get("fcf") if _fva_result else None))
     ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "main",
                                     score, ob_spot, ratio, pos24, spike, net, move, funding_label,
                                     fractal_score=_fractal_score,
