@@ -86,7 +86,7 @@ def main():
         scan  = r.get("scanner") or "main"
         if ratio is None or net is None or pos is None:
             continue
-        tier = _grade(ratio, pos, net, scan, ls_ratio=None, fcf=r.get("fcf"))
+        tier = _grade(ratio, pos, net, scan, ls_ratio=r.get("ls_ratio"), fcf=r.get("fcf"))
         buckets[tier].append(r)
 
     print("\n" + "=" * 66)
