@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.29"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.30"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1769,6 +1769,16 @@ def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
         head = "🟡 MODERATE"
     else:
         head = "🔴 LOW PROBABILITY"
+
+    # v3.7.30 — momentum/moonshot are an asymmetric family: they clean-win only ~29% but
+    # their wins are enormous (龙虾 +103%, COTI +27%, momentum avg peak +27%, moonshot +25%).
+    # A pure win-rate grade reads "LOW/bad" on a signal whose real edge is a rare big payoff,
+    # which is misleading — the reader dismisses a lottery ticket instead of sizing it small
+    # and letting it run. Reframe the low tiers for this family only (vol_explosion keeps its
+    # normal grade; it wins 57%). This does NOT change the point math or the tier used by
+    # grade_vs_outcome — display text only. Full EV-based re-weighting still waits for data.
+    if scanner in ("moonshot", "momentum") and pts < 3:
+        head = "🎲 HIGH-VARIANCE — rare hit, big payoff · small size, let it run"
 
     detail = " · ".join(plus[:3])
     if minus:
