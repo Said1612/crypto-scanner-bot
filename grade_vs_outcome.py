@@ -33,8 +33,8 @@ def _is_clean_win(r):
     return not _closed_on_stop(r) and (r.get("max_gain_pct") or 0.0) >= 5.0
 
 
-def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
-    """نسخة مطابقة لـ _setup_grade في main.py (v3.7.28) — تُعيد اسم المستوى فقط."""
+def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=None):
+    """نسخة مطابقة لـ _setup_grade في main.py (v3.7.32) — تُعيد اسم المستوى فقط."""
     pts = 0
     if ratio < 1.5:      pts += 3
     elif ratio < 2.0:    pts += 2
@@ -53,13 +53,18 @@ def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
     if 5_000 <= net <= 30_000: pts += 1
     elif net > 100_000:        pts -= 1
 
+    # v3.7.32: crowding meaning flips with OI direction (squeeze fuel vs exhaustion).
+    block_top = False
     if ls_ratio is not None:
-        if ls_ratio >= 2.5:   pts -= 3
-        elif ls_ratio >= 1.8: pts -= 1
+        if ls_ratio >= 2.5:
+            if oi_expanding:
+                pts -= 1
+            else:
+                pts -= 3; block_top = True
+        elif ls_ratio >= 1.8:
+            pts -= 1
     if fcf is not None and fcf < 0.80: pts -= 1
 
-    # v3.7.31: crowding (L/S>=2.5) blocks only the top A+ tier, not GOOD.
-    block_top = ls_ratio is not None and ls_ratio >= 2.5
     if pts >= 5 and not block_top: return "A+"
     if pts >= 3:                   return "GOOD"
     if pts >= 1:                   return "MODERATE"
@@ -87,7 +92,10 @@ def main():
         scan  = r.get("scanner") or "main"
         if ratio is None or net is None or pos is None:
             continue
-        tier = _grade(ratio, pos, net, scan, ls_ratio=r.get("ls_ratio"), fcf=r.get("fcf"))
+        _oid = r.get("oi_delta")
+        _oi_exp = (_oid > 2.0) if _oid is not None else None   # expanding = OI grew >2%/1h
+        tier = _grade(ratio, pos, net, scan, ls_ratio=r.get("ls_ratio"),
+                      fcf=r.get("fcf"), oi_expanding=_oi_exp)
         buckets[tier].append(r)
 
     print("\n" + "=" * 66)

@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.31"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.32"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1696,7 +1696,7 @@ def _momentum_warning(ratio, spike, pos24):
         pass
     return ""
 
-def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
+def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=None):
     """v3.7.27 — auto quality read from the win-rate tables in analyze_signals
     (n=351 closed signals). NOT advice and NOT a block: it only tells the reader
     which historical bucket this setup falls in, so a good signal is legible at a
@@ -1745,24 +1745,27 @@ def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
     elif net > 100_000:
         pts -= 1; minus.append("net>$100K (34%)")
 
-    # L/S crowding — the crowded-longs risk. A strong negative (WIF at 2.20 hit SL),
-    # but NOT a dead end: ZKC (L/S 2.53) ran +54% and TAKE (1.87) +21%, so the earlier
-    # "L/S>2.5 = 0 clean wins" absolute was falsified by live data — crowded longs can
-    # still squeeze higher. Penalize heavily, don't declare it hopeless.
+    # L/S crowding — but the meaning FLIPS with OI direction (v3.7.32). Crowded longs +
+    # OI EXPANDING = new money still piling in = short-squeeze fuel, which kept winning
+    # (ZKC 2.53/+7.4% OI → +54%, TNSR 2.62/+2.3% OI → +21%). Crowded longs + OI flat or
+    # CONTRACTING = positions unwinding = exhaustion, which lost (WIF 2.20/-0.7% OI → SL).
+    # So a heavy crowd is only a heavy penalty when OI is NOT expanding; with OI expanding
+    # it is a light penalty and can still reach the top tier. This is squeeze mechanics,
+    # confirmed on both sides — not bull-market curve-fitting.
+    _crowd_block_top = False
     if ls_ratio is not None:
         if ls_ratio >= 2.5:
-            pts -= 3; minus.append(f"L/S {ls_ratio:.1f} crowded (high risk)")
+            if oi_expanding:
+                pts -= 1; minus.append(f"L/S {ls_ratio:.1f} crowded, OI expanding (squeeze fuel)")
+            else:
+                pts -= 3; minus.append(f"L/S {ls_ratio:.1f} crowded, OI flat (exhaustion risk)")
+                _crowd_block_top = True
         elif ls_ratio >= 1.8:
             pts -= 1; minus.append(f"L/S {ls_ratio:.1f} crowded")
 
     # FCF — hollow flow. Below the moonshot 0.80 floor = weak buying pressure.
     if fcf is not None and fcf < 0.80:
         pts -= 1; minus.append(f"FCF {fcf:.2f} weak")
-
-    # v3.7.31 — crowding blocks only the top A+ tier now, not GOOD. A heavily crowded
-    # signal that is still strong on every other axis (ZKC: Ratio<2 + pos golden +
-    # vol_explosion + FCF 1.40) earns GOOD, not a capped MODERATE that its +54% belied.
-    _crowd_block_top = ls_ratio is not None and ls_ratio >= 2.5
 
     if pts >= 5 and not _crowd_block_top:
         head = "🟢🟢 A+ HIGH PROBABILITY"
@@ -1796,7 +1799,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
                  score=0.0, moonshot=False, momentum=False, vol_explosion=False,
                  interval="1h", is_flash=False, signal_type=None, is_alpha=False,
                  fractal_score=None, oi_label="", counter_trend=False, verdict="",
-                 mkt_label=None, ls_ratio=None, fcf=None):
+                 mkt_label=None, ls_ratio=None, fcf=None, oi_expanding=None):
     global signal_count
     signal_count += 1
 
@@ -1880,7 +1883,7 @@ def build_signal(sym, price, change, buy_v, sell_v,
     else:
         _scanner_name = "main"
     _setup_line = _setup_grade(ratio, pos_from_bottom / 100.0, net, _scanner_name,
-                               ls_ratio=ls_ratio, fcf=fcf)
+                               ls_ratio=ls_ratio, fcf=fcf, oi_expanding=oi_expanding)
 
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
@@ -3963,7 +3966,8 @@ def _check(sym, ticker, interval, sector_boost=False):
                        counter_trend=_counter_trend_main,
                        verdict=_v_label,
                        ls_ratio=(_oi.get("ls_ratio") if _oi else None),
-                       fcf=(_fva_result.get("fcf") if _fva_result else None))
+                       fcf=(_fva_result.get("fcf") if _fva_result else None),
+                       oi_expanding=(_oi.get("expanding") if _oi else None))
     ai_str, ai_blocked = _ai_assess(sym, exchange, tier["name"], "main",
                                     score, ob_spot, ratio, pos24, spike, net, move, funding_label,
                                     fractal_score=_fractal_score,
