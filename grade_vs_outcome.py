@@ -58,10 +58,11 @@ def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
         elif ls_ratio >= 1.8: pts -= 1
     if fcf is not None and fcf < 0.80: pts -= 1
 
-    capped = ls_ratio is not None and ls_ratio >= 2.5
-    if pts >= 5 and not capped:   return "A+"
-    if pts >= 3 and not capped:   return "GOOD"
-    if pts >= 1:                  return "MODERATE"
+    # v3.7.31: crowding (L/S>=2.5) blocks only the top A+ tier, not GOOD.
+    block_top = ls_ratio is not None and ls_ratio >= 2.5
+    if pts >= 5 and not block_top: return "A+"
+    if pts >= 3:                   return "GOOD"
+    if pts >= 1:                   return "MODERATE"
     return "LOW"
 
 

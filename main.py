@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.30"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.31"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1745,10 +1745,13 @@ def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
     elif net > 100_000:
         pts -= 1; minus.append("net>$100K (34%)")
 
-    # L/S crowding — the crowded-longs trap. Data: L/S > 2.5 = 0 clean wins.
+    # L/S crowding — the crowded-longs risk. A strong negative (WIF at 2.20 hit SL),
+    # but NOT a dead end: ZKC (L/S 2.53) ran +54% and TAKE (1.87) +21%, so the earlier
+    # "L/S>2.5 = 0 clean wins" absolute was falsified by live data — crowded longs can
+    # still squeeze higher. Penalize heavily, don't declare it hopeless.
     if ls_ratio is not None:
         if ls_ratio >= 2.5:
-            pts -= 3; minus.append(f"L/S {ls_ratio:.1f} crowded (0 win)")
+            pts -= 3; minus.append(f"L/S {ls_ratio:.1f} crowded (high risk)")
         elif ls_ratio >= 1.8:
             pts -= 1; minus.append(f"L/S {ls_ratio:.1f} crowded")
 
@@ -1756,14 +1759,14 @@ def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None):
     if fcf is not None and fcf < 0.80:
         pts -= 1; minus.append(f"FCF {fcf:.2f} weak")
 
-    # Hard cap: a 0-win-history condition (L/S >= 2.5 = 0 clean wins in the data)
-    # can never read as GOOD/A+, however strong the other factors — the headline
-    # must not contradict its own "0 win" warning. Caps the grade at MODERATE.
-    _crowd_capped = ls_ratio is not None and ls_ratio >= 2.5
+    # v3.7.31 — crowding blocks only the top A+ tier now, not GOOD. A heavily crowded
+    # signal that is still strong on every other axis (ZKC: Ratio<2 + pos golden +
+    # vol_explosion + FCF 1.40) earns GOOD, not a capped MODERATE that its +54% belied.
+    _crowd_block_top = ls_ratio is not None and ls_ratio >= 2.5
 
-    if pts >= 5 and not _crowd_capped:
+    if pts >= 5 and not _crowd_block_top:
         head = "🟢🟢 A+ HIGH PROBABILITY"
-    elif pts >= 3 and not _crowd_capped:
+    elif pts >= 3:
         head = "🟢 GOOD SETUP"
     elif pts >= 1:
         head = "🟡 MODERATE"
