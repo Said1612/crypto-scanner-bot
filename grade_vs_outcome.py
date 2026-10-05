@@ -33,12 +33,14 @@ def _is_clean_win(r):
     return not _closed_on_stop(r) and (r.get("max_gain_pct") or 0.0) >= 5.0
 
 
-def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=None):
-    """نسخة مطابقة لـ _setup_grade في main.py (v3.7.32) — تُعيد اسم المستوى فقط."""
+def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=None,
+           market_bias=None):
+    """نسخة مطابقة لـ _setup_grade في main.py (v3.7.33) — تُعيد اسم المستوى فقط."""
     pts = 0
     if ratio < 1.5:      pts += 3
     elif ratio < 2.0:    pts += 2
     elif ratio < 3.0:    pts += 1
+    elif ratio < 5.0:    pts += 1
     elif 10.0 <= ratio < 20.0: pts -= 3
     elif ratio >= 5.0:   pts -= 1
 
@@ -64,6 +66,11 @@ def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=Non
         elif ls_ratio >= 1.8:
             pts -= 1
     if fcf is not None and fcf < 0.80: pts -= 1
+
+    # v3.7.33: weak-market penalty (losers avg bias -7.3 vs winners -1.0).
+    if market_bias is not None:
+        if market_bias <= -15:  pts -= 2
+        elif market_bias <= -5: pts -= 1
 
     if pts >= 5 and not block_top: return "A+"
     if pts >= 3:                   return "GOOD"
@@ -95,7 +102,8 @@ def main():
         _oid = r.get("oi_delta")
         _oi_exp = (_oid > 2.0) if _oid is not None else None   # expanding = OI grew >2%/1h
         tier = _grade(ratio, pos, net, scan, ls_ratio=r.get("ls_ratio"),
-                      fcf=r.get("fcf"), oi_expanding=_oi_exp)
+                      fcf=r.get("fcf"), oi_expanding=_oi_exp,
+                      market_bias=r.get("market_bias"))
         buckets[tier].append(r)
 
     print("\n" + "=" * 66)

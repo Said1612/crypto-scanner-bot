@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.32"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.33"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1696,7 +1696,8 @@ def _momentum_warning(ratio, spike, pos24):
         pass
     return ""
 
-def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=None):
+def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=None,
+                 market_bias=None):
     """v3.7.27 — auto quality read from the win-rate tables in analyze_signals
     (n=351 closed signals). NOT advice and NOT a block: it only tells the reader
     which historical bucket this setup falls in, so a good signal is legible at a
@@ -1716,13 +1717,15 @@ def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expandi
     pts, plus, minus = 0, [], []
 
     if ratio < 1.5:
-        pts += 3; plus.append("Ratio<1.5 (90% win)")
+        pts += 3; plus.append("Ratio<1.5 (91% win)")
     elif ratio < 2.0:
-        pts += 2; plus.append("Ratio<2.0 (52%)")
+        pts += 2; plus.append("Ratio<2.0 (46%)")
     elif ratio < 3.0:
         pts += 1
+    elif ratio < 5.0:
+        pts += 1; plus.append("Ratio 3-5x (40% win)")   # v3.7.33: 40% win, +29.6% peak
     elif 10.0 <= ratio < 20.0:
-        pts -= 3; minus.append(f"Ratio {ratio:.0f}x (8% win)")
+        pts -= 3; minus.append(f"Ratio {ratio:.0f}x (18% win)")
     elif ratio >= 5.0:
         pts -= 1; minus.append(f"Ratio {ratio:.0f}x high")
 
@@ -1766,6 +1769,16 @@ def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expandi
     # FCF — hollow flow. Below the moonshot 0.80 floor = weak buying pressure.
     if fcf is not None and fcf < 0.80:
         pts -= 1; minus.append(f"FCF {fcf:.2f} weak")
+
+    # market_bias (v3.7.33) — the strongest NEW factor the 3-month fingerprint revealed:
+    # losers fired in a far weaker tape (avg bias -7.3) than winners (-1.0). The bias gate
+    # blocks the extremes, but moderately-negative breadth still drags, so a signal born in
+    # a weak market reads lower. -100..+100 scale.
+    if market_bias is not None:
+        if market_bias <= -15:
+            pts -= 2; minus.append(f"weak market (bias {market_bias:.0f})")
+        elif market_bias <= -5:
+            pts -= 1; minus.append(f"weak market (bias {market_bias:.0f})")
 
     if pts >= 5 and not _crowd_block_top:
         head = "🟢🟢 A+ HIGH PROBABILITY"
@@ -1883,7 +1896,8 @@ def build_signal(sym, price, change, buy_v, sell_v,
     else:
         _scanner_name = "main"
     _setup_line = _setup_grade(ratio, pos_from_bottom / 100.0, net, _scanner_name,
-                               ls_ratio=ls_ratio, fcf=fcf, oi_expanding=oi_expanding)
+                               ls_ratio=ls_ratio, fcf=fcf, oi_expanding=oi_expanding,
+                               market_bias=market_bias)
 
     _tf        = "1m" if interval in ("1m", "1m_sg") else "1h"
     _flash_tag = "\n⚡ *FLASH PUMP* — Act in seconds or skip\n" if is_flash else ""
@@ -6871,7 +6885,9 @@ def main():
             global last_alpha
             if now - last_alpha >= ACCUM_SCAN_S:
                 last_alpha = now
-                scan_alpha_explosion(all_t)
+                # v3.7.33: scan_alpha_explosion DELETED — 3-month data: 4.3% win / +7.6%
+                # peak (n=23), worst scanner on both axes with no big-payoff tail. It was
+                # already paused (sent nothing); now it no longer scans at all.
                 _retroactive_peak_update()   # fix timeout records with true historical peak
 
             global last_sg
