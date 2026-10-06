@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.33"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.34"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -1799,10 +1799,27 @@ def _setup_grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expandi
     if scanner in ("moonshot", "momentum") and pts < 3:
         head = "🎲 HIGH-VARIANCE — rare hit, big payoff · small size, let it run"
 
+    # v3.7.34 — 💥 EXPLOSIVE SEED. The one thing that separated the monsters (+50% winners)
+    # from ordinary winners (+20-50%) in the 3-month fingerprint was a SMALL net (median 35K
+    # vs 73K): the big money has not piled in yet, so there is the most room left to run.
+    # Everything else (ratio ~2.7, pos ~0.55, move ~2.5) matched ordinary winners. Flag a
+    # signal that carries that exact monster profile on a reliable scanner so the explosive
+    # ones are visible at a glance. Display-only; does not change the tier.
+    _explosive = (
+        scanner in ("main", "supertrend", "volume_explosion")
+        and 2_000 <= net <= 45_000                 # small net = room to explode
+        and 1.5 <= ratio <= 4.0                    # clean, non-extreme demand
+        and 0.40 <= pos24 <= 0.68                  # golden, not topped
+        and (market_bias is None or market_bias > -5)   # not a weak tape
+    )
+
     detail = " · ".join(plus[:3])
     if minus:
         detail = (detail + ("  ⚠ " if detail else "⚠ ") + " · ".join(minus[:2]))
-    return f"📋 *SETUP: {head}*\n" + (f"   _{detail}_\n" if detail else "")
+    out = f"📋 *SETUP: {head}*\n" + (f"   _{detail}_\n" if detail else "")
+    if _explosive:
+        out += "   💥 *EXPLOSIVE SEED* — matches the +50% monster profile (small net · clean ratio · golden pos)\n"
+    return out
 
 
 def build_signal(sym, price, change, buy_v, sell_v,
