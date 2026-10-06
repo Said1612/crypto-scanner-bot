@@ -213,7 +213,13 @@ class MafioAgent:
         return (float(val) - mn) / rng if rng > 0 else 0.5
 
     def _distance(self, a: dict, b: dict) -> float:
-        """Euclidean distance in normalized feature space."""
+        """Euclidean distance in normalized feature space, plus a RECENCY penalty on
+        b (the historical candidate). v3.7.35: without it, an analog from 5+ months
+        ago — a different market regime — ranked as 'similar' with the same weight as
+        yesterday's, so the AI's confidence and its 🔍 references leaned on stale data.
+        Old signals are not excluded (keeps the sample robust), only pushed down: a
+        candidate gains up to +0.35 of distance as it ages toward ~120 days, so recent
+        analogs from the current regime surface first. Missing timestamp = treat as old."""
         total = 0.0
         count = 0
         for feat in _FEAT_RANGES:
@@ -227,7 +233,13 @@ class MafioAgent:
                 count += 1
             except (TypeError, ValueError):
                 continue
-        return math.sqrt(total / count) if count > 0 else 1.0
+        base = math.sqrt(total / count) if count > 0 else 1.0
+        ts = b.get("timestamp")
+        try:
+            age_days = (time.time() - float(ts)) / 86400.0 if ts else 999.0
+        except (TypeError, ValueError):
+            age_days = 999.0
+        return base + min(max(age_days, 0.0) / 120.0, 1.0) * 0.35
 
     def _find_similar(self, sig: dict, n: int = 3) -> List[dict]:
         """Return n completed signals most similar to sig by feature distance.
