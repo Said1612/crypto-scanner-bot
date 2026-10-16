@@ -50,7 +50,7 @@ def _grade(ratio, pos24, net, scanner, ls_ratio=None, fcf=None, oi_expanding=Non
 
     if scanner in ("main", "supertrend"): pts += 2
     elif scanner == "volume_explosion":   pts += 1
-    elif scanner in ("moonshot", "momentum"): pts -= 1
+    elif scanner in ("moonshot", "momentum", "quiet_buildup"): pts -= 1
 
     if 5_000 <= net <= 30_000: pts += 1
     elif net > 100_000:        pts -= 1

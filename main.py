@@ -5,7 +5,7 @@ Binance-only scanner
 Detects liquidity entry by tier: Micro / Small / Mid / Large cap
 Based on analysis of real Wolf Flow trades (Mar-Apr 2026)
 """
-BOT_VERSION = "3.7.35"  # bump this with every push — verify after restart
+BOT_VERSION = "3.7.36"  # bump this with every push — verify after restart
 
 import os, time, json, logging, signal as _signal, sys
 from datetime import datetime, timezone
@@ -4108,6 +4108,7 @@ def _check(sym, ticker, interval, sector_boost=False):
     }
     _scanner_type = ("moonshot" if is_moonshot
                      else "volume_explosion" if volume_explosion
+                     else "quiet_buildup" if ticker.get("_quiet_buildup")
                      else "momentum" if momentum_bypass
                      else "main")
     _db_add(sym, price, exchange, tier["name"], _scanner_type,
@@ -6644,10 +6645,12 @@ def scan_quiet_buildup(all_t: dict):
                 continue
             vol_ratio = last3_avg / prior3_avg
 
-            # OR consecutive: each of last 3 hours >= 105% of the prior hour
-            consec = all(vols[-3 + i] >= vols[-4 + i] * 1.05 for i in range(3))
+            # OR consecutive: each of last 3 hours >= 103% of the prior hour
+            consec = all(vols[-3 + i] >= vols[-4 + i] * 1.03 for i in range(3))
 
-            if vol_ratio < 1.35 and not consec:
+            # v3.7.36: escalation bar 1.35 -> 1.25 to catch gentler pre-breakout buildups
+            # (user goal: bring the signal BEFORE the rise, like TIA which built slowly).
+            if vol_ratio < 1.25 and not consec:
                 continue
 
             # Price progress >= 0.5% over last 4 completed candles
@@ -6679,6 +6682,8 @@ def scan_quiet_buildup(all_t: dict):
             _quiet_buildup_dedup[sym] = now
             ticker_copy = dict(ticker)
             ticker_copy["momentum_signal"] = True
+            ticker_copy["_quiet_buildup"] = True   # v3.7.36 — distinct tag so pre-breakout
+                                                   # performance is measurable on its own
             ticker_copy["_mom_vol_ratio"] = vol_ratio   # v3.7.16 — see scan_trend_gainer
 
             log.info(
